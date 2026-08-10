@@ -10,8 +10,11 @@ const db = require('./database');
 const { BAREME_POINTS, CALENDRIER_TOURNOIS, SEMAINES_COUPES_EQUIPE, genererJoueurLambda, drapeau, phaseDeSemaine, LONGUEUR_SAISON } = require('./calendrier-tournois');
 
 // Photos d'articles de presse : dossier servi statiquement (voir express.static
-// plus bas), cree au demarrage s'il n'existe pas encore (absent du depot).
-const DOSSIER_UPLOADS_PRESSE = path.join(__dirname, 'uploads', 'presse');
+// plus bas), cree au demarrage s'il n'existe pas encore (absent du depot). Meme
+// logique DATA_DIR que database.js : sur Railway, doit vivre sur le volume
+// persistant, sinon les photos uploadees disparaitraient a chaque redeploiement.
+const DOSSIER_DONNEES = process.env.DATA_DIR || __dirname;
+const DOSSIER_UPLOADS_PRESSE = path.join(DOSSIER_DONNEES, 'uploads', 'presse');
 fs.mkdirSync(DOSSIER_UPLOADS_PRESSE, { recursive: true });
 
 const uploadPresse = multer({
@@ -41,6 +44,7 @@ const SITE_URL = process.env.SITE_URL || 'http://localhost:3000';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+app.use('/uploads', express.static(path.join(DOSSIER_DONNEES, 'uploads')));
 app.use(express.static(__dirname));
 app.use(express.json());
 

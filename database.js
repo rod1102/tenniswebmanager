@@ -1,5 +1,11 @@
 const Database = require('better-sqlite3');
-const db = new Database('tennis-manager.db');
+const path = require('path');
+
+// En local, la base reste a la racine du projet comme avant. Sur Railway, DATA_DIR
+// pointe vers le volume persistant (ex. /app/data) - indispensable pour que la base
+// survive aux redeploiements (le reste du disque est efface a chaque nouveau build).
+const cheminBase = process.env.DATA_DIR ? path.join(process.env.DATA_DIR, 'tennis-manager.db') : 'tennis-manager.db';
+const db = new Database(cheminBase);
 
 db.exec(`
     CREATE TABLE IF NOT EXISTS users (
