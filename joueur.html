@@ -1,0 +1,953 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mes joueurs — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <div style="text-align:center;">
+                <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
+            </div>
+
+            <div class="tabs-nav" id="tabs-nav"></div>
+
+            <div id="semaine-info-container" style="text-align:center; margin-bottom:16px;"></div>
+
+            <div id="planning-container"></div>
+
+            <div class="stats-header">Style de jeu</div>
+            <div id="style-container"></div>
+
+            <div id="player-card-container"></div>
+
+            <div class="stats-header">Résultats en tournoi</div>
+            <div id="historique-container"></div>
+
+            <div class="stats-header">Journal hebdomadaire</div>
+            <div id="journal-container"></div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const paramsUrl = new URLSearchParams(window.location.search);
+        const typeDemande = paramsUrl.get('type');
+        let typeCourant = (typeDemande === 'joueur' || typeDemande === 'joueuse') ? typeDemande : null;
+        let joueurData = null;
+        let joueuseData = null;
+
+        const COMPETENCES_LABELS = {
+            service: 'Service', retour: 'Retour', coup_droit_revers: 'Coup droit / Revers',
+            effet: 'Effet', volee: 'Volée', deplacement: 'Déplacement', puissance: 'Puissance', resistance: 'Résistance'
+        };
+
+        const DISPOSITIONS_LABELS = {
+            adversite: 'Adversité', coupeur_de_tetes: 'Coupeur de têtes', dernier_carre: 'Dernier carré',
+            premiers_tours: 'Premiers tours', sang_froid: 'Sang froid', indoor: 'Indoor', rivalite: 'Rivalité'
+        };
+
+        const ACTIONS_LABELS = {
+            '': '— Non défini —',
+            repos: 'Repos',
+            generique: 'Entraînement générique (+8 XP)',
+            surface_dur: 'Entraînement surface Dur',
+            surface_terre: 'Entraînement surface Terre battue',
+            surface_herbe: 'Entraînement surface Herbe',
+            coaching_mental: 'Coaching mental (0 XP, +1 pt de disposition)'
+        };
+
+        function traduireMain(main) {
+            return main === 'droitier' ? 'Droitier' : 'Gaucher';
+        }
+
+        function traduireStatut(statut) {
+            if (statut === 'refuse') return 'Refusé';
+            return 'En attente de validation';
+        }
+
+        const CONDITION_LABELS = { en_forme: 'En forme', fatigue: 'Fatigué', diminue: 'Diminué', blesse: 'Blessé' };
+        const CONDITION_BARRES = { en_forme: 3, fatigue: 2, diminue: 1, blesse: 0 };
+
+        function afficherKine(condition) {
+            const cle = condition || 'en_forme';
+            const nb = CONDITION_BARRES[cle] !== undefined ? CONDITION_BARRES[cle] : 3;
+            const label = CONDITION_LABELS[cle] || 'En forme';
+            let barresHtml = '';
+            for (let i = 0; i < 3; i++) {
+                barresHtml += `<span class="kine-bar${i < nb ? ' kine-bar-remplie' : ''}"></span>`;
+            }
+            return `
+                <div class="kine-status kine-${cle}">
+                    <div class="kine-bars">${barresHtml}</div>
+                    <span class="kine-label">${label}</span>
+                </div>
+            `;
+        }
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        function classeEnergie(points) {
+            if (points <= 10) return 'energie-noir';
+            if (points <= 25) return 'energie-rouge-fonce';
+            if (points <= 35) return 'energie-rouge';
+            if (points <= 50) return 'energie-orange';
+            if (points <= 74) return 'energie-vert-clair';
+            if (points <= 89) return 'energie-vert';
+            return 'energie-vert-fonce';
+        }
+
+        function classeCompetence(valeur) {
+            if (valeur <= 24) return 'competence-vert';
+            if (valeur <= 49) return 'competence-jaune';
+            if (valeur <= 74) return 'competence-orange';
+            if (valeur <= 99) return 'competence-rouge';
+            return 'competence-noir';
+        }
+
+        function ligneCompetence(label, valeur) {
+            return `<div class="bar-row"><span class="bar-label">${label}</span><div class="bar-track"><div class="bar-fill ${classeCompetence(valeur)}" style="width:${Math.min(100, valeur)}%;"></div></div><span class="bar-value">${valeur}</span></div>`;
+        }
+
+        function libellePhase(phase) {
+            if (phase.type === 'presaison') return 'Pré-saison (Saison ' + phase.numeroSaison + ')';
+            if (phase.type === 's0') return 'Semaine 0 (Saison ' + phase.numeroSaison + ')';
+            return 'Semaine ' + phase.positionSemaine + ' (Saison ' + phase.numeroSaison + ')';
+        }
+
+        async function chargerSemaine() {
+            const response = await fetch('/api/semaine');
+            const data = await response.json();
+            if (response.ok) {
+                document.getElementById('semaine-badge').textContent = 'Semaine actuelle : ' + libellePhase(data.phase);
+            }
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        async function chargerSemaineInfo(player) {
+            const container = document.getElementById('semaine-info-container');
+            const response = await fetch('/api/joueur/semaine-info/' + player.id + '?userId=' + userId);
+            const data = await response.json();
+            if (!response.ok) {
+                container.innerHTML = '';
+                return;
+            }
+            container.innerHTML = `
+                <span class="match-hint">Semaine en cours : ${data.semaineActuelle.libelle} · Semaine prochaine : ${data.semaineProchaine.libelle}</span>
+            `;
+        }
+
+        async function chargerPlanification(player) {
+            const container = document.getElementById('planning-container');
+
+            if (player.statut !== 'valide') {
+                container.innerHTML = '<p style="text-align:center; color:#8B98A5;">La planification sera disponible une fois ce personnage validé par l\'administrateur.</p>';
+                return;
+            }
+
+            const responsePlan = await fetch('/api/planification/' + player.id + '?userId=' + userId);
+            const dataPlan = await responsePlan.json();
+            if (!responsePlan.ok) {
+                alert(dataPlan.error);
+                return;
+            }
+
+            const ordresExistants = {};
+            dataPlan.ordres.forEach(function (o) { ordresExistants[o.semaine] = o.action; });
+
+            const tournoisExistants = {};
+            dataPlan.tournois.forEach(function (t) { tournoisExistants[t.semaine] = t.nom; });
+
+            let xpHtml = '';
+            if (player.points_experience > 0) {
+                let inputsHtml = '';
+                Object.keys(COMPETENCES_LABELS).forEach(function (cle) {
+                    inputsHtml += `
+                        <div class="form-group">
+                            <label>${COMPETENCES_LABELS[cle]} (actuel : ${player[cle]})</label>
+                            <input type="number" min="0" max="${100 - player[cle]}" value="0" class="xp-input" data-cle="${cle}">
+                        </div>
+                    `;
+                });
+                xpHtml = `
+                    <div class="xp-pool-panel">
+                        <div class="xp-pool-title">Points d'expérience en réserve : <span id="xp-restant">${player.points_experience}</span></div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">À répartir cette semaine — non utilisés, ils seront perdus à la prochaine avancée de semaine.</div>
+                        <div class="stats-grid">${inputsHtml}</div>
+                        <button class="cta cta-primary repartir-btn" data-pool="${player.points_experience}" style="padding:10px 20px; font-size:0.8rem;">Répartir ces points</button>
+                    </div>
+                `;
+            }
+
+            let dispositionsGainHtml = '';
+            if (player.points_dispositions_a_gagner > 0) {
+                let inputsDispoHtml = '';
+                Object.keys(DISPOSITIONS_LABELS).forEach(function (cle) {
+                    inputsDispoHtml += `
+                        <div class="form-group">
+                            <label>${DISPOSITIONS_LABELS[cle]} (actuel : ${player['disposition_' + cle]})</label>
+                            <input type="number" min="0" value="0" class="dispo-gain-input" data-cle="${cle}">
+                        </div>
+                    `;
+                });
+                dispositionsGainHtml = `
+                    <div class="xp-pool-panel">
+                        <div class="xp-pool-title">Points de disposition en réserve : <span id="dispo-gain-restant">${player.points_dispositions_a_gagner}</span></div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Peuvent rester en attente aussi longtemps que tu veux, pas de plafond de 5 par catégorie en dehors de la création.</div>
+                        <div class="stats-grid">${inputsDispoHtml}</div>
+                        <button class="cta cta-primary dispo-gain-btn" data-pool="${player.points_dispositions_a_gagner}" style="padding:10px 20px; font-size:0.8rem;">Répartir ces points</button>
+                    </div>
+                `;
+            }
+
+            let deplacerHtml = '';
+            if (player.points_dispositions_a_deplacer > 0) {
+                let optionsDispoHtml = '';
+                Object.keys(DISPOSITIONS_LABELS).forEach(function (cle) {
+                    optionsDispoHtml += `<option value="${cle}">${DISPOSITIONS_LABELS[cle]}</option>`;
+                });
+                deplacerHtml = `
+                    <div class="xp-pool-panel">
+                        <div class="xp-pool-title">Déplacement de disposition disponible : <span>${player.points_dispositions_a_deplacer}</span></div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Déplace 1 point déjà acquis d'une catégorie vers une autre (bonus Coaching mental).</div>
+                        <div class="training-row">
+                            <select class="dispo-deplacer-depuis">${optionsDispoHtml}</select>
+                            <select class="dispo-deplacer-vers">${optionsDispoHtml}</select>
+                            <button class="cta cta-primary dispo-deplacer-btn" style="padding:10px 16px; font-size:0.8rem;">Déplacer</button>
+                        </div>
+                    </div>
+                `;
+            }
+
+            let weeksHtml = '';
+            for (let s = dataPlan.debut; s <= dataPlan.fin; s++) {
+                const phaseInfo = dataPlan.phases && dataPlan.phases[s];
+                const labelSemaine = phaseInfo ? libellePhase(phaseInfo) : 'Semaine ' + s;
+
+                if (tournoisExistants[s]) {
+                    weeksHtml += `
+                        <div class="planning-week-card planning-week-tournoi">
+                            <label>${labelSemaine}</label>
+                            <div class="planning-tournoi-lock">Tournoi : ${tournoisExistants[s]}</div>
+                        </div>
+                    `;
+                    continue;
+                }
+                if (phaseInfo && phaseInfo.type !== 'tournoi') {
+                    weeksHtml += `
+                        <div class="planning-week-card planning-week-tournoi">
+                            <label>${labelSemaine}</label>
+                            <div class="planning-tournoi-lock">${phaseInfo.type === 'presaison' ? 'Pré-saison — rien à planifier' : 'Semaine 0 — préparatifs de la nouvelle saison'}</div>
+                        </div>
+                    `;
+                    continue;
+                }
+                const valeurActuelle = ordresExistants[s] || '';
+                const bientotPerdue = s === dataPlan.debut && valeurActuelle === '';
+                let optionsHtml = '';
+                Object.keys(ACTIONS_LABELS).forEach(function (val) {
+                    optionsHtml += `<option value="${val}" ${val === valeurActuelle ? 'selected' : ''}>${ACTIONS_LABELS[val]}</option>`;
+                });
+                weeksHtml += `
+                    <div class="planning-week-card${bientotPerdue ? ' planning-week-alerte' : ''}">
+                        <label>${labelSemaine}</label>
+                        <select class="planning-select" data-semaine="${s}">${optionsHtml}</select>
+                        ${bientotPerdue ? '<div class="planning-alerte-texte">Non planifiée — bientôt trop tard</div>' : ''}
+                    </div>
+                `;
+            }
+
+            container.innerHTML = `
+                ${xpHtml}
+                ${dispositionsGainHtml}
+                ${deplacerHtml}
+                <div class="stats-header">Programmation des 5 prochaines semaines</div>
+                <div class="planning-grid">${weeksHtml}</div>
+                <button class="cta cta-primary enregistrer-btn" style="padding:12px 24px; font-size:0.85rem;">Enregistrer la planification</button>
+            `;
+
+            document.querySelector('.enregistrer-btn').addEventListener('click', async function () {
+                const selects = document.querySelectorAll('.planning-select');
+                for (const select of selects) {
+                    if (select.value === '') continue;
+                    await fetch('/api/planification', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            userId,
+                            playerId: player.id,
+                            semaine: Number(select.getAttribute('data-semaine')),
+                            action: select.value
+                        })
+                    });
+                }
+                alert('Planification enregistrée.');
+            });
+
+            const repartirBtn = document.querySelector('.repartir-btn');
+            if (repartirBtn) {
+                repartirBtn.addEventListener('click', async function () {
+                    const pool = Number(repartirBtn.getAttribute('data-pool'));
+                    const inputs = document.querySelectorAll('.xp-input');
+
+                    const repartition = {};
+                    let total = 0;
+                    inputs.forEach(function (input) {
+                        const val = Number(input.value) || 0;
+                        repartition[input.getAttribute('data-cle')] = val;
+                        total += val;
+                    });
+
+                    if (total > pool) {
+                        alert('Tu ne peux pas répartir plus de ' + pool + ' points.');
+                        return;
+                    }
+                    if (total === 0) {
+                        alert('Indique au moins un point à répartir.');
+                        return;
+                    }
+
+                    const response = await fetch('/api/repartir-xp', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId, playerId: player.id, repartition })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.error);
+                        return;
+                    }
+                    alert('Points répartis avec succès.');
+                    chargerOnglets();
+                });
+            }
+
+            const dispoGainBtn = document.querySelector('.dispo-gain-btn');
+            if (dispoGainBtn) {
+                dispoGainBtn.addEventListener('click', async function () {
+                    const pool = Number(dispoGainBtn.getAttribute('data-pool'));
+                    const inputs = document.querySelectorAll('.dispo-gain-input');
+
+                    const repartition = {};
+                    let total = 0;
+                    inputs.forEach(function (input) {
+                        const val = Number(input.value) || 0;
+                        repartition[input.getAttribute('data-cle')] = val;
+                        total += val;
+                    });
+
+                    if (total > pool) {
+                        alert('Tu ne peux pas répartir plus de ' + pool + ' points.');
+                        return;
+                    }
+                    if (total === 0) {
+                        alert('Indique au moins un point à répartir.');
+                        return;
+                    }
+
+                    const response = await fetch('/api/repartir-dispositions-gain', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId, playerId: player.id, repartition })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.error);
+                        return;
+                    }
+                    alert('Points de disposition répartis avec succès.');
+                    chargerOnglets();
+                });
+            }
+
+            const dispoDeplacerBtn = document.querySelector('.dispo-deplacer-btn');
+            if (dispoDeplacerBtn) {
+                dispoDeplacerBtn.addEventListener('click', async function () {
+                    const depuis = document.querySelector('.dispo-deplacer-depuis').value;
+                    const vers = document.querySelector('.dispo-deplacer-vers').value;
+
+                    if (depuis === vers) {
+                        alert('Choisis deux catégories différentes.');
+                        return;
+                    }
+
+                    const response = await fetch('/api/deplacer-disposition', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId, playerId: player.id, depuis, vers })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.error);
+                        return;
+                    }
+                    alert('Point de disposition déplacé avec succès.');
+                    chargerOnglets();
+                });
+            }
+        }
+
+        const STYLES_JEU_LABELS = {
+            aucun: 'Aucun',
+            sprinter: 'Sprinter',
+            prudence: 'Prudence',
+            en_avant: 'En Avant',
+            marathonien: 'Marathonien',
+            mental_acier: 'Mental d\'acier',
+            reperage: 'Repérage'
+        };
+
+        async function chargerStyleEnAttente(player) {
+            const container = document.getElementById('style-container');
+            const response = await fetch('/api/tournois/style-en-attente/' + player.id + '?userId=' + userId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                container.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger les styles de jeu.') + '</div>';
+                return;
+            }
+
+            if (!data.tournoi) {
+                container.innerHTML = '<div class="match-hint">Aucun tournoi en attente de style pour le moment — reviens ici une fois le tableau tiré (à S-1).</div>';
+                return;
+            }
+
+            const stylesInterdits = data.stylesInterdits || [];
+            const tourActuel = data.tournoi.tour_actuel || 0;
+            const tournoiDemarre = tourActuel > 0;
+            const plafondMise = data.plafondMiseEnergie || 0;
+            const maxMise = Math.min(plafondMise, data.pointsEnergieDisponibles || 0);
+            const miseHtml = plafondMise > 0 ? `
+                <div class="xp-pool-panel">
+                    <div class="xp-pool-title">Mise de points d'énergie (plafond ${plafondMise}, énergie disponible ${data.pointsEnergieDisponibles})</div>
+                    <div class="planning-alerte-texte" style="margin-bottom:8px;">S'ajoute au niveau de jeu pendant tout le tournoi, mais définitivement perdue à l'élimination ou à la victoire. ${tournoiDemarre ? 'Le tournoi a déjà commencé, la mise ne peut plus être modifiée.' : 'Modifiable librement jusqu\'au début du tournoi.'}</div>
+                    <div class="training-row">
+                        <input type="number" min="0" max="${maxMise}" value="${data.energieMiseeActuelle || 0}" class="mise-energie-input" style="width:70px;" ${tournoiDemarre ? 'disabled' : ''}>
+                        <button class="cta cta-primary mise-energie-btn" style="padding:10px 16px; font-size:0.8rem;" ${tournoiDemarre ? 'disabled' : ''}>Valider la mise</button>
+                    </div>
+                </div>
+            ` : '';
+            const toursHtml = data.labelsTours.map(function (label, i) {
+                const valeurActuelle = data.stylesActuels[i] || 'aucun';
+                const dejaJoue = i < tourActuel;
+                const optionsHtml = Object.keys(STYLES_JEU_LABELS).map(function (cle) {
+                    const interdit = stylesInterdits.includes(cle);
+                    return `<option value="${cle}" ${cle === valeurActuelle ? 'selected' : ''} ${interdit ? 'disabled' : ''}>${STYLES_JEU_LABELS[cle]}${interdit ? ' (déjà utilisé au tournoi précédent)' : ''}</option>`;
+                }).join('');
+                return `
+                    <div class="style-tour-card">
+                        <label>${label}${dejaJoue ? ' (déjà joué)' : ''}</label>
+                        <select class="style-tour-select" data-index="${i}" ${dejaJoue ? 'disabled' : ''}>${optionsHtml}</select>
+                    </div>
+                `;
+            }).join('');
+
+            const texteInterdits = stylesInterdits.length > 0
+                ? ' Interdit(s) car déjà utilisé(s) au tournoi précédent : ' + stylesInterdits.map(function (s) { return STYLES_JEU_LABELS[s] || s; }).join(', ') + '.'
+                : '';
+
+            container.innerHTML = `
+                <div class="match-hint">${data.tournoi.nom} (semaine ${data.tournoi.semaine}) — à choisir avant le début du tournoi. Le même style peut être gardé sur plusieurs tours d'affilée.${texteInterdits}</div>
+                ${miseHtml}
+                <div class="style-tour-grid">${toursHtml}</div>
+                <button class="cta cta-primary style-valider-btn" style="padding:12px 24px; font-size:0.85rem;">Valider les styles</button>
+            `;
+
+            if (!tournoiDemarre && plafondMise > 0) {
+                document.querySelector('.mise-energie-btn').addEventListener('click', async function () {
+                    const inputMise = document.querySelector('.mise-energie-input');
+                    const energieMisee = Number(inputMise.value) || 0;
+
+                    const responseMise = await fetch('/api/tournois/mise-energie', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId, playerId: player.id, tournoiId: data.tournoi.id, energieMisee })
+                    });
+                    const dataMise = await responseMise.json();
+                    if (!responseMise.ok) {
+                        alert(dataMise.error);
+                        return;
+                    }
+                    alert('Mise d\'énergie enregistrée.');
+                    chargerStyleEnAttente(player);
+                });
+            }
+
+            document.querySelector('.style-valider-btn').addEventListener('click', async function () {
+                const styles = Array.from(document.querySelectorAll('.style-tour-select')).map(function (s) { return s.value; });
+
+                const responseValider = await fetch('/api/tournois/style', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId, playerId: player.id, tournoiId: data.tournoi.id, styles })
+                });
+                const dataValider = await responseValider.json();
+                if (!responseValider.ok) {
+                    alert(dataValider.error);
+                    return;
+                }
+                alert('Styles de jeu enregistrés.');
+                chargerStyleEnAttente(player);
+            });
+        }
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        async function chargerRangs(player) {
+            const response = await fetch('/api/classement/' + userId);
+            const data = await response.json();
+            if (!response.ok) return null;
+
+            const circuit = player.type === 'joueur' ? data.atp : data.wta;
+            const indexLive = circuit.live.findIndex(function (j) { return j.estMoi; });
+            const indexRace = circuit.race.findIndex(function (j) { return j.estMoi; });
+
+            return {
+                live: indexLive >= 0 ? indexLive + 1 : null,
+                race: indexRace >= 0 ? indexRace + 1 : null
+            };
+        }
+
+        function afficherCarteJoueur(player, rangs) {
+            const container = document.getElementById('player-card-container');
+
+            const rangLive = rangs && rangs.live ? rangs.live : 'Non classé';
+            const rangRace = rangs && rangs.race ? rangs.race : 'Non classé';
+
+            const badge = player.statut === 'valide'
+                ? ''
+                : `<div class="status-badge status-${player.statut}">${traduireStatut(player.statut)}</div>`;
+
+            const xpLigne = player.points_experience > 0
+                ? `<div class="stat-row"><span class="stat-label">XP en réserve</span><span class="stat-value">${player.points_experience}</span></div>`
+                : '';
+
+            const card = document.createElement('div');
+            card.className = 'player-summary';
+            card.innerHTML = `
+                <div class="player-avatar">
+                    <img src="${player.type === 'joueur' ? 'icone-joueur.png' : 'icone-joueuse.png'}" alt="">
+                </div>
+                ${badge}
+                <div class="player-summary-type">${player.type === 'joueur' ? 'Ton joueur' : 'Ta joueuse'}</div>
+                <div class="player-summary-name">${formaterNom(player.prenom, player.nom)}</div>
+
+                <div class="stat-row"><span class="stat-label">Âge</span><span class="stat-value">${player.age} ans</span></div>
+                <div class="stat-row"><span class="stat-label">Taille</span><span class="stat-value">${player.taille} cm</span></div>
+                <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value">${flagImg(player.drapeau)} ${player.nationalite}</span></div>
+                <div class="stat-row"><span class="stat-label">Main forte</span><span class="stat-value">${traduireMain(player.main_forte)}</span></div>
+                <div id="capitaine-zone"></div>
+                <div class="stat-row"><span class="stat-label">Classement Live</span><span class="stat-value">${rangLive}</span></div>
+                <div class="stat-row"><span class="stat-label">Classement Race</span><span class="stat-value">${rangRace}</span></div>
+
+                <div class="stats-header">État du jour</div>
+                ${afficherKine(player.condition)}
+                <div class="bar-row"><span class="bar-label">Forme</span><div class="bar-track"><div class="bar-fill" style="width:${player.forme}%;"></div></div><span class="bar-value">${player.forme}</span></div>
+                <div class="stat-row"><span class="stat-label">Mental courant</span><span class="stat-value">${player.mental_courant}</span></div>
+                <div class="stat-row"><span class="stat-label">Mental max</span><span class="stat-value">${player.mental_max}</span></div>
+                <div class="bar-row"><span class="bar-label">Usure</span><div class="bar-track"><div class="bar-fill usure" style="width:${player.usure}%;"></div></div><span class="bar-value">${player.usure}</span></div>
+                <div class="bar-row"><span class="bar-label">Énergie</span><div class="bar-track"><div class="bar-fill ${classeEnergie(player.points_energie)}" style="width:${Math.min(100, player.points_energie)}%;"></div></div><span class="bar-value">${player.points_energie}</span></div>
+                ${xpLigne}
+
+                <div class="stats-header">Compétences techniques</div>
+                ${ligneCompetence('Service', player.service)}
+                ${ligneCompetence('Retour', player.retour)}
+                ${ligneCompetence('Coup droit / Revers', player.coup_droit_revers)}
+                ${ligneCompetence('Effet', player.effet)}
+                ${ligneCompetence('Volée', player.volee)}
+                ${ligneCompetence('Déplacement', player.deplacement)}
+                ${ligneCompetence('Puissance', player.puissance)}
+                ${ligneCompetence('Résistance', player.resistance)}
+
+                <div class="stats-header">Dispositions</div>
+                <div class="stat-row"><span class="stat-label">Adversité</span><span class="stat-value">${player.disposition_adversite}</span></div>
+                <div class="stat-row"><span class="stat-label">Coupeur de têtes</span><span class="stat-value">${player.disposition_coupeur_de_tetes}</span></div>
+                <div class="stat-row"><span class="stat-label">Dernier carré</span><span class="stat-value">${player.disposition_dernier_carre}</span></div>
+                <div class="stat-row"><span class="stat-label">Premiers tours</span><span class="stat-value">${player.disposition_premiers_tours}</span></div>
+                <div class="stat-row"><span class="stat-label">Sang froid</span><span class="stat-value">${player.disposition_sang_froid}</span></div>
+                <div class="stat-row"><span class="stat-label">Indoor</span><span class="stat-value">${player.disposition_indoor}</span></div>
+                <div class="stat-row"><span class="stat-label">Rivalité</span><span class="stat-value">${player.disposition_rivalite}</span></div>
+
+                <div class="stats-header">Spécialisation par surface</div>
+                <div class="surface-grid">
+                    <div class="surface-card dur">
+                        <div class="surface-name">Dur</div>
+                        <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_dur_niveau}</span></div>
+                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_dur_niveau_mental}</span></div>
+                        <div class="stat-row-mini"><span>Automatismes</span><span>${player.surface_dur_automatismes}</span></div>
+                    </div>
+                    <div class="surface-card terre">
+                        <div class="surface-name">Terre battue</div>
+                        <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_terre_niveau}</span></div>
+                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_terre_niveau_mental}</span></div>
+                        <div class="stat-row-mini"><span>Automatismes</span><span>${player.surface_terre_automatismes}</span></div>
+                    </div>
+                    <div class="surface-card herbe">
+                        <div class="surface-name">Herbe</div>
+                        <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_herbe_niveau}</span></div>
+                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_herbe_niveau_mental}</span></div>
+                        <div class="stat-row-mini"><span>Automatismes</span><span>${player.surface_herbe_automatismes}</span></div>
+                    </div>
+                </div>
+
+                <div class="stats-header">Spécialisation par surface (double)</div>
+                <p class="match-hint" style="text-align:left; padding:0 0 8px;">Aperçu à titre indicatif — le double n'est pas encore un mode jouable, seulement prévu pour une future Coupe Davis / Fed Cup.</p>
+                <div class="surface-grid">
+                    <div class="surface-card dur">
+                        <div class="surface-name">Dur</div>
+                        <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_dur_niveau_double}</span></div>
+                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_dur_niveau_mental_double}</span></div>
+                    </div>
+                    <div class="surface-card terre">
+                        <div class="surface-name">Terre battue</div>
+                        <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_terre_niveau_double}</span></div>
+                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_terre_niveau_mental_double}</span></div>
+                    </div>
+                    <div class="surface-card herbe">
+                        <div class="surface-name">Herbe</div>
+                        <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_herbe_niveau_double}</span></div>
+                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_herbe_niveau_mental_double}</span></div>
+                    </div>
+                </div>
+            `;
+            container.innerHTML = '';
+            container.appendChild(card);
+            chargerZoneCapitaine(player);
+        }
+
+        async function chargerZoneCapitaine(player) {
+            const zone = document.getElementById('capitaine-zone');
+            if (!zone) return;
+
+            const response = await fetch('/api/coupe/statut-capitaine/' + player.id);
+            const data = await response.json();
+            if (!response.ok || !data.dansLeTableau) {
+                zone.innerHTML = '';
+                return;
+            }
+
+            const lienRencontres = `<p class="match-hint" style="text-align:left; padding:8px 0 0;"><a class="lien-adversaire" href="coupe.html?playerId=${player.id}">Voir mes rencontres de Coupe Davis / Fed Cup</a></p>`;
+
+            if (data.capitaine) {
+                const estMoi = Number(data.capitaine) === Number(player.id);
+                zone.innerHTML = `<div class="stat-row"><span class="stat-label">Capitaine Coupe Davis/Fed Cup</span><span class="stat-value">${estMoi ? 'Toi' : 'Désigné'}</span></div>${lienRencontres}`;
+                return;
+            }
+
+            if (data.fenetreCandidature) {
+                if (data.maCandidature) {
+                    zone.innerHTML = '<p class="match-hint" style="text-align:left; padding:8px 0 0;">Tu es candidat au poste de capitaine — le vote aura lieu en Semaine 1.</p>' + lienRencontres;
+                } else {
+                    zone.innerHTML = '<button class="cta cta-secondary" id="candidater-capitaine-btn" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Candidater pour être capitaine</button>' + lienRencontres;
+                    document.getElementById('candidater-capitaine-btn').addEventListener('click', async function () {
+                        const r = await fetch('/api/coupe/candidature', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ playerId: player.id })
+                        });
+                        const d = await r.json();
+                        if (!r.ok) { alert(d.error); return; }
+                        chargerZoneCapitaine(player);
+                    });
+                }
+                return;
+            }
+
+            if (data.fenetreVote) {
+                if (data.candidatures.length === 0) {
+                    zone.innerHTML = '<p class="match-hint" style="text-align:left; padding:8px 0 0;">Aucun candidat au poste de capitaine cette saison.</p>' + lienRencontres;
+                    return;
+                }
+                const options = data.candidatures.map(function (c) {
+                    return `<option value="${c.player_id}"${Number(data.monVote) === c.player_id ? ' selected' : ''}>${formaterNom(c.prenom, c.nom)}</option>`;
+                }).join('');
+                zone.innerHTML = `
+                    <div class="form-group" style="margin-top:8px;">
+                        <label>Vote pour le capitaine</label>
+                        <select id="vote-capitaine-select"><option value="">— Choisir —</option>${options}</select>
+                        <button class="cta cta-secondary" id="voter-capitaine-btn" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Voter</button>
+                    </div>
+                    ${lienRencontres}
+                `;
+                document.getElementById('voter-capitaine-btn').addEventListener('click', async function () {
+                    const candidatPlayerId = document.getElementById('vote-capitaine-select').value;
+                    if (!candidatPlayerId) return;
+                    const r = await fetch('/api/coupe/vote', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ votantPlayerId: player.id, candidatPlayerId })
+                    });
+                    const d = await r.json();
+                    if (!r.ok) { alert(d.error); return; }
+                    chargerZoneCapitaine(player);
+                });
+                return;
+            }
+
+            zone.innerHTML = lienRencontres;
+        }
+
+        async function chargerHistorique(player) {
+            const response = await fetch('/api/tournois/historique/' + player.id + '?userId=' + userId);
+            const data = await response.json();
+            const container = document.getElementById('historique-container');
+
+            if (!response.ok) {
+                container.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger l\'historique.') + '</div>';
+                return;
+            }
+
+            if (data.historique.length === 0) {
+                container.innerHTML = '<div class="match-hint">Aucun tournoi disputé pour le moment.</div>';
+                return;
+            }
+
+            const totalHtml = `<div class="stat-row"><span class="stat-label">Total des points gagnés</span><span class="stat-value">${data.totalPoints}</span></div>`;
+
+            const listeHtml = data.historique.map(function (h) {
+                const resultat = h.tour_elimine === 'Vainqueur' ? 'Vainqueur' : (h.tour_elimine ? 'Éliminé : ' + h.tour_elimine : '—');
+                const kineBadge = h.kineIntervenu ? '<span class="status-badge kine-badge">Kiné</span>' : '';
+                return `
+                    <div class="tournoi-card tournoi-card-${h.surface}">
+                        <a class="tournoi-card-name" href="tournoi-detail.html?calendrierId=${h.calendrier_id}&semaine=${h.semaine}&playerId=${player.id}">${h.nom} ${kineBadge}</a>
+                        <div class="tournoi-card-meta">Semaine ${h.positionSemaine} · ${resultat} · ${h.points_gagnes || 0} points</div>
+                    </div>
+                `;
+            }).join('<div class="separateur-tournoi"></div>');
+
+            container.innerHTML = `${totalHtml}<div class="tournoi-list">${listeHtml}</div>`;
+        }
+
+        async function chargerJournal(player) {
+            const response = await fetch('/api/journal/' + player.id + '?userId=' + userId);
+            const data = await response.json();
+            const container = document.getElementById('journal-container');
+
+            if (!response.ok) {
+                container.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger le journal.') + '</div>';
+                return;
+            }
+
+            if (data.journal.length === 0) {
+                container.innerHTML = '<div class="match-hint">Rien à afficher pour le moment.</div>';
+                return;
+            }
+
+            const lignesHtml = data.journal.map(function (j) {
+                const semaineTxt = j.positionSemaine !== null ? 'Semaine ' + j.positionSemaine : j.libelle;
+                return `
+                    <tr>
+                        <td>${semaineTxt}</td>
+                        <td>${j.libelle}</td>
+                        <td>${j.xp_credite || 0}</td>
+                        <td>${j.disposition_a_gagner_ajoutee ? '+1 à gagner' : ''}${j.disposition_a_deplacer_ajoutee ? ' +1 à déplacer' : ''}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            container.innerHTML = `
+                <p class="match-hint" style="margin-bottom:10px;">Trace de ce qui était prévu et de ce qui a été crédité, semaine par semaine — utile en cas de doute sur un entraînement.</p>
+                <table class="classement-table">
+                    <thead><tr><th>Semaine</th><th>Prévu / réalisé</th><th>XP crédité</th><th>Dispositions</th></tr></thead>
+                    <tbody>${lignesHtml}</tbody>
+                </table>
+            `;
+        }
+
+        function fermerBlocagePertes() {
+            const overlay = document.getElementById('dispo-blocage-overlay');
+            if (overlay) overlay.remove();
+        }
+
+        function afficherBlocagePertes(player) {
+            fermerBlocagePertes();
+
+            let inputsHtml = '';
+            Object.keys(DISPOSITIONS_LABELS).forEach(function (cle) {
+                inputsHtml += `
+                    <div class="form-group">
+                        <label>${DISPOSITIONS_LABELS[cle]} (actuel : ${player['disposition_' + cle]})</label>
+                        <input type="number" min="0" max="${player['disposition_' + cle]}" value="0" class="dispo-perte-input" data-cle="${cle}">
+                    </div>
+                `;
+            });
+
+            const overlay = document.createElement('div');
+            overlay.id = 'dispo-blocage-overlay';
+            overlay.className = 'dispo-blocage-overlay';
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box">
+                    <div class="stats-header">Perte de dispositions à l'intersaison</div>
+                    <p class="planning-alerte-texte" style="margin-bottom:12px;">
+                        Il faut retirer exactement <strong>${player.points_dispositions_a_retirer}</strong> point(s) de disposition
+                        avant de pouvoir continuer à gérer ce personnage.
+                    </p>
+                    <div class="stats-grid">${inputsHtml}</div>
+                    <button class="cta cta-primary dispo-perte-btn" style="padding:10px 20px; font-size:0.8rem;">Valider le retrait</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            document.querySelector('.dispo-perte-btn').addEventListener('click', async function () {
+                const inputs = document.querySelectorAll('.dispo-perte-input');
+                const repartition = {};
+                let total = 0;
+                inputs.forEach(function (input) {
+                    const val = Number(input.value) || 0;
+                    repartition[input.getAttribute('data-cle')] = val;
+                    total += val;
+                });
+
+                if (total !== player.points_dispositions_a_retirer) {
+                    alert('Le total doit correspondre exactement à ' + player.points_dispositions_a_retirer + ' points.');
+                    return;
+                }
+
+                const response = await fetch('/api/repartir-dispositions-perte', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId, playerId: player.id, repartition })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.error);
+                    return;
+                }
+                fermerBlocagePertes();
+                chargerOnglets();
+            });
+        }
+
+        async function afficherJoueurCourant() {
+            const player = typeCourant === 'joueur' ? joueurData : joueuseData;
+            const label = typeCourant === 'joueur' ? 'Mon joueur' : 'Ma joueuse';
+
+            document.title = label + ' — Tennis Web Manager';
+
+            if (!player) {
+                document.getElementById('semaine-info-container').innerHTML = '';
+                document.getElementById('planning-container').innerHTML = '';
+                document.getElementById('style-container').innerHTML = '';
+                document.getElementById('historique-container').innerHTML = '';
+                document.getElementById('journal-container').innerHTML = '';
+                document.getElementById('player-card-container').innerHTML =
+                    '<p style="text-align:center; color:#8B98A5;">Pas encore de personnage sur ce circuit — <a href="creation-joueurs.html">créer mes personnages</a>.</p>';
+                return;
+            }
+
+            if (player.points_dispositions_a_retirer > 0) {
+                afficherBlocagePertes(player);
+                return;
+            }
+            fermerBlocagePertes();
+
+            await chargerSemaineInfo(player);
+            await chargerPlanification(player);
+            await chargerStyleEnAttente(player);
+            const rangs = await chargerRangs(player);
+            afficherCarteJoueur(player, rangs);
+            await chargerHistorique(player);
+            await chargerJournal(player);
+        }
+
+        async function chargerOnglets() {
+            const response = await fetch('/api/joueurs/' + userId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.error || 'Impossible de charger tes joueurs.');
+                return;
+            }
+            if (data.players.length === 0) {
+                window.location.href = 'creation-joueurs.html';
+                return;
+            }
+
+            joueurData = data.players.find(function (p) { return p.type === 'joueur'; }) || null;
+            joueuseData = data.players.find(function (p) { return p.type === 'joueuse'; }) || null;
+            if (typeCourant === null) {
+                typeCourant = joueurData ? 'joueur' : 'joueuse';
+            }
+
+            const tabsNav = document.getElementById('tabs-nav');
+            tabsNav.innerHTML = `
+                <button class="tab-btn${typeCourant === 'joueur' ? ' active' : ''}" data-type="joueur">${joueurData ? formaterNom(joueurData.prenom, joueurData.nom) : 'Créer mon joueur'}</button>
+                <button class="tab-btn${typeCourant === 'joueuse' ? ' active' : ''}" data-type="joueuse">${joueuseData ? formaterNom(joueuseData.prenom, joueuseData.nom) : 'Créer ma joueuse'}</button>
+            `;
+            tabsNav.querySelectorAll('.tab-btn').forEach(function (bouton) {
+                bouton.addEventListener('click', function () {
+                    tabsNav.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                    bouton.classList.add('active');
+                    typeCourant = bouton.dataset.type;
+                    afficherJoueurCourant();
+                });
+            });
+
+            await afficherJoueurCourant();
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        chargerSemaine();
+        verifierAdmin();
+        chargerOnglets();
+    </script>
+</body>
+</html>

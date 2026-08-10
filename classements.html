@@ -1,0 +1,232 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Classements — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Classements</h1>
+            <div style="text-align:center;">
+                <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
+            </div>
+
+            <div class="tabs-nav" id="tabs-nav">
+                <button class="tab-btn active" data-circuit="atp" data-type="live">ATP Live</button>
+                <button class="tab-btn" data-circuit="atp" data-type="race">ATP Race</button>
+                <button class="tab-btn" data-circuit="wta" data-type="live">WTA Live</button>
+                <button class="tab-btn" data-circuit="wta" data-type="race">WTA Race</button>
+                <button class="tab-btn" data-circuit="pronos" data-type="atp">Pronos ATP</button>
+                <button class="tab-btn" data-circuit="pronos" data-type="wta">Pronos WTA</button>
+                <button class="tab-btn" data-circuit="pronos" data-type="combine">Pronos Combiné</button>
+            </div>
+
+            <div class="tab-panel">
+                <table class="classement-table">
+                    <thead>
+                        <tr><th>Rang</th><th id="classement-entete-nom">Joueur</th><th>Points</th></tr>
+                    </thead>
+                    <tbody id="classement-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        let classementData = null;
+        let pronosData = null;
+        let circuitCourant = 'atp';
+        let typeCourant = 'live';
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        function formaterNomComplet(nomComplet) {
+            if (!nomComplet) return nomComplet;
+            // Cas coach avec 2 personnages : "Prenom Nom / Prenom Nom" (classement Pronos
+            // combine) - formate chaque moitie separement plutot que de ne traiter que le
+            // dernier mot du tout.
+            if (nomComplet.indexOf(' / ') !== -1) {
+                return nomComplet.split(' / ').map(formaterNomComplet).join(' / ');
+            }
+            const i = nomComplet.lastIndexOf(' ');
+            if (i === -1) return nomComplet;
+            return nomComplet.slice(0, i) + ' ' + nomComplet.slice(i + 1).toUpperCase();
+        }
+
+        function libellePhase(phase) {
+            if (phase.type === 'presaison') return 'Pré-saison (Saison ' + phase.numeroSaison + ')';
+            if (phase.type === 's0') return 'Semaine 0 (Saison ' + phase.numeroSaison + ')';
+            return 'Semaine ' + phase.positionSemaine + ' (Saison ' + phase.numeroSaison + ')';
+        }
+
+        async function chargerSemaine() {
+            const response = await fetch('/api/semaine');
+            const data = await response.json();
+            if (response.ok) {
+                document.getElementById('semaine-badge').textContent = 'Semaine actuelle : ' + libellePhase(data.phase);
+            }
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        function ligneHtml(j, rang) {
+            const nomAffiche = `${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}`;
+            let nomHtml = nomAffiche;
+
+            // Ma propre ligne pointe vers la meme fiche adversaire.html que les autres
+            // joueurs reels (Infos/Palmares/Badges/...), pas vers joueur.html (page de
+            // gestion) - demande explicite de l'utilisateur. Les lignes "Pronos"
+            // (identite = un coach, pas un joueur/rival precis) pointent vers la fiche
+            // coach via son userId plutot que via `cle`, qu'elles n'ont pas.
+            if (circuitCourant === 'pronos') {
+                if (j.userId) {
+                    nomHtml = `<a class="lien-adversaire" href="coach.html?id=${j.userId}">${nomAffiche}</a>`;
+                }
+            } else if (j.cle) {
+                if (j.cle.indexOf('rival:') === 0) {
+                    nomHtml = `<a class="lien-adversaire" href="adversaire.html?type=rival&id=${j.cle.slice(6)}">${nomAffiche}</a>`;
+                } else if (j.cle.indexOf('joueur:') === 0) {
+                    nomHtml = `<a class="lien-adversaire" href="adversaire.html?type=reel&id=${j.cle.slice(7)}">${nomAffiche}</a>`;
+                }
+            }
+
+            return `
+                <tr class="${j.estMoi ? 'classement-moi' : ''}">
+                    <td class="rang">${rang}</td>
+                    <td>${nomHtml}</td>
+                    <td class="pts">${j.points}</td>
+                </tr>
+            `;
+        }
+
+        function afficherClassement() {
+            const corps = document.getElementById('classement-body');
+            const entete = document.getElementById('classement-entete-nom');
+
+            let liste;
+            if (circuitCourant === 'pronos') {
+                entete.textContent = 'Coach';
+                liste = pronosData ? pronosData[typeCourant] : [];
+            } else {
+                entete.textContent = 'Joueur';
+                liste = classementData ? classementData[circuitCourant][typeCourant] : [];
+            }
+
+            if (!liste || liste.length === 0) {
+                corps.innerHTML = '<tr><td colspan="3" class="match-hint">Aucun classement disponible pour le moment.</td></tr>';
+                return;
+            }
+
+            const top100 = liste.slice(0, 100);
+            const indexMoi = liste.findIndex(function (j) { return j.estMoi; });
+
+            let html = top100.map(function (j, i) { return ligneHtml(j, i + 1); }).join('');
+
+            if (indexMoi >= 100) {
+                html += '<tr class="classement-separateur"><td colspan="3">···</td></tr>';
+                html += ligneHtml(liste[indexMoi], indexMoi + 1);
+            }
+
+            corps.innerHTML = html;
+        }
+
+        async function chargerClassement() {
+            const response = await fetch('/api/classement/' + userId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.error || 'Impossible de charger les classements.');
+                return;
+            }
+
+            classementData = data;
+            afficherClassement();
+        }
+
+        async function chargerPronos() {
+            const response = await fetch('/api/pronostics/classement/' + userId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                return;
+            }
+
+            pronosData = data;
+            afficherClassement();
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                bouton.classList.add('active');
+                circuitCourant = bouton.dataset.circuit;
+                typeCourant = bouton.dataset.type;
+                afficherClassement();
+            });
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        chargerSemaine();
+        verifierAdmin();
+        chargerClassement();
+        chargerPronos();
+    </script>
+</body>
+</html>

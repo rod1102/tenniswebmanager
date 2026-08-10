@@ -1,0 +1,291 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coupe Davis / Fed Cup — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Coupe Davis / Fed Cup</h1>
+
+            <div id="liste-container" style="display:none;">
+                <div class="stats-header">Mes rencontres</div>
+                <div id="liste-rencontres"><p class="match-hint">Chargement...</p></div>
+            </div>
+
+            <div id="detail-container" style="display:none;">
+                <p><a class="lien-adversaire" id="retour-liste-lien" href="#">� Retour à mes rencontres</a></p>
+                <div id="detail-rencontre"><p class="match-hint">Chargement...</p></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const playerId = params.get('playerId');
+        const tieId = params.get('tieId');
+        if (!playerId) {
+            window.location.href = 'joueur.html';
+        }
+
+        const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+        const LABELS_STYLE = {
+            sprinter: 'Sprinter', prudence: 'Prudence', en_avant: 'En avant', marathonien: 'Marathonien',
+            mental_acier: 'Mental d\'acier', reperage: 'Repérage', aucun: 'Aucun'
+        };
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        function carteRencontre(t, nbDivisions) {
+            const scoreTxt = t.statut === 'termine'
+                ? `${t.victoires_domicile} - ${t.victoires_exterieur} (${t.nation_vainqueur} qualifié)`
+                : (t.surface ? LABELS_SURFACE[t.surface] : 'Surface pas encore choisie');
+            const divisionTxt = nbDivisions > 1 ? ` · Division ${t.division}` : '';
+            return `
+                <a class="tournoi-card" href="coupe.html?playerId=${playerId}&tieId=${t.id}" style="display:block; text-decoration:none;">
+                    <div class="tournoi-card-name">${t.nation_domicile} vs ${t.nation_exterieur}</div>
+                    <div class="tournoi-card-meta">${t.manche}${divisionTxt} · Semaine ${t.semaine} · ${scoreTxt}</div>
+                </a>
+            `;
+        }
+
+        async function chargerListe() {
+            document.getElementById('liste-container').style.display = 'block';
+            document.getElementById('detail-container').style.display = 'none';
+
+            const response = await fetch('/api/coupe/mes-rencontres/' + playerId);
+            const data = await response.json();
+            const container = document.getElementById('liste-rencontres');
+
+            if (!response.ok) {
+                container.innerHTML = '<p class="match-hint">' + (data.error || 'Impossible de charger tes rencontres.') + '</p>';
+                return;
+            }
+            if (data.ties.length === 0) {
+                container.innerHTML = '<p class="match-hint">Ta nation ne fait pas partie du tableau cette saison, ou aucune rencontre n\'a encore été programmée.</p>';
+                return;
+            }
+
+            container.innerHTML = '<div class="tournoi-list">' + data.ties.map(function (t) { return carteRencontre(t, data.nbDivisions); }).join('') + '</div>';
+        }
+
+        function formulaireSurface(tie) {
+            return `
+                <div class="form-group" style="margin-top:16px;">
+                    <label>Surface (choix du capitaine de l'équipe à domicile)</label>
+                    <select id="surface-select">
+                        <option value="dur">Dur</option>
+                        <option value="terre">Terre battue</option>
+                        <option value="herbe">Herbe</option>
+                    </select>
+                    <button class="cta cta-primary" id="surface-btn" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider la surface</button>
+                </div>
+            `;
+        }
+
+        function optionsJoueurs(liste) {
+            return liste.map(function (j) {
+                return `<option value="${j.estReel ? 'reel' : 'rival'}-${j.id}">${j.nom}${j.estReel ? '' : ' (rival)'}</option>`;
+            }).join('');
+        }
+
+        function formulaireComposition(tie, nation, joueurs) {
+            const opts = optionsJoueurs(joueurs);
+            return `
+                <div class="form-group" style="margin-top:16px;">
+                    <label>Composition — ${nation}</label>
+                    <label style="font-size:0.7rem;">Simple 1 (+ simple retour vs B adverse)</label>
+                    <select id="compo-a-${nation}"><option value="">—</option>${opts}</select>
+                    <label style="font-size:0.7rem;">Simple 2 (+ simple retour vs A adverse)</label>
+                    <select id="compo-b-${nation}"><option value="">—</option>${opts}</select>
+                    <label style="font-size:0.7rem;">Double — joueur 1</label>
+                    <select id="compo-d1-${nation}"><option value="">—</option>${opts}</select>
+                    <label style="font-size:0.7rem;">Double — joueur 2</label>
+                    <select id="compo-d2-${nation}"><option value="">—</option>${opts}</select>
+                    <button class="cta cta-primary" id="compo-btn-${nation}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider la composition</button>
+                </div>
+            `;
+        }
+
+        function formulaireStyle() {
+            const options = Object.keys(LABELS_STYLE).map(function (s) { return `<option value="${s}">${LABELS_STYLE[s]}</option>`; }).join('');
+            return `
+                <div class="form-group" style="margin-top:16px;">
+                    <label>Ton style pour cette manche (simple + double si tu joues le double)</label>
+                    <select id="style-select">${options}</select>
+                    <button class="cta cta-primary" id="style-btn" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider le style</button>
+                </div>
+            `;
+        }
+
+        function carteRubber(r) {
+            const label = r.type === 'double' ? 'Double' : 'Simple ' + r.numero;
+            return `<div class="stat-row"><span class="stat-label">${label}</span><span class="stat-value">${r.nation_vainqueur} — ${r.score || ''}</span></div>`;
+        }
+
+        async function chargerDetail() {
+            document.getElementById('liste-container').style.display = 'none';
+            document.getElementById('detail-container').style.display = 'block';
+            document.getElementById('retour-liste-lien').href = 'coupe.html?playerId=' + playerId;
+
+            const response = await fetch('/api/coupe/tie/' + tieId);
+            const data = await response.json();
+            const container = document.getElementById('detail-rencontre');
+
+            if (!response.ok) {
+                container.innerHTML = '<p class="match-hint">' + (data.error || 'Rencontre introuvable.') + '</p>';
+                return;
+            }
+
+            const tie = data.tie;
+            const estCapitaineDomicile = Number(data.capitaineDomicile) === Number(playerId);
+            const estCapitaineExterieur = Number(data.capitaineExterieur) === Number(playerId);
+            const jeParticipe = Number(data.capitaineDomicile) === Number(playerId) || Number(data.capitaineExterieur) === Number(playerId)
+                || data.joueursDomicile.some(function (j) { return j.estReel && Number(j.id) === Number(playerId); })
+                || data.joueursExterieur.some(function (j) { return j.estReel && Number(j.id) === Number(playerId); });
+
+            const divisionTxt = data.nbDivisions > 1 ? ` · Division ${tie.division}` : '';
+            let html = `
+                <div class="stats-header">${tie.nation_domicile} vs ${tie.nation_exterieur}</div>
+                <p class="match-hint" style="text-align:left; padding:0;">${tie.manche || ''}${divisionTxt} · Semaine ${tie.semaine} · Surface : ${tie.surface ? LABELS_SURFACE[tie.surface] : 'pas encore choisie'}</p>
+            `;
+
+            if (tie.statut === 'termine') {
+                html += `
+                    <div class="tournoi-card" style="margin-top:16px;">
+                        <div class="tournoi-card-name">${tie.nation_vainqueur} qualifié — ${tie.victoires_domicile} à ${tie.victoires_exterieur}</div>
+                        ${data.rubbers.map(carteRubber).join('')}
+                    </div>
+                `;
+            } else {
+                if (data.etape === 'surface' && estCapitaineDomicile) html += formulaireSurface(tie);
+                if (data.etape === 'composition' && estCapitaineDomicile) html += formulaireComposition(tie, tie.nation_domicile, data.joueursDomicile);
+                if (data.etape === 'composition' && estCapitaineExterieur) html += formulaireComposition(tie, tie.nation_exterieur, data.joueursExterieur);
+                if (data.etape === 'styles' && jeParticipe) html += formulaireStyle();
+                if (data.etape === 'matchs' || data.rubbers.length > 0) {
+                    html += `
+                        <div class="tournoi-card" style="margin-top:16px;">
+                            <div class="tournoi-card-name">Rencontre en cours — ${data.rubbers.length} / 5 rencontre${data.rubbers.length > 1 ? 's' : ''} jouée${data.rubbers.length > 1 ? 's' : ''}</div>
+                            ${data.rubbers.map(carteRubber).join('') || '<p class="match-hint" style="text-align:left; padding:8px 0 0;">Première rencontre pas encore jouée.</p>'}
+                        </div>
+                    `;
+                } else if (!data.etape) {
+                    html += '<p class="match-hint" style="margin-top:16px;">Rien à faire cette semaine pour cette rencontre.</p>';
+                }
+            }
+
+            container.innerHTML = html;
+
+            const surfaceBtn = document.getElementById('surface-btn');
+            if (surfaceBtn) surfaceBtn.addEventListener('click', async function () {
+                const surface = document.getElementById('surface-select').value;
+                const r = await fetch('/api/coupe/surface', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tieId, capitainePlayerId: playerId, surface })
+                });
+                const d = await r.json();
+                if (!r.ok) { alert(d.error); return; }
+                chargerDetail();
+            });
+
+            [tie.nation_domicile, tie.nation_exterieur].forEach(function (nation) {
+                const btn = document.getElementById('compo-btn-' + nation);
+                if (!btn) return;
+                btn.addEventListener('click', async function () {
+                    function lireSelect(id) {
+                        const val = document.getElementById(id).value;
+                        if (!val) return null;
+                        const [type, id2] = val.split('-');
+                        return { estReel: type === 'reel', id: Number(id2) };
+                    }
+                    const joueurA = lireSelect('compo-a-' + nation);
+                    const joueurB = lireSelect('compo-b-' + nation);
+                    const doubleJ1 = lireSelect('compo-d1-' + nation);
+                    const doubleJ2 = lireSelect('compo-d2-' + nation);
+                    if (!joueurA || !joueurB || !doubleJ1 || !doubleJ2) { alert('Choisis les 4 postes (simple 1, simple 2, double 1, double 2).'); return; }
+                    const r = await fetch('/api/coupe/composition', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tieId, capitainePlayerId: playerId, nation, joueurA, joueurB, doubleJ1, doubleJ2 })
+                    });
+                    const d = await r.json();
+                    if (!r.ok) { alert(d.error); return; }
+                    chargerDetail();
+                });
+            });
+
+            const styleBtn = document.getElementById('style-btn');
+            if (styleBtn) styleBtn.addEventListener('click', async function () {
+                const style = document.getElementById('style-select').value;
+                const r = await fetch('/api/coupe/style', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ tieId, playerId, style })
+                });
+                const d = await r.json();
+                if (!r.ok) { alert(d.error); return; }
+                chargerDetail();
+            });
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin();
+        if (tieId) { chargerDetail(); } else { chargerListe(); }
+    </script>
+</body>
+</html>

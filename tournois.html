@@ -1,0 +1,432 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tournois — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title" id="page-title">Tournois</h1>
+            <div style="text-align:center;">
+                <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
+            </div>
+
+            <div class="tabs-nav" id="tabs-nav"></div>
+
+            <div class="stats-header">Tournois de la semaine</div>
+            <div class="tournoi-list" id="semaine-tournois-list"></div>
+
+            <div class="stats-header">Tournois de l'année — inscriptions</div>
+            <div id="calendrier-container"></div>
+
+            <div class="stats-header">Tournois passés</div>
+            <div class="tournoi-list" id="tournois-passes-list"></div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        let typeCourant = 'joueur';
+        let joueurData = null;
+        let joueuseData = null;
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        let semaineActuelleCourante = null;
+
+        const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+
+        function labelCategorie(circuit, categorie) {
+            if (categorie === 'slam') return 'Grand Chelem';
+            if (categorie === 'finals') return 'Masters (fin de saison)';
+            return circuit + ' ' + categorie;
+        }
+
+        function labelSurface(t) {
+            return LABELS_SURFACE[t.surface] + (t.indoor ? ' (intérieur)' : '');
+        }
+
+        function formaterNomComplet(nomComplet) {
+            if (!nomComplet) return nomComplet;
+            const i = nomComplet.lastIndexOf(' ');
+            if (i === -1) return nomComplet;
+            return nomComplet.slice(0, i) + ' ' + nomComplet.slice(i + 1).toUpperCase();
+        }
+
+        function lienFiche(calendrierId, semaine, playerId) {
+            return 'tournoi-detail.html?calendrierId=' + calendrierId + '&semaine=' + semaine + '&playerId=' + playerId;
+        }
+
+        function libellePhase(phase) {
+            if (phase.type === 'presaison') return 'Pré-saison (Saison ' + phase.numeroSaison + ')';
+            if (phase.type === 's0') return 'Semaine 0 (Saison ' + phase.numeroSaison + ')';
+            return 'Semaine ' + phase.positionSemaine + ' (Saison ' + phase.numeroSaison + ')';
+        }
+
+        async function chargerSemaine() {
+            const response = await fetch('/api/semaine');
+            const data = await response.json();
+            if (response.ok) {
+                semaineActuelleCourante = data.semaine_actuelle;
+                document.getElementById('semaine-badge').textContent = 'Semaine actuelle : ' + libellePhase(data.phase);
+            }
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        function traduireStatutTournoi(statut) {
+            return statut === 'termine' ? 'Terminé' : 'À venir';
+        }
+
+        async function desinscrire(playerId, tournoiId, bouton) {
+            bouton.disabled = true;
+            bouton.textContent = 'Désinscription...';
+
+            const response = await fetch('/api/tournois/desinscription', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId, playerId, tournoiId })
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.error);
+                bouton.disabled = false;
+                bouton.textContent = 'Se désinscrire';
+                return;
+            }
+
+            chargerJoueurCourant();
+        }
+
+        async function chargerTournoisSemaine(player, circuitAffiche) {
+            const response = await fetch('/api/tournois/mes/' + userId);
+            const data = await response.json();
+            const liste = document.getElementById('semaine-tournois-list');
+            liste.innerHTML = '';
+
+            if (!response.ok) {
+                liste.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger tes tournois.') + '</div>';
+                return;
+            }
+
+            const tournoisSemaine = data.tournois.filter(function (t) {
+                return t.circuit === circuitAffiche && t.semaine === semaineActuelleCourante;
+            });
+
+            if (tournoisSemaine.length === 0) {
+                liste.innerHTML = '<div class="match-hint">Aucun tournoi ' + circuitAffiche + ' cette semaine.</div>';
+                return;
+            }
+
+            tournoisSemaine.forEach(function (t) {
+                const carte = document.createElement('div');
+                carte.className = 'tournoi-card tournoi-card-' + t.surface;
+                carte.innerHTML = `
+                    <div class="tournoi-card-head">
+                        <div>
+                            <a class="tournoi-card-name" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>
+                            <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Semaine ${t.positionSemaine}</div>
+                        </div>
+                        <div class="tournoi-status-badge tournoi-status-${t.statut}">${traduireStatutTournoi(t.statut)}</div>
+                    </div>
+                    ${t.statut === 'termine' ? `<div class="tournoi-resultat">Éliminé(e) : ${t.tour_elimine_joueur || '-'} · ${t.points_gagnes_joueur || 0} points</div>` : ''}
+                `;
+                liste.appendChild(carte);
+            });
+        }
+
+        async function chargerTournoisPasses(player, circuitAffiche) {
+            const response = await fetch('/api/tournois/passes/' + player.id + '?userId=' + userId);
+            const data = await response.json();
+            const liste = document.getElementById('tournois-passes-list');
+            liste.innerHTML = '';
+
+            if (!response.ok) {
+                liste.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger les tournois passés.') + '</div>';
+                return;
+            }
+
+            if (data.tournois.length === 0) {
+                liste.innerHTML = '<div class="match-hint">Aucun tournoi ' + circuitAffiche + ' joué pour le moment cette saison.</div>';
+                return;
+            }
+
+            const nomJoueur = player.prenom + ' ' + player.nom;
+
+            data.tournois.forEach(function (t) {
+                const carte = document.createElement('div');
+                carte.className = 'tournoi-card tournoi-card-' + t.surface;
+
+                let resultatHtml;
+                if (t.participe) {
+                    const cestToi = t.nomVainqueur === nomJoueur;
+                    resultatHtml = `Vainqueur : ${cestToi ? 'Toi !' : (formaterNomComplet(t.nomVainqueur) || '-')} · Ton résultat : ${t.tourElimineJoueur || '-'} (${t.pointsGagnesJoueur || 0} points)`;
+                } else {
+                    resultatHtml = 'Non disputé';
+                }
+
+                carte.innerHTML = `
+                    <div class="tournoi-card-head">
+                        <div>
+                            <a class="tournoi-card-name" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>
+                            <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Semaine ${t.positionSemaine}</div>
+                        </div>
+                    </div>
+                    <div class="tournoi-resultat">${resultatHtml}</div>
+                `;
+                liste.appendChild(carte);
+            });
+        }
+
+        async function inscrire(playerId, calendrierId, semaine, bouton) {
+            bouton.disabled = true;
+            bouton.textContent = 'Inscription...';
+
+            const response = await fetch('/api/tournois/inscription', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId, playerId, calendrierId, semaine })
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.error);
+                bouton.disabled = false;
+                bouton.textContent = 'S\'inscrire';
+                return;
+            }
+
+            chargerJoueurCourant();
+        }
+
+        async function basculerFavori(playerId, calendrierId, semaine, bouton) {
+            bouton.disabled = true;
+
+            const response = await fetch('/api/tournois/favori', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId, playerId, calendrierId, semaine })
+            });
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.error);
+                bouton.disabled = false;
+                return;
+            }
+
+            chargerJoueurCourant();
+        }
+
+        async function chargerCalendrierJoueur(player, container) {
+            const response = await fetch('/api/tournois/calendrier/' + player.id + '?userId=' + userId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                container.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger le calendrier.') + '</div>';
+                return;
+            }
+
+            if (data.tournois.length === 0) {
+                container.innerHTML = '<div class="match-hint">Aucun tournoi éligible cette année.</div>';
+                return;
+            }
+
+            // Vide le contenu du tour precedent (sinon en changeant d'onglet joueur/
+            // joueuse, le nouveau calendrier vient s'ajouter au lieu de remplacer l'ancien).
+            container.innerHTML = '';
+
+            const parSemaine = {};
+            data.tournois.forEach(function (t) {
+                if (!parSemaine[t.semaine]) parSemaine[t.semaine] = [];
+                parSemaine[t.semaine].push(t);
+            });
+
+            Object.keys(parSemaine).sort(function (a, b) { return a - b; }).forEach(function (semaine) {
+                const enTete = document.createElement('div');
+                enTete.className = 'tournoi-semaine-header';
+                enTete.textContent = 'Semaine ' + parSemaine[semaine][0].positionSemaine;
+                container.appendChild(enTete);
+
+                const grille = document.createElement('div');
+                grille.className = 'tournoi-grid';
+
+                parSemaine[semaine].forEach(function (t) {
+                    const carte = document.createElement('div');
+                    carte.className = 'tournoi-card tournoi-card-' + t.surface;
+
+                    const nomClasse = t.circuit === 'ATP' ? 'tournoi-name-atp' : 'tournoi-name-wta';
+
+                    const peutEncoreInscrire = t.ouvert && !t.inscriptionFermee;
+
+                    let actionHtml;
+                    if (t.categorie === 'finals') {
+                        actionHtml = `<div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Qualification automatique — Top 8 Race</div>`;
+                    } else if (t.inscrit) {
+                        actionHtml = `<button class="cta cta-secondary tournoi-desinscription-btn" style="padding:8px 14px; font-size:0.75rem;">Se désinscrire</button>`;
+                    } else if (peutEncoreInscrire) {
+                        actionHtml = `<button class="cta cta-primary tournoi-inscription-btn" style="padding:8px 14px; font-size:0.75rem;">S'inscrire</button>`;
+                    } else if (t.ouvert) {
+                        actionHtml = `<div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Tableau déjà tiré</div>`;
+                    } else {
+                        actionHtml = `<button class="tournoi-coeur-btn ${t.favori ? 'active' : ''}" title="Programmer l'inscription dès l'ouverture">${t.favori ? '♥' : '♡'}</button>`;
+                    }
+
+                    carte.innerHTML = `
+                        <a class="tournoi-card-name ${nomClasse}" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>
+                        <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Tableau de ${t.taille_tableau}</div>
+                        ${actionHtml}
+                    `;
+
+                    if (t.categorie === 'finals') {
+                        // Pas de bouton pour les Masters/Finals (qualification automatique
+                        // Top 8 Race) - actionHtml n'a rendu qu'un texte informatif, rien a
+                        // ecouter.
+                    } else if (t.inscrit) {
+                        carte.querySelector('.tournoi-desinscription-btn').addEventListener('click', function () {
+                            desinscrire(player.id, t.tournoiId, this);
+                        });
+                    } else if (peutEncoreInscrire) {
+                        carte.querySelector('.tournoi-inscription-btn').addEventListener('click', function () {
+                            inscrire(player.id, t.id, t.semaine, this);
+                        });
+                    } else if (!t.ouvert) {
+                        carte.querySelector('.tournoi-coeur-btn').addEventListener('click', function () {
+                            basculerFavori(player.id, t.id, t.semaine, this);
+                        });
+                    }
+
+                    grille.appendChild(carte);
+                });
+
+                container.appendChild(grille);
+            });
+        }
+
+        async function chargerJoueurCourant() {
+            const player = typeCourant === 'joueur' ? joueurData : joueuseData;
+            const circuitAffiche = typeCourant === 'joueur' ? 'ATP' : 'WTA';
+
+            document.getElementById('page-title').textContent = 'Tournois ' + circuitAffiche;
+            document.title = 'Tournois ' + circuitAffiche + ' — Tennis Web Manager';
+
+            const semaineListe = document.getElementById('semaine-tournois-list');
+            const passesListe = document.getElementById('tournois-passes-list');
+            const container = document.getElementById('calendrier-container');
+
+            if (!player) {
+                semaineListe.innerHTML = '';
+                passesListe.innerHTML = '';
+                container.innerHTML = '<div class="match-hint">Pas encore de personnage sur ce circuit — <a href="creation-joueurs.html">créer mes personnages</a>.</div>';
+                return;
+            }
+            if (player.statut !== 'valide') {
+                semaineListe.innerHTML = '';
+                passesListe.innerHTML = '';
+                const texteValidation = typeCourant === 'joueur'
+                    ? 'Ce joueur doit d\'abord être validé par l\'administrateur.'
+                    : 'Cette joueuse doit d\'abord être validée par l\'administrateur.';
+                container.innerHTML = '<div class="match-hint">' + texteValidation + '</div>';
+                return;
+            }
+
+            await chargerTournoisSemaine(player, circuitAffiche);
+            await chargerCalendrierJoueur(player, container);
+            await chargerTournoisPasses(player, circuitAffiche);
+        }
+
+        async function chargerOnglets() {
+            const response = await fetch('/api/joueurs/' + userId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.error || 'Impossible de charger tes joueurs.');
+                return;
+            }
+
+            joueurData = data.players.find(function (p) { return p.type === 'joueur'; }) || null;
+            joueuseData = data.players.find(function (p) { return p.type === 'joueuse'; }) || null;
+            typeCourant = joueurData ? 'joueur' : 'joueuse';
+
+            const tabsNav = document.getElementById('tabs-nav');
+            tabsNav.innerHTML = `
+                <button class="tab-btn${typeCourant === 'joueur' ? ' active' : ''}" data-type="joueur">${joueurData ? formaterNom(joueurData.prenom, joueurData.nom) : 'Créer mon joueur'}</button>
+                <button class="tab-btn${typeCourant === 'joueuse' ? ' active' : ''}" data-type="joueuse">${joueuseData ? formaterNom(joueuseData.prenom, joueuseData.nom) : 'Créer ma joueuse'}</button>
+            `;
+            tabsNav.querySelectorAll('.tab-btn').forEach(function (bouton) {
+                bouton.addEventListener('click', function () {
+                    tabsNav.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                    bouton.classList.add('active');
+                    typeCourant = bouton.dataset.type;
+                    chargerJoueurCourant();
+                });
+            });
+
+            await chargerJoueurCourant();
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        (async function init() {
+            await chargerSemaine();
+            verifierAdmin();
+            chargerOnglets();
+        })();
+    </script>
+</body>
+</html>

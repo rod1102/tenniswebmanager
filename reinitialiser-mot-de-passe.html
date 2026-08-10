@@ -1,0 +1,70 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Réinitialiser le mot de passe — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="auth-page">
+        <div class="auth-card">
+            <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+            <h1 class="auth-title">Nouveau mot de passe</h1>
+
+            <form id="reset-form">
+                <div class="form-group">
+                    <label for="password">Nouveau mot de passe</label>
+                    <input type="password" id="password" name="password" placeholder="Au moins 6 caractères" required minlength="6">
+                </div>
+                <div class="form-group">
+                    <label for="password-confirm">Confirme le mot de passe</label>
+                    <input type="password" id="password-confirm" name="password-confirm" placeholder="Retape-le" required minlength="6">
+                </div>
+                <button type="submit" class="cta cta-primary auth-submit">Réinitialiser le mot de passe</button>
+            </form>
+
+            <p class="auth-switch"><a href="connexion.html">Retour à la connexion</a></p>
+        </div>
+    </div>
+
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const token = params.get('token');
+
+        if (!token) {
+            document.getElementById('reset-form').innerHTML = '<div class="match-hint">Lien invalide : aucun jeton fourni.</div>';
+        }
+
+        document.getElementById('reset-form').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const password = document.getElementById('password').value;
+            const passwordConfirm = document.getElementById('password-confirm').value;
+
+            if (password !== passwordConfirm) {
+                alert('Les 2 mots de passe ne correspondent pas.');
+                return;
+            }
+
+            const response = await fetch('/api/reinitialiser-mot-de-passe', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token, password })
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.error);
+                return;
+            }
+
+            alert('Mot de passe réinitialisé. Tu peux te connecter.');
+            window.location.href = 'connexion.html';
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,5886 @@
+require('dotenv').config();
+const express = require('express');
+const bcrypt = require('bcrypt');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const multer = require('multer');
+const { Resend } = require('resend');
+const db = require('./database');
+const { BAREME_POINTS, CALENDRIER_TOURNOIS, SEMAINES_COUPES_EQUIPE, genererJoueurLambda, drapeau, phaseDeSemaine, LONGUEUR_SAISON } = require('./calendrier-tournois');
+
+// Photos d'articles de presse : dossier servi statiquement (voir express.static
+// plus bas), cree au demarrage s'il n'existe pas encore (absent du depot).
+const DOSSIER_UPLOADS_PRESSE = path.join(__dirname, 'uploads', 'presse');
+fs.mkdirSync(DOSSIER_UPLOADS_PRESSE, { recursive: true });
+
+const uploadPresse = multer({
+    storage: multer.diskStorage({
+        destination: DOSSIER_UPLOADS_PRESSE,
+        filename: function (req, file, cb) {
+            const extension = path.extname(file.originalname).toLowerCase();
+            cb(null, Date.now() + '-' + crypto.randomBytes(6).toString('hex') + extension);
+        }
+    }),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: function (req, file, cb) {
+        const autorises = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+        if (!autorises.includes(file.mimetype)) {
+            return cb(new Error('Format d\'image non supporté (jpg, png, webp ou gif uniquement).'));
+        }
+        cb(null, true);
+    }
+});
+
+// Tant qu'aucune cle Resend n'est configuree (.env), le reste du jeu doit
+// continuer a fonctionner normalement - seul l'envoi du mail de reinitialisation
+// est indisponible (le constructeur Resend() plante sinon des le demarrage).
+const resend = process.env.RESEND_API_KEY ? new Resend(process.env.RESEND_API_KEY) : null;
+const SITE_URL = process.env.SITE_URL || 'http://localhost:3000';
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(express.static(__dirname));
+app.use(express.json());
+
+const BUDGET_POINTS = 120;
+const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
+const DISPOSITIONS = ['adversite', 'coupeur_de_tetes', 'dernier_carre', 'premiers_tours', 'sang_froid', 'indoor', 'rivalite'];
+const STYLES_JEU = ['sprinter', 'prudence', 'en_avant', 'marathonien', 'mental_acier', 'reperage', 'aucun'];
+const BUDGET_DISPOSITIONS = 12;
+const MAX_PAR_DISPOSITION = 5;
+const SURFACES = ['dur', 'terre', 'herbe'];
+const ACTIONS_VALIDES = ['repos', 'generique', 'surface_dur', 'surface_terre', 'surface_herbe', 'coaching_mental'];
+
+function formeMax(usure) {
+    return Math.min(100, (100 - usure / 10) + 3);
+}
+
+// Degradation de la condition (En forme -> Fatigue -> Diminue -> Blesse), regle
+// exacte du PDF : par jeu joue, probabilite en pour mille = 10 (si plus d'energie)
+// + (80 - forme) si forme < 80. Si le tirage reussit et forme < 60, saut direct a
+// "Blesse" quel que soit l'etat courant. forme/points_energie doivent etre les
+// valeurs AVANT le match (constantes pendant tout le match), pas les valeurs deja
+// mises a jour post-match.
+const CONDITION_ORDRE = ['en_forme', 'fatigue', 'diminue', 'blesse'];
+
+function degraderCondition(conditionActuelle, forme, pointsEnergie, totalJeux) {
+    let condition = conditionActuelle || 'en_forme';
+    const chancePourMille = (pointsEnergie <= 0 ? 10 : 0) + (forme < 80 ? (80 - forme) : 0);
+    if (chancePourMille <= 0) return condition;
+
+    for (let i = 0; i < totalJeux; i++) {
+        if (Math.random() * 1000 < chancePourMille) {
+            if (forme < 60) {
+                condition = 'blesse';
+            } else {
+                const index = CONDITION_ORDRE.indexOf(condition);
+                condition = CONDITION_ORDRE[Math.min(index + 1, CONDITION_ORDRE.length - 1)];
+            }
+        }
+    }
+    return condition;
+}
+
+// "Le kine est intervenu pendant CE match" = la condition s'est reellement degradee
+// entre le debut et la fin de ce match precis (pas juste "il etait deja diminue en
+// arrivant"). Un forfait blessure n'appelle jamais degraderCondition (aucune
+// simulation n'a lieu), donc n'est jamais marque comme une degradation "pendant" le match.
+function conditionSestDegradee(avant, apres) {
+    return CONDITION_ORDRE.indexOf(apres) > CONDITION_ORDRE.indexOf(avant || 'en_forme');
+}
+
+// Anti-doublon de comptes : 1 seul compte par adresse IP, sans exception pour
+// localhost (choix explicite de l'utilisateur, plus strict que "1 personne = 1
+// compte" habituel puisque ca s'applique aussi en dev/local).
+const LIMITE_COMPTES_PAR_IP = 1;
+
+app.post('/api/inscription', (req, res) => {
+    try {
+        const { email, password, pseudo } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email et mot de passe requis.' });
+        }
+        const pseudoNettoye = (pseudo || '').trim();
+        if (!pseudoNettoye) {
+            return res.status(400).json({ error: 'Le pseudo de coach est obligatoire.' });
+        }
+        if (password.length < 8) {
+            return res.status(400).json({ error: 'Le mot de passe doit faire au moins 8 caracteres.' });
+        }
+
+        const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+        if (existing) {
+            return res.status(409).json({ error: 'Un compte existe deja avec cet email.' });
+        }
+
+        const ip = req.ip;
+        const nbComptesIp = db.prepare('SELECT COUNT(*) AS n FROM users WHERE ip_inscription = ?').get(ip).n;
+        if (nbComptesIp >= LIMITE_COMPTES_PAR_IP) {
+            return res.status(409).json({ error: 'Un compte existe deja depuis cette adresse. Un seul compte par personne.' });
+        }
+
+        const passwordHash = bcrypt.hashSync(password, 10);
+        const result = db.prepare('INSERT INTO users (email, password_hash, ip_inscription, pseudo) VALUES (?, ?, ?, ?)').run(email, passwordHash, ip, pseudoNettoye);
+
+        res.json({ success: true, userId: result.lastInsertRowid });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+function competencesValides(joueur) {
+    let total = 0;
+    for (const cle of COMPETENCES) {
+        const valeur = Number(joueur[cle]);
+        if (!Number.isFinite(valeur) || valeur < 0 || valeur > 100) {
+            return false;
+        }
+        total += valeur;
+    }
+    return total === BUDGET_POINTS;
+}
+
+function dispositionsValides(joueur) {
+    let total = 0;
+    for (const cle of DISPOSITIONS) {
+        const valeur = Number(joueur['disp_' + cle]);
+        if (!Number.isFinite(valeur) || valeur < 0 || valeur > MAX_PAR_DISPOSITION) {
+            return false;
+        }
+        total += valeur;
+    }
+    return total === BUDGET_DISPOSITIONS;
+}
+
+function calculerNiveau(joueur) {
+    const total = COMPETENCES.reduce(function (somme, cle) { return somme + Number(joueur[cle]); }, 0);
+    return Math.round((total / COMPETENCES.length) * 10) / 10;
+}
+
+// Un joueur avec une perte de disposition d'intersaison non resolue doit d'abord
+// passer par /api/repartir-dispositions-perte avant toute autre action le concernant.
+function aDesPertesDispositionsEnAttente(playerId) {
+    const player = db.prepare('SELECT points_dispositions_a_retirer FROM players WHERE id = ?').get(playerId);
+    return !!player && player.points_dispositions_a_retirer > 0;
+}
+
+app.post('/api/joueurs', (req, res) => {
+    try {
+        const { userId, joueur, joueuse } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({ error: 'Utilisateur non identifie.' });
+        }
+        if (!joueur || !joueuse) {
+            return res.status(400).json({ error: 'Il manque les infos d un des deux personnages.' });
+        }
+        if (!competencesValides(joueur)) {
+            return res.status(400).json({ error: 'Le total des competences du joueur doit faire exactement ' + BUDGET_POINTS + ' points.' });
+        }
+        if (!competencesValides(joueuse)) {
+            return res.status(400).json({ error: 'Le total des competences de la joueuse doit faire exactement ' + BUDGET_POINTS + ' points.' });
+        }
+        if (!dispositionsValides(joueur)) {
+            return res.status(400).json({ error: 'Le total des dispositions du joueur doit faire exactement ' + BUDGET_DISPOSITIONS + ' points.' });
+        }
+        if (!dispositionsValides(joueuse)) {
+            return res.status(400).json({ error: 'Le total des dispositions de la joueuse doit faire exactement ' + BUDGET_DISPOSITIONS + ' points.' });
+        }
+
+        const insert = db.prepare(`
+            INSERT INTO players (
+                user_id, type, prenom, nom, age, taille, nationalite, main_forte, statut,
+                service, retour, coup_droit_revers, effet, volee, deplacement, puissance, resistance,
+                niveau, points_energie, points_experience,
+                surface_dur_automatismes, surface_terre_automatismes, surface_herbe_automatismes,
+                disposition_adversite, disposition_coupeur_de_tetes, disposition_dernier_carre,
+                disposition_premiers_tours, disposition_sang_froid, disposition_indoor, disposition_rivalite
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?, ?, ?, ?, ?, ?, ?, ?, ?, 50, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        insert.run(
+            userId, 'joueur', joueur.prenom, joueur.nom, joueur.age, joueur.taille, joueur.nationalite, joueur.main,
+            joueur.service, joueur.retour, joueur.coup_droit_revers, joueur.effet, joueur.volee, joueur.deplacement, joueur.puissance, joueur.resistance,
+            calculerNiveau(joueur),
+            joueur.disp_adversite, joueur.disp_coupeur_de_tetes, joueur.disp_dernier_carre,
+            joueur.disp_premiers_tours, joueur.disp_sang_froid, joueur.disp_indoor, joueur.disp_rivalite
+        );
+
+        insert.run(
+            userId, 'joueuse', joueuse.prenom, joueuse.nom, joueuse.age, joueuse.taille, joueuse.nationalite, joueuse.main,
+            joueuse.service, joueuse.retour, joueuse.coup_droit_revers, joueuse.effet, joueuse.volee, joueuse.deplacement, joueuse.puissance, joueuse.resistance,
+            calculerNiveau(joueuse),
+            joueuse.disp_adversite, joueuse.disp_coupeur_de_tetes, joueuse.disp_dernier_carre,
+            joueuse.disp_premiers_tours, joueuse.disp_sang_froid, joueuse.disp_indoor, joueuse.disp_rivalite
+        );
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/connexion', (req, res) => {
+    try {
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({ error: 'Email et mot de passe requis.' });
+        }
+
+        const user = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(email);
+
+        if (!user) {
+            return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
+        }
+
+        const passwordMatches = bcrypt.compareSync(password, user.password_hash);
+        if (!passwordMatches) {
+            return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
+        }
+
+        res.json({ success: true, userId: user.id });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Duree de validite d'un jeton de reinitialisation de mot de passe.
+const EXPIRATION_RESET_MOT_DE_PASSE_MS = 60 * 60 * 1000; // 1 heure
+
+app.post('/api/mot-de-passe-oublie', (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email) {
+            return res.status(400).json({ error: 'Adresse e-mail requise.' });
+        }
+
+        const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
+
+        // Reponse identique que le compte existe ou non, pour ne jamais reveler
+        // si une adresse e-mail est inscrite (enumeration de comptes).
+        if (user) {
+            const token = crypto.randomBytes(32).toString('hex');
+            const expire = new Date(Date.now() + EXPIRATION_RESET_MOT_DE_PASSE_MS).toISOString();
+            db.prepare('UPDATE users SET reset_token = ?, reset_token_expire = ? WHERE id = ?').run(token, expire, user.id);
+
+            const lienReset = SITE_URL + '/reinitialiser-mot-de-passe.html?token=' + token;
+            if (resend) {
+                resend.emails.send({
+                    // A remplacer par une adresse sur un domaine verifie dans Resend
+                    // (ex. noreply@tondomaine.fr) une fois le domaine ajoute - en
+                    // attendant, onboarding@resend.dev ne delivre reellement qu'aux
+                    // adresses de test Resend, pas aux vrais coachs.
+                    from: 'Tennis Web Manager <onboarding@resend.dev>',
+                    to: [user.email],
+                    subject: 'Réinitialisation de ton mot de passe',
+                    html: `
+                        <p>Tu as demandé la réinitialisation de ton mot de passe sur Tennis Web Manager.</p>
+                        <p><a href="${lienReset}">Clique ici pour choisir un nouveau mot de passe</a> (lien valable 1 heure).</p>
+                        <p>Si tu n'es pas à l'origine de cette demande, ignore simplement cet e-mail.</p>
+                    `
+                }).catch(function (err) { console.error('Erreur envoi e-mail reset :', err); });
+            } else {
+                console.log('[RESEND_API_KEY absente] Lien de reinitialisation pour ' + user.email + ' : ' + lienReset);
+            }
+        }
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/reinitialiser-mot-de-passe', (req, res) => {
+    try {
+        const { token, password } = req.body;
+        if (!token || !password) {
+            return res.status(400).json({ error: 'Jeton et nouveau mot de passe requis.' });
+        }
+        if (password.length < 6) {
+            return res.status(400).json({ error: 'Le mot de passe doit faire au moins 6 caractères.' });
+        }
+
+        const user = db.prepare('SELECT id, reset_token_expire FROM users WHERE reset_token = ?').get(token);
+        if (!user || new Date(user.reset_token_expire) < new Date()) {
+            return res.status(400).json({ error: 'Ce lien de réinitialisation est invalide ou a expiré.' });
+        }
+
+        const passwordHash = bcrypt.hashSync(password, 10);
+        db.prepare('UPDATE users SET password_hash = ?, reset_token = NULL, reset_token_expire = NULL WHERE id = ?').run(passwordHash, user.id);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/joueurs/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const players = db.prepare('SELECT * FROM players WHERE user_id = ?').all(userId);
+
+        players.forEach(function (player) {
+            SURFACES.forEach(function (surface) {
+                const niveauBase = niveauNormal(player, surface);
+                player['surface_' + surface + '_niveau'] = Math.round(niveauBase * 100) / 100;
+                player['surface_' + surface + '_niveau_mental'] = Math.round((niveauBase + player.mental_courant) * 100) / 100;
+
+                const niveauDoubleBase = niveauDouble(player, surface);
+                player['surface_' + surface + '_niveau_double'] = Math.round(niveauDoubleBase * 100) / 100;
+                player['surface_' + surface + '_niveau_mental_double'] = Math.round((niveauDoubleBase + player.mental_courant) * 100) / 100;
+            });
+            player.drapeau = drapeau(player.nationalite);
+        });
+
+        res.json({ success: true, players });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/utilisateur/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const user = db.prepare('SELECT id, email, role, est_redacteur FROM users WHERE id = ?').get(userId);
+
+        if (!user) {
+            return res.status(404).json({ error: 'Utilisateur introuvable.' });
+        }
+
+        res.json({ success: true, user });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+function estAdmin(adminId) {
+    const user = db.prepare('SELECT role FROM users WHERE id = ?').get(adminId);
+    return user && user.role === 'admin';
+}
+
+app.get('/api/admin/en-attente', (req, res) => {
+    try {
+        const { adminId } = req.query;
+
+        if (!estAdmin(adminId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+
+        const enAttente = db.prepare(`
+            SELECT players.*, users.email AS coach_email
+            FROM players
+            JOIN users ON users.id = players.user_id
+            WHERE players.statut = 'en_attente'
+        `).all();
+
+        res.json({ success: true, players: enAttente });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Repartition des points de disposition gagnes (intersaison ou Coaching mental) :
+// meme principe que /api/repartir-xp (pool consommable partiellement, le reste
+// attend), mais SANS plafond de 5/categorie - celui-ci ne s'applique qu'a la
+// creation du personnage (dispositionsValides).
+app.post('/api/repartir-dispositions-gain', (req, res) => {
+    try {
+        const { userId, playerId, repartition } = req.body;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        let total = 0;
+        for (const cle of DISPOSITIONS) {
+            const valeur = Number((repartition && repartition[cle]) || 0);
+            if (!Number.isFinite(valeur) || valeur < 0) {
+                return res.status(400).json({ error: 'Valeurs invalides.' });
+            }
+            total += valeur;
+        }
+        if (total > player.points_dispositions_a_gagner) {
+            return res.status(400).json({ error: 'Pas assez de points de disposition disponibles.' });
+        }
+
+        const maj = db.prepare(`
+            UPDATE players SET
+                disposition_adversite = ?, disposition_coupeur_de_tetes = ?, disposition_dernier_carre = ?,
+                disposition_premiers_tours = ?, disposition_sang_froid = ?, disposition_indoor = ?, disposition_rivalite = ?,
+                points_dispositions_a_gagner = ?
+            WHERE id = ?
+        `);
+        maj.run(
+            player.disposition_adversite + Number((repartition && repartition.adversite) || 0),
+            player.disposition_coupeur_de_tetes + Number((repartition && repartition.coupeur_de_tetes) || 0),
+            player.disposition_dernier_carre + Number((repartition && repartition.dernier_carre) || 0),
+            player.disposition_premiers_tours + Number((repartition && repartition.premiers_tours) || 0),
+            player.disposition_sang_froid + Number((repartition && repartition.sang_froid) || 0),
+            player.disposition_indoor + Number((repartition && repartition.indoor) || 0),
+            player.disposition_rivalite + Number((repartition && repartition.rivalite) || 0),
+            player.points_dispositions_a_gagner - total,
+            playerId
+        );
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Retrait obligatoire de points de disposition (perte d'intersaison) : contrairement
+// au gain, la resolution doit etre complete en un seul appel (total exact, pas de
+// reste en attente) puisqu'elle debloque un ecran obligatoire cote frontend.
+app.post('/api/repartir-dispositions-perte', (req, res) => {
+    try {
+        const { userId, playerId, repartition } = req.body;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        let total = 0;
+        for (const cle of DISPOSITIONS) {
+            const valeur = Number((repartition && repartition[cle]) || 0);
+            if (!Number.isFinite(valeur) || valeur < 0) {
+                return res.status(400).json({ error: 'Valeurs invalides.' });
+            }
+            if (player['disposition_' + cle] - valeur < 0) {
+                return res.status(400).json({ error: 'Impossible de descendre sous 0 en ' + cle + '.' });
+            }
+            total += valeur;
+        }
+        if (total !== player.points_dispositions_a_retirer) {
+            return res.status(400).json({ error: 'Le total doit correspondre exactement aux ' + player.points_dispositions_a_retirer + ' points a retirer.' });
+        }
+
+        const maj = db.prepare(`
+            UPDATE players SET
+                disposition_adversite = ?, disposition_coupeur_de_tetes = ?, disposition_dernier_carre = ?,
+                disposition_premiers_tours = ?, disposition_sang_froid = ?, disposition_indoor = ?, disposition_rivalite = ?,
+                points_dispositions_a_retirer = 0
+            WHERE id = ?
+        `);
+        maj.run(
+            player.disposition_adversite - Number((repartition && repartition.adversite) || 0),
+            player.disposition_coupeur_de_tetes - Number((repartition && repartition.coupeur_de_tetes) || 0),
+            player.disposition_dernier_carre - Number((repartition && repartition.dernier_carre) || 0),
+            player.disposition_premiers_tours - Number((repartition && repartition.premiers_tours) || 0),
+            player.disposition_sang_froid - Number((repartition && repartition.sang_froid) || 0),
+            player.disposition_indoor - Number((repartition && repartition.indoor) || 0),
+            player.disposition_rivalite - Number((repartition && repartition.rivalite) || 0),
+            playerId
+        );
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Deplacement d'1 point de disposition deja acquis (bonus "Coaching mental") : ne
+// consomme pas le pool de gain, un compteur separe (points_dispositions_a_deplacer).
+app.post('/api/deplacer-disposition', (req, res) => {
+    try {
+        const { userId, playerId, depuis, vers } = req.body;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        if (!DISPOSITIONS.includes(depuis) || !DISPOSITIONS.includes(vers) || depuis === vers) {
+            return res.status(400).json({ error: 'Categories invalides.' });
+        }
+        if (player.points_dispositions_a_deplacer <= 0) {
+            return res.status(400).json({ error: 'Aucun deplacement disponible.' });
+        }
+        if (player['disposition_' + depuis] <= 0) {
+            return res.status(400).json({ error: 'Cette categorie est deja a 0.' });
+        }
+
+        db.prepare(`
+            UPDATE players SET
+                disposition_${depuis} = disposition_${depuis} - 1,
+                disposition_${vers} = disposition_${vers} + 1,
+                points_dispositions_a_deplacer = points_dispositions_a_deplacer - 1
+            WHERE id = ?
+        `).run(playerId);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/admin/decision', (req, res) => {
+    try {
+        const { adminId, playerId, decision } = req.body;
+
+        if (!estAdmin(adminId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        if (decision !== 'valide' && decision !== 'refuse') {
+            return res.status(400).json({ error: 'Decision invalide.' });
+        }
+
+        db.prepare('UPDATE players SET statut = ? WHERE id = ?').run(decision, playerId);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Liste des coachs (tous les comptes non-admin) avec leur statut redacteur actuel,
+// pour l'ecran admin qui accorde/retire ce statut.
+app.get('/api/admin/redacteurs', (req, res) => {
+    try {
+        const { adminId } = req.query;
+        if (!estAdmin(adminId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+
+        const coachs = db.prepare("SELECT id, email, pseudo, est_redacteur FROM users WHERE role != 'admin' ORDER BY pseudo").all();
+        res.json({ success: true, coachs });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/admin/redacteur', (req, res) => {
+    try {
+        const { adminId, userId, estRedacteur } = req.body;
+        if (!estAdmin(adminId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+
+        db.prepare('UPDATE users SET est_redacteur = ? WHERE id = ?').run(estRedacteur ? 1 : 0, userId);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Decalage d'affichage du numero de saison (jeu_etat.saison_offset) : permet de
+// faire jouer une "saison 0" (bots uniquement, avant toute vraie partie) sans que
+// la vraie carriere d'un coach ne demarre visiblement a "Saison 2". N'affecte que
+// l'AFFICHAGE et l'indexation des paliers d'intersaison (variationDispositionsIntersaison)
+// - jamais les semaines absolues stockees en base ni les fenetres Live/Race, qui
+// continuent de raisonner sur phaseDeSemaine brut.
+function decalageSaison() {
+    const etat = db.prepare('SELECT saison_offset FROM jeu_etat WHERE id = 1').get();
+    return (etat && etat.saison_offset) || 0;
+}
+
+function phaseAffichee(semaine) {
+    const phase = phaseDeSemaine(semaine);
+    return Object.assign({}, phase, { numeroSaison: phase.numeroSaison - decalageSaison() });
+}
+
+// Position relative (1-52) d'une semaine absolue A L'INTERIEUR DE SA PROPRE SAISON
+// - a utiliser partout ou un evenement passe (tournoi joue, palmares, match) affiche
+// "Semaine X" a l'utilisateur : jamais le numero absolu brut, qui n'a de sens que
+// pour l'implementation (fenetres Live/Race, calcul de saison). Retourne null pour
+// une semaine de Pre-saison/Semaine 0 (pas de position de tournoi).
+function positionSemaineAffichee(semaine) {
+    const phase = phaseDeSemaine(semaine);
+    return phase.type === 'tournoi' ? phase.positionSemaine : null;
+}
+
+app.get('/api/semaine', (req, res) => {
+    try {
+        const etat = db.prepare('SELECT semaine_actuelle, saison_lancee FROM jeu_etat WHERE id = 1').get();
+        res.json({
+            success: true, semaine_actuelle: etat.semaine_actuelle, phase: phaseAffichee(etat.semaine_actuelle),
+            prochainAvancementAuto: prochaineEcheanceApres(new Date()).toISOString(),
+            saisonLancee: !!etat.saison_lancee
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/planification/:playerId', (req, res) => {
+    try {
+        const { playerId } = req.params;
+        const { userId } = req.query;
+
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const debut = etat.semaine_actuelle + 1;
+        const fin = debut + 4;
+
+        const ordres = db.prepare('SELECT semaine, action FROM plannings WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, debut, fin);
+
+        // Semaines ou le joueur est reellement inscrit a un tournoi : la planification
+        // (repos/entrainement) n'a pas sa place la, le tournoi occupe deja la semaine.
+        const tournois = db.prepare(`
+            SELECT tournois.semaine, tournois.nom
+            FROM tournois
+            JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
+            WHERE tournois.semaine BETWEEN ? AND ?
+              AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
+        `).all(debut, fin, playerId);
+
+        const phases = {};
+        for (let s = debut; s <= fin; s++) phases[s] = phaseAffichee(s);
+
+        res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournois, phases });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Tournoi qui occupe une semaine ingame donnee pour un joueur reel precis (couvre
+// aussi les tournois sur 2 semaines, ex. Grand Chelem : semaine de depart + la
+// suivante, via CALENDRIER_TOURNOIS.duree - tournois.semaine ne stocke que le
+// depart). Utilise pour "Semaine en cours/prochaine" (joueur.html) et pourrait
+// resservir ailleurs si besoin d'un aperçu similaire.
+function tournoiCouvrantSemaine(playerId, semaine) {
+    const lignes = db.prepare(`
+        SELECT t.*
+        FROM tournoi_joueurs tj
+        JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut != 'termine'
+    `).all(playerId);
+    for (const t of lignes) {
+        const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === t.calendrier_id; });
+        const duree = entree ? entree.duree : 1;
+        if (semaine >= t.semaine && semaine <= t.semaine + duree - 1) return t;
+    }
+    return null;
+}
+
+const LABELS_ACTION_COURTS = {
+    repos: 'Repos',
+    generique: 'Entraînement générique',
+    surface_dur: 'Entraînement surface Dur',
+    surface_terre: 'Entraînement surface Terre battue',
+    surface_herbe: 'Entraînement surface Herbe',
+    coaching_mental: 'Coaching mental'
+};
+
+app.get('/api/joueur/semaine-info/:playerId', (req, res) => {
+    try {
+        const { playerId } = req.params;
+        const { userId } = req.query;
+
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+
+        function infoPour(semaine) {
+            // Un tournoi sur 2 semaines peut, dans l'absolu, deborder sur une Pre-saison/
+            // Semaine 0 si son tour final tombe pile sur la derniere semaine de la saison -
+            // priorite au tournoi (le joueur reste engage) avant de retomber sur le libelle
+            // de phase neutre.
+            const tournoi = tournoiCouvrantSemaine(playerId, semaine);
+            if (tournoi) return { libelle: 'Tournoi : ' + tournoi.nom };
+
+            const phase = phaseDeSemaine(semaine);
+            if (phase.type === 'presaison') return { libelle: 'Pré-saison' };
+            if (phase.type === 's0') return { libelle: 'Semaine 0' };
+
+            const planning = db.prepare('SELECT action FROM plannings WHERE player_id = ? AND semaine = ?').get(playerId, semaine);
+            if (planning) return { libelle: LABELS_ACTION_COURTS[planning.action] || planning.action };
+
+            return { libelle: 'Pas encore défini' };
+        }
+
+        res.json({
+            success: true,
+            semaineActuelle: infoPour(semaineActuelle),
+            semaineProchaine: infoPour(semaineActuelle + 1)
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Journal hebdomadaire : seule trace persistante de "qu'est-ce qui etait prevu et
+// qu'est-ce qui a ete credite" pour un joueur, semaine par semaine (contrairement a
+// `plannings`, supprimee une fois consommee, et `points_experience`, remis a zero
+// chaque semaine). Sert a diagnostiquer un doute du type "j'avais prevu un
+// entrainement mais les points n'ont pas ete ajoutes".
+app.get('/api/journal/:playerId', (req, res) => {
+    try {
+        const { playerId } = req.params;
+        const { userId } = req.query;
+
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        const lignes = db.prepare(`
+            SELECT semaine, action_prevue, tournoi_nom, xp_credite, disposition_a_gagner_ajoutee,
+                   disposition_a_deplacer_ajoutee, forme_avant, forme_apres, horodatage
+            FROM journal_semaine_joueur
+            WHERE player_id = ?
+            ORDER BY semaine DESC
+            LIMIT 20
+        `).all(playerId);
+
+        const journal = lignes.map(function (l) {
+            let libelle;
+            if (l.action_prevue === 'tournoi') libelle = 'Tournoi : ' + l.tournoi_nom;
+            else if (l.action_prevue) libelle = LABELS_ACTION_COURTS[l.action_prevue] || l.action_prevue;
+            else {
+                const phase = phaseDeSemaine(l.semaine);
+                libelle = phase.type === 'presaison' ? 'Pré-saison' : (phase.type === 's0' ? 'Semaine 0' : 'Rien de planifié');
+            }
+            return Object.assign({}, l, { positionSemaine: positionSemaineAffichee(l.semaine), libelle });
+        });
+
+        res.json({ success: true, journal });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/planification', (req, res) => {
+    try {
+        const { userId, playerId, semaine, action } = req.body;
+
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        if (aDesPertesDispositionsEnAttente(playerId)) {
+            return res.status(400).json({ error: 'Il faut d abord repartir les points de disposition a retirer.' });
+        }
+        if (!ACTIONS_VALIDES.includes(action)) {
+            return res.status(400).json({ error: 'Action invalide.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const debut = etat.semaine_actuelle + 1;
+        const fin = debut + 4;
+        if (semaine < debut || semaine > fin) {
+            return res.status(400).json({ error: 'Cette semaine est en dehors de la fenetre de planification.' });
+        }
+        if (phaseDeSemaine(semaine).type !== 'tournoi') {
+            return res.status(400).json({ error: 'Aucune planification possible pendant la Pre-saison ou la Semaine 0.' });
+        }
+
+        const inscritCetteSemaine = db.prepare(`
+            SELECT tournois.id
+            FROM tournois
+            JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
+            WHERE tournois.semaine = ?
+              AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
+        `).get(semaine, playerId);
+        if (inscritCetteSemaine) {
+            return res.status(400).json({ error: 'Ce joueur est inscrit a un tournoi cette semaine-la, la planification ne s applique pas.' });
+        }
+
+        db.prepare(`
+            INSERT INTO plannings (player_id, semaine, action) VALUES (?, ?, ?)
+            ON CONFLICT(player_id, semaine) DO UPDATE SET action = excluded.action
+        `).run(playerId, semaine, action);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/repartir-xp', (req, res) => {
+    try {
+        const { userId, playerId, repartition } = req.body;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        if (aDesPertesDispositionsEnAttente(playerId)) {
+            return res.status(400).json({ error: 'Il faut d abord repartir les points de disposition a retirer.' });
+        }
+
+        let total = 0;
+        for (const cle of COMPETENCES) {
+            const valeur = Number((repartition && repartition[cle]) || 0);
+            if (!Number.isFinite(valeur) || valeur < 0) {
+                return res.status(400).json({ error: 'Valeurs invalides.' });
+            }
+            if (player[cle] + valeur > 100) {
+                return res.status(400).json({ error: 'Impossible de depasser 100 en ' + cle + '.' });
+            }
+            total += valeur;
+        }
+        if (total > player.points_experience) {
+            return res.status(400).json({ error: 'Pas assez de points d experience disponibles.' });
+        }
+
+        const nouvelles = {};
+        COMPETENCES.forEach(function (cle) {
+            nouvelles[cle] = player[cle] + Number((repartition && repartition[cle]) || 0);
+        });
+        const nouveauNiveau = COMPETENCES.reduce(function (s, c) { return s + nouvelles[c]; }, 0) / COMPETENCES.length;
+
+        db.prepare(`
+            UPDATE players SET
+                service = ?, retour = ?, coup_droit_revers = ?, effet = ?, volee = ?, deplacement = ?, puissance = ?, resistance = ?,
+                points_experience = ?, niveau = ?
+            WHERE id = ?
+        `).run(
+            nouvelles.service, nouvelles.retour, nouvelles.coup_droit_revers, nouvelles.effet,
+            nouvelles.volee, nouvelles.deplacement, nouvelles.puissance, nouvelles.resistance,
+            player.points_experience - total, Math.round(nouveauNiveau * 10) / 10,
+            playerId
+        );
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Variation du budget de dispositions a chaque intersaison (indexIntersaison=1 pour
+// la toute premiere) : gains les premieres annees pour laisser le temps de rattraper
+// les joueurs plus anciens, puis pertes, puis stabilisation a partir de la 10eme.
+function variationDispositionsIntersaison(indexIntersaison) {
+    if (indexIntersaison <= 3) return 3;
+    if (indexIntersaison <= 5) return 2;
+    if (indexIntersaison <= 7) return -2;
+    if (indexIntersaison <= 9) return -3;
+    return 0;
+}
+
+// Changement de saison (declenche une seule fois, a la transition S52 -> nouvelle
+// Pre-saison) : remise a zero de l'usure/automatismes/mental max/energie (choix
+// assume, divergent du PDF qui ne remet pas l'energie a zero), + la moulinette qui
+// rabote les competences des joueurs les plus developpes pour resserrer l'ecart avec
+// les nouveaux arrivants (cible = ((XP totale - 200) / 2.5) + 100, jamais
+// d'augmentation si cible >= total), + la variation de dispositions de la saison.
+function appliquerChangementDeSaison(nouvelleSemaine) {
+    const joueurs = db.prepare("SELECT * FROM players WHERE statut = 'valide'").all();
+    const indexIntersaison = phaseAffichee(nouvelleSemaine).numeroSaison - 1;
+    const variationDispositions = variationDispositionsIntersaison(indexIntersaison);
+
+    const maj = db.prepare(`
+        UPDATE players SET
+            service = ?, retour = ?, coup_droit_revers = ?, effet = ?, volee = ?, deplacement = ?, puissance = ?, resistance = ?,
+            niveau = ?, usure = 0, points_energie = 0,
+            surface_dur_automatismes = 0, surface_terre_automatismes = 0, surface_herbe_automatismes = 0,
+            mental_max = 100, mental_courant = ?,
+            points_dispositions_a_gagner = ?, points_dispositions_a_retirer = ?
+        WHERE id = ?
+    `);
+
+    joueurs.forEach(function (player) {
+        const valeurs = {};
+        COMPETENCES.forEach(function (c) { valeurs[c] = player[c]; });
+        const xpTotale = COMPETENCES.reduce(function (s, c) { return s + valeurs[c]; }, 0);
+        const cible = ((xpTotale - 200) / 2.5) + 100;
+
+        let nouvelles = valeurs;
+        if (xpTotale > 0 && cible < xpTotale) {
+            const tauxReduction = 1 - (cible / xpTotale);
+            nouvelles = {};
+            COMPETENCES.forEach(function (c) {
+                const perte = Math.floor(valeurs[c] * tauxReduction);
+                nouvelles[c] = Math.max(0, valeurs[c] - perte);
+            });
+        }
+
+        const nouveauNiveau = COMPETENCES.reduce(function (s, c) { return s + nouvelles[c]; }, 0) / COMPETENCES.length;
+        const mentalCourant = Math.min(player.mental_courant, 100);
+        const dispositionsAGagner = player.points_dispositions_a_gagner + Math.max(0, variationDispositions);
+        const dispositionsARetirer = player.points_dispositions_a_retirer + Math.max(0, -variationDispositions);
+
+        maj.run(
+            nouvelles.service, nouvelles.retour, nouvelles.coup_droit_revers, nouvelles.effet,
+            nouvelles.volee, nouvelles.deplacement, nouvelles.puissance, nouvelles.resistance,
+            Math.round(nouveauNiveau * 10) / 10, mentalCourant,
+            dispositionsAGagner, dispositionsARetirer,
+            player.id
+        );
+    });
+
+    // Coupe Davis / Fed Cup : tableau de 16 nations + ties du 1er tour genere une
+    // seule fois au tout debut de la nouvelle Pre-saison (idempotent).
+    assurerTableauCoupe('ATP');
+    assurerTableauCoupe('WTA');
+}
+
+// Coeur de l'avancee de semaine, reutilise par la route admin ET par le scheduler
+// automatique (verifierAvancementAuto) - jamais duplique entre les deux.
+function executerAvancementSemaine() {
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaine = etat.semaine_actuelle;
+
+        // Ancre temps reel de cette semaine ingame : seule source de verite pour
+        // calculer a quelle heure reelle chaque tour des tournois qui s'y deroulent
+        // doit etre joue (executerAvancementTour). Enregistree inconditionnellement,
+        // meme en Pre-saison/Semaine 0 (sans effet, juste par simplicite).
+        db.prepare('INSERT OR IGNORE INTO semaines_reelles (semaine, debut_reel) VALUES (?, ?)').run(semaine, new Date().toISOString());
+
+        const joueurs = db.prepare("SELECT * FROM players WHERE statut = 'valide'").all();
+
+        const phaseActuelle = phaseDeSemaine(semaine);
+
+        // Tournoi = evenement GLOBAL partage par tous les coachs : un seul pool
+        // cree/tire par entree calendaire due cette semaine (tous circuits confondus),
+        // quel que soit le nombre de coachs inscrits dedans. La SIMULATION elle-meme
+        // (tour par tour) est entierement geree par executerAvancementTour, pas ici.
+        // Pre-saison/Semaine 0 : semaines neutres, jamais de tournoi dessus.
+        const entreesSemaine = phaseActuelle.type === 'tournoi'
+            ? CALENDRIER_TOURNOIS
+                .filter(function (t) { return t.semaine_debut === phaseActuelle.positionSemaine; })
+                .sort(function (a, b) { return b.taille_tableau - a.taille_tableau; })
+            : [];
+
+        const rivauxUtilisesSemaine = new Set();
+
+        entreesSemaine.forEach(function (entree) {
+            let tournoiRow = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaine);
+
+            if (!tournoiRow) {
+                // Filet de securite : normalement le pool est cree a S-5 (inscriptions
+                // ouvertes) et tire au sort a S-1. Si ce n'est jamais arrive (partie
+                // commencee en cours de cycle, etc.), on rattrape les deux etapes ici.
+                const nouveauId = creerTournoi(entree, semaine, rivauxUtilisesSemaine);
+                tirerAuSort(nouveauId, entree);
+            } else if (tournoiRow.statut === 'inscriptions') {
+                tirerAuSort(tournoiRow.id, entree);
+            }
+        });
+
+        joueurs.forEach(function (player) {
+            if (phaseActuelle.type !== 'tournoi') {
+                // Pre-saison / Semaine 0 : aucune resolution de planning, aucune
+                // erosion, aucun automatisme, aucune XP distribuee.
+                db.prepare('DELETE FROM plannings WHERE player_id = ? AND semaine = ?').run(player.id, semaine);
+                db.prepare(`
+                    INSERT OR IGNORE INTO journal_semaine_joueur
+                        (player_id, semaine, action_prevue, tournoi_nom, xp_credite, disposition_a_gagner_ajoutee, disposition_a_deplacer_ajoutee, forme_avant, forme_apres, horodatage)
+                    VALUES (?, ?, NULL, NULL, 0, 0, 0, ?, ?, ?)
+                `).run(player.id, semaine, player.forme, player.forme, new Date().toISOString());
+                return;
+            }
+
+            // Un tournoi peut maintenant deborder sur plusieurs semaines ingame (les
+            // 7-tours) : un joueur reste "engage" tant que son tournoi n'est pas
+            // termine, quelle que soit la semaine ou ce tournoi a ete cree - pas
+            // seulement les tournois dus cette semaine precise comme avant.
+            const joueurEngageCetteSemaine = !!db.prepare(`
+                SELECT 1
+                FROM tournoi_joueurs tj
+                JOIN tournois t ON t.id = tj.tournoi_id
+                WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut != 'termine'
+            `).get(player.id);
+
+            if (joueurEngageCetteSemaine) {
+                player = db.prepare('SELECT * FROM players WHERE id = ?').get(player.id);
+            }
+
+            const ordre = joueurEngageCetteSemaine ? null : db.prepare('SELECT action FROM plannings WHERE player_id = ? AND semaine = ?').get(player.id, semaine);
+            const formeAvant = player.forme;
+
+            let forme = player.forme;
+            let mentalCourant = player.mental_courant;
+            // Pas d'accumulation d'une semaine sur l'autre : les XP d'entrainement
+            // generique ne sont distribuables que la semaine ou elles sont gagnees,
+            // donc on repart de 0 a chaque semaine plutot que de cumuler sur
+            // player.points_experience.
+            let pointsExperience = 0;
+            let pointsEnergie = player.points_energie;
+            let pointsDispositionsAGagner = player.points_dispositions_a_gagner;
+            let pointsDispositionsADeplacer = player.points_dispositions_a_deplacer;
+            // Recuperation : tant qu'aucune semaine de repos n'est faite, la condition
+            // (En forme/Fatigue/Diminue/Blesse) reste degradee ; une semaine de repos
+            // suffit a repartir a zero, quel que soit l'etat de depart.
+            let condition = player.condition;
+            const automatismes = {
+                dur: player.surface_dur_automatismes,
+                terre: player.surface_terre_automatismes,
+                herbe: player.surface_herbe_automatismes
+            };
+
+            let surfaceProtegee = null;
+
+            if (ordre) {
+                if (ordre.action === 'repos') {
+                    forme = formeMax(player.usure);
+                    mentalCourant = player.mental_max;
+                    condition = 'en_forme';
+                } else if (ordre.action === 'generique') {
+                    pointsExperience = 8;
+                } else if (ordre.action.indexOf('surface_') === 0) {
+                    const surf = ordre.action.replace('surface_', '');
+                    if (SURFACES.includes(surf)) {
+                        surfaceProtegee = surf;
+                        automatismes[surf] = automatismes[surf] > 15 ? 30 : Math.min(30, automatismes[surf] + 15);
+                    }
+                } else if (ordre.action === 'coaching_mental') {
+                    pointsDispositionsAGagner += 1;
+                    pointsDispositionsADeplacer += 1;
+                }
+            }
+
+            SURFACES.forEach(function (surf) {
+                if (surf !== surfaceProtegee) {
+                    automatismes[surf] = Math.max(0, automatismes[surf] - 5);
+                }
+            });
+
+            const competencesErodees = {};
+            COMPETENCES.forEach(function (cle) {
+                const valeur = player[cle];
+                const perte = Math.floor(valeur * 0.04);
+                competencesErodees[cle] = Math.max(0, valeur - perte);
+            });
+
+            if (semaine % 4 === 0) {
+                pointsEnergie = Math.min(100, pointsEnergie + 5);
+            }
+
+            const nouveauNiveau = COMPETENCES.reduce(function (s, c) { return s + competencesErodees[c]; }, 0) / COMPETENCES.length;
+
+            db.prepare(`
+                UPDATE players SET
+                    service = ?, retour = ?, coup_droit_revers = ?, effet = ?, volee = ?, deplacement = ?, puissance = ?, resistance = ?,
+                    forme = ?, mental_courant = ?, points_experience = ?, points_energie = ?,
+                    surface_dur_automatismes = ?, surface_terre_automatismes = ?, surface_herbe_automatismes = ?,
+                    niveau = ?, condition = ?, points_dispositions_a_gagner = ?, points_dispositions_a_deplacer = ?
+                WHERE id = ?
+            `).run(
+                competencesErodees.service, competencesErodees.retour, competencesErodees.coup_droit_revers, competencesErodees.effet,
+                competencesErodees.volee, competencesErodees.deplacement, competencesErodees.puissance, competencesErodees.resistance,
+                forme, mentalCourant, pointsExperience, pointsEnergie,
+                automatismes.dur, automatismes.terre, automatismes.herbe,
+                Math.round(nouveauNiveau * 10) / 10, condition, pointsDispositionsAGagner, pointsDispositionsADeplacer,
+                player.id
+            );
+
+            const tournoiEnCours = joueurEngageCetteSemaine ? db.prepare(`
+                SELECT t.nom
+                FROM tournoi_joueurs tj
+                JOIN tournois t ON t.id = tj.tournoi_id
+                WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut != 'termine'
+                LIMIT 1
+            `).get(player.id) : null;
+
+            db.prepare(`
+                INSERT OR IGNORE INTO journal_semaine_joueur
+                    (player_id, semaine, action_prevue, tournoi_nom, xp_credite, disposition_a_gagner_ajoutee, disposition_a_deplacer_ajoutee, forme_avant, forme_apres, horodatage)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).run(
+                player.id, semaine,
+                joueurEngageCetteSemaine ? 'tournoi' : (ordre ? ordre.action : null),
+                tournoiEnCours ? tournoiEnCours.nom : null,
+                pointsExperience,
+                ordre && ordre.action === 'coaching_mental' ? 1 : 0,
+                ordre && ordre.action === 'coaching_mental' ? 1 : 0,
+                formeAvant, forme, new Date().toISOString()
+            );
+
+            if (ordre) {
+                db.prepare('DELETE FROM plannings WHERE player_id = ? AND semaine = ?').run(player.id, semaine);
+            }
+        });
+
+        // Photo hebdomadaire du classement Live GLOBAL (voir classement_historique,
+        // database.js) - alimente le "meilleur classement" affiche sur les fiches
+        // adversaire. Prise sur la semaine qui vient d'etre traitee, avant la bascule
+        // sur nouvelleSemaine (coherent avec calculerRangsLiveGlobal, qui utilisera
+        // cette meme semaine comme borne haute une fois qu'elle sera "actuelle").
+        const insertHistorique = db.prepare('INSERT INTO classement_historique (circuit, cle, semaine, rang) VALUES (?, ?, ?, ?)');
+        ['ATP', 'WTA'].forEach(function (circuit) {
+            const liste = calculerClassementGlobal(circuit, semaine - LONGUEUR_SAISON, semaine);
+            liste.forEach(function (j, i) { insertHistorique.run(circuit, j.cle, semaine, i + 1); });
+        });
+
+        const nouvelleSemaine = semaine + 1;
+        db.prepare('UPDATE jeu_etat SET semaine_actuelle = semaine_actuelle + 1 WHERE id = 1').run();
+
+        // Changement de saison : declenche une seule fois, exactement au moment ou
+        // l'on quitte S52 pour entrer dans la nouvelle Pre-saison.
+        if (phaseDeSemaine(nouvelleSemaine).type === 'presaison') {
+            appliquerChangementDeSaison(nouvelleSemaine);
+        }
+
+        // Coupe Davis / Fed Cup : capitaine tranche une seule fois par saison, a la
+        // bascule S1->S2 (le vote de S1 vient de se terminer). Les manches elles-memes
+        // se simulent rencontre par rencontre via executerAvancementTourCoupe (memes
+        // creneaux qu'un tournoi individuel classique), pas ici.
+        const phaseNouvelleSemaine = phaseDeSemaine(nouvelleSemaine);
+        if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine === 2) {
+            resoudreCapitainesSaison(phaseAffichee(nouvelleSemaine).numeroSaison);
+        }
+
+        const semaineOuvertureFavoris = nouvelleSemaine + 5;
+        const semaineOuvertureEntrants = nouvelleSemaine + 5;
+        const semaineTirage = nouvelleSemaine + 1;
+        const phaseOuvertureEntrants = phaseDeSemaine(semaineOuvertureEntrants);
+        const phaseTirage = phaseDeSemaine(semaineTirage);
+
+        // Ouverture des inscriptions (S-5) : le pool d'entrants existe des maintenant,
+        // consultable dans l'onglet "Inscrits", meme si personne n'est encore inscrit.
+        // Une seule fois par entree calendaire due (tous circuits), plus par joueur.
+        // Pre-saison/Semaine 0 : rien a ouvrir, ces semaines n'ont jamais de tournoi.
+        const rivauxUtilisesOuverture = new Set();
+        if (phaseOuvertureEntrants.type === 'tournoi') {
+            CALENDRIER_TOURNOIS
+                .filter(function (t) { return t.semaine_debut === phaseOuvertureEntrants.positionSemaine; })
+                .sort(function (a, b) { return b.taille_tableau - a.taille_tableau; })
+                .forEach(function (entree) {
+                    const existe = db.prepare('SELECT id FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaineOuvertureEntrants);
+                    if (!existe) {
+                        creerTournoi(entree, semaineOuvertureEntrants, rivauxUtilisesOuverture);
+                    }
+                });
+        }
+
+        // Tirage au sort (S-1) : le pool est fige, seede et place dans le tableau.
+        const rivauxUtilisesTirage = new Set();
+        if (phaseTirage.type === 'tournoi') {
+            CALENDRIER_TOURNOIS
+                .filter(function (t) { return t.semaine_debut === phaseTirage.positionSemaine; })
+                .sort(function (a, b) { return b.taille_tableau - a.taille_tableau; })
+                .forEach(function (entree) {
+                    let tournoiRow = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaineTirage);
+                    if (!tournoiRow) {
+                        const nouveauId = creerTournoi(entree, semaineTirage, rivauxUtilisesTirage);
+                        tournoiRow = { id: nouveauId, statut: 'inscriptions' };
+                    }
+                    if (tournoiRow.statut === 'inscriptions') {
+                        tirerAuSort(tournoiRow.id, entree);
+                    }
+                });
+        }
+
+        // Auto-inscription des favoris : intrinsequement une action par coach/joueur,
+        // reste une boucle par joueur (le pool existe deja grace a l'ouverture des
+        // inscriptions ci-dessus, donc ceci remplace un lambda plutot que d'en creer un).
+        joueurs.forEach(function (player) {
+            const favori = db.prepare('SELECT calendrier_id FROM tournoi_favoris WHERE player_id = ? AND semaine = ?').get(player.id, semaineOuvertureFavoris);
+            if (favori) {
+                const entreeFavori = CALENDRIER_TOURNOIS.find(function (t) { return t.id === favori.calendrier_id; });
+                if (entreeFavori) {
+                    const joueurAJour = db.prepare('SELECT * FROM players WHERE id = ?').get(player.id);
+                    inscrireJoueurAuTournoi(player.user_id, joueurAJour, entreeFavori, semaineOuvertureFavoris);
+                }
+            }
+        });
+
+        return nouvelleSemaine;
+}
+
+app.post('/api/admin/avancer-semaine', (req, res) => {
+    try {
+        const { adminId } = req.body;
+        if (!estAdmin(adminId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const nouvelleSemaine = executerAvancementSemaine();
+        res.json({ success: true, nouvelleSemaine });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/admin/avancer-tour', (req, res) => {
+    try {
+        const { adminId } = req.body;
+        if (!estAdmin(adminId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const quelqueChoseSimule = executerAvancementTour(true);
+        const quelqueChoseSimuleCoupe = executerAvancementTourCoupe(true);
+        res.json({ success: true, quelqueChoseSimule: quelqueChoseSimule || quelqueChoseSimuleCoupe });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Verrou manuel : tant que la saison n'est pas "lancee", les 2 schedulers
+// automatiques (verifierAvancementAuto/verifierAvancementTourAuto) ne font rien,
+// meme si l'horaire reel est depasse - permet de rester bloque en Pre-saison
+// aussi longtemps que voulu avant de demarrer une vraie partie. Les boutons
+// manuels "Avancer semaine"/"Avancer tour" restent actifs independamment de ce
+// verrou (action deliberee de l'admin, jamais bloquee).
+app.post('/api/admin/lancer-saison', (req, res) => {
+    try {
+        const { adminId } = req.body;
+        if (!estAdmin(adminId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        // Redemarre la fenetre de rattrapage a partir de maintenant : evite qu'un
+        // long temps de pause ne soit compte comme des echeances manquees a
+        // rattraper d'un coup au moment du lancement.
+        db.prepare('UPDATE jeu_etat SET saison_lancee = 1, derniere_avancee_auto = ? WHERE id = 1').run(new Date().toISOString());
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Avancement automatique : fidele au PDF ("chaque semaine reelle equivaut a deux
+// semaines ingame"), rythme fixe a lundi et jeudi 8h00 heure locale.
+const JOURS_ECHEANCE_AUTO = [1, 4]; // lundi, jeudi (Date.getDay())
+const HEURE_ECHEANCE_AUTO = 8;
+
+// Premiere echeance strictement apres `date` (mercredi ou samedi, 8h00). Avance
+// jour par jour jusqu'a tomber sur un jour valide dont le crenau de 8h n'est pas
+// deja passe par rapport a `date`.
+function prochaineEcheanceApres(date) {
+    let jour = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    let candidate = new Date(jour.getFullYear(), jour.getMonth(), jour.getDate(), HEURE_ECHEANCE_AUTO, 0, 0, 0);
+    while (candidate.getTime() <= date.getTime() || !JOURS_ECHEANCE_AUTO.includes(candidate.getDay())) {
+        jour = new Date(jour.getFullYear(), jour.getMonth(), jour.getDate() + 1);
+        candidate = new Date(jour.getFullYear(), jour.getMonth(), jour.getDate(), HEURE_ECHEANCE_AUTO, 0, 0, 0);
+    }
+    return candidate;
+}
+
+// Toutes les echeances strictement apres `depuis` et jusqu'a `jusqua` inclus, dans
+// l'ordre chronologique - couvre le rattrapage de plusieurs echeances manquees.
+function echeancesEntre(depuis, jusqua) {
+    const resultat = [];
+    let courante = prochaineEcheanceApres(depuis);
+    while (courante.getTime() <= jusqua.getTime()) {
+        resultat.push(courante);
+        courante = prochaineEcheanceApres(courante);
+    }
+    return resultat;
+}
+
+let avancementAutoEnCours = false;
+
+// Verifie si une ou plusieurs echeances sont dues et les rattrape dans l'ordre.
+// Appelee au demarrage (rattrapage si le serveur etait eteint) puis toutes les
+// 15 minutes. Pas de verrou complexe necessaire au-dela du booleen ci-dessus :
+// Node est single-threaded et toutes les operations DB sont synchrones
+// (better-sqlite3), donc aucun risque reel de concurrence avec un clic manuel sur
+// le bouton admin - les deux s'executent simplement l'un apres l'autre.
+function verifierAvancementAuto() {
+    const gate = db.prepare('SELECT saison_lancee FROM jeu_etat WHERE id = 1').get();
+    if (!gate.saison_lancee) return;
+    if (avancementAutoEnCours) return;
+    avancementAutoEnCours = true;
+    try {
+        const etat = db.prepare('SELECT derniere_avancee_auto FROM jeu_etat WHERE id = 1').get();
+        if (!etat.derniere_avancee_auto) {
+            // Premier demarrage jamais vu : point de depart = maintenant, sans
+            // rattrapage retroactif (eviterait une rafale d'avancees au tout
+            // premier deploiement de cette fonctionnalite).
+            db.prepare('UPDATE jeu_etat SET derniere_avancee_auto = ? WHERE id = 1').run(new Date().toISOString());
+            return;
+        }
+
+        const echeances = echeancesEntre(new Date(etat.derniere_avancee_auto), new Date());
+        echeances.forEach(function (echeance) {
+            executerAvancementSemaine();
+            db.prepare('UPDATE jeu_etat SET derniere_avancee_auto = ? WHERE id = 1').run(echeance.toISOString());
+        });
+    } finally {
+        avancementAutoEnCours = false;
+    }
+}
+
+// Creneaux de simulation "un tour a la fois", en heures depuis le "changement
+// semaine" (8h00, lundi ou jeudi) de la semaine ingame concernee - fonctionne aussi
+// bien pour une semaine lundi-mercredi que jeudi-samedi puisque tout est relatif.
+const CRENEAUX_TOUR_1_SEMAINE = [0, 9, 24, 33, 48, 52];        // tour1..tour6 (5 ou 6 tours, 1 semaine)
+const CRENEAUX_TOUR_2_SEMAINES_S1 = [4, 28, 52];               // tours 1-3 (semaine ingame de depart)
+const CRENEAUX_TOUR_2_SEMAINES_S2 = [0, 9, 28, 52];            // huitieme/quart/demi/finale (semaine ingame suivante)
+
+// Simule, pour chaque tournoi en cours, le(s) tour(s) dont le creneau horaire est
+// deja atteint (rattrapage naturel si plusieurs echeances ont ete manquees).
+// `force=true` (bouton admin manuel, symetrique du bouton "Avancer semaine") ignore
+// le creneau horaire et simule immediatement le prochain tour de chaque tournoi, sans
+// pour autant contourner la contrainte structurelle "semaine ingame pas commencee"
+// (impossible de jouer les huitiemes d'un GC avant que sa 2e semaine n'ait debute).
+// Retourne true si au moins un tour a ete simule.
+function executerAvancementTour(force) {
+    let quelqueChoseSimule = false;
+    const idsTournoisActifs = db.prepare("SELECT id FROM tournois WHERE statut = 'a_venir'").all().map(function (r) { return r.id; });
+
+    idsTournoisActifs.forEach(function (tournoiId) {
+        let encore = true;
+        while (encore) {
+            encore = false;
+            const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+            if (!tournoi || tournoi.statut !== 'a_venir') break;
+
+            const nbTours = calculerLabelsTours(tournoi.taille_tableau, tournoi.format).length;
+            const tourIndex = tournoi.tour_actuel;
+            if (tourIndex >= nbTours) break;
+
+            // Tournoi 7 tours (2 semaines) : les tours 0-2 se jouent la semaine de
+            // depart, les tours 3-6 (huitieme->finale) la semaine ingame suivante.
+            const semaineTour = (nbTours === 7 && tourIndex >= 3) ? tournoi.semaine + 1 : tournoi.semaine;
+            const ancre = db.prepare('SELECT debut_reel FROM semaines_reelles WHERE semaine = ?').get(semaineTour);
+            if (!ancre) break; // la semaine ingame concernee n'a pas encore commence (verrou naturel)
+
+            let pret = force;
+            if (!pret) {
+                const creneaux = nbTours === 7
+                    ? (tourIndex < 3 ? CRENEAUX_TOUR_2_SEMAINES_S1 : CRENEAUX_TOUR_2_SEMAINES_S2)
+                    : CRENEAUX_TOUR_1_SEMAINE;
+                const indexCreneau = (nbTours === 7 && tourIndex >= 3) ? tourIndex - 3 : tourIndex;
+                const offsetHeures = creneaux[indexCreneau];
+                if (offsetHeures === undefined) break;
+                const horaire = new Date(ancre.debut_reel).getTime() + offsetHeures * 60 * 60 * 1000;
+                pret = Date.now() >= horaire;
+            }
+
+            if (pret) {
+                if (tournoi.format === 'poules') {
+                    simulerUnTourPoules(tournoiId);
+                } else {
+                    simulerUnTour(tournoiId);
+                }
+                quelqueChoseSimule = true;
+                encore = !force; // en mode force, un seul tour par tournoi et par clic
+            }
+        }
+    });
+
+    return quelqueChoseSimule;
+}
+
+let avancementTourEnCours = false;
+
+function verifierAvancementTourAuto() {
+    const gate = db.prepare('SELECT saison_lancee FROM jeu_etat WHERE id = 1').get();
+    if (!gate.saison_lancee) return;
+    if (avancementTourEnCours) return;
+    avancementTourEnCours = true;
+    try {
+        executerAvancementTour();
+    } finally {
+        avancementTourEnCours = false;
+    }
+}
+
+// Coupe Davis / Fed Cup : memes creneaux qu'un tournoi individuel classique
+// (CRENEAUX_TOUR_1_SEMAINE, une manche = toujours 5 rencontres = les 5 premiers
+// creneaux) - une seule rencontre simulee a la fois (simulerUnRubberCoupe), jamais
+// les 5 d'un coup. simulerUnRubberCoupe/finaliserMancheCoupe/genererMancheSuivante
+// sont definis plus bas (section Coupe Davis), disponibles ici par hoisting.
+function executerAvancementTourCoupe(force) {
+    let quelqueChoseSimule = false;
+    const idsTiesActifs = db.prepare("SELECT id FROM coupe_equipes WHERE statut = 'a_venir'").all().map(function (r) { return r.id; });
+
+    idsTiesActifs.forEach(function (tieId) {
+        let encore = true;
+        while (encore) {
+            encore = false;
+            const tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tieId);
+            if (!tie || tie.statut !== 'a_venir') break;
+            if (tie.rubber_actuel >= 5) break;
+
+            const ancre = db.prepare('SELECT debut_reel FROM semaines_reelles WHERE semaine = ?').get(tie.semaine);
+            if (!ancre) break; // la semaine ingame de cette manche n'a pas encore commence
+
+            let pret = force;
+            if (!pret) {
+                const offsetHeures = CRENEAUX_TOUR_1_SEMAINE[tie.rubber_actuel];
+                if (offsetHeures === undefined) break;
+                const horaire = new Date(ancre.debut_reel).getTime() + offsetHeures * 60 * 60 * 1000;
+                pret = Date.now() >= horaire;
+            }
+
+            if (pret) {
+                simulerUnRubberCoupe(tieId);
+                quelqueChoseSimule = true;
+                encore = !force;
+            }
+        }
+    });
+
+    return quelqueChoseSimule;
+}
+
+let avancementTourCoupeEnCours = false;
+
+function verifierAvancementTourCoupeAuto() {
+    const gate = db.prepare('SELECT saison_lancee FROM jeu_etat WHERE id = 1').get();
+    if (!gate.saison_lancee) return;
+    if (avancementTourCoupeEnCours) return;
+    avancementTourCoupeEnCours = true;
+    try {
+        executerAvancementTourCoupe();
+    } finally {
+        avancementTourCoupeEnCours = false;
+    }
+}
+
+const COEFFICIENTS_SURFACE = {
+    dur: { service: 2, retour: 2, coup_droit_revers: 2, effet: 1, volee: 1, deplacement: 1, puissance: 2, resistance: 1 },
+    herbe: { service: 2, retour: 2, coup_droit_revers: 1, effet: 2, volee: 2, deplacement: 1, puissance: 1, resistance: 1 },
+    terre: { service: 1, retour: 1, coup_droit_revers: 2, effet: 2, volee: 1, deplacement: 2, puissance: 1, resistance: 2 }
+};
+
+// Double (Coupe Davis/Fed Cup uniquement, pas encore un vrai mode de jeu - simple
+// apercu chiffre pour l'instant) : memes coefficients que COEFFICIENTS_SURFACE,
+// ponderes par un bonus/malus qui valorise le jeu au filet (Volee tres fortement,
+// Deplacement un peu) et penalise le jeu de fond de court pur (Puissance/Resistance),
+// Service/Retour/Coup droit-Revers/Effet inchanges (deja maximaux sur les surfaces
+// qui comptent, un bonus supplementaire ne les differenciait pas davantage).
+const COEFFICIENTS_DOUBLE = {
+    dur: { service: 2, retour: 2, coup_droit_revers: 2, effet: 1, volee: 2.25, deplacement: 1.25, puissance: 1.5, resistance: 0.75 },
+    herbe: { service: 2, retour: 2, coup_droit_revers: 1, effet: 2, volee: 4.5, deplacement: 1.25, puissance: 0.75, resistance: 0.75 },
+    terre: { service: 1, retour: 1, coup_droit_revers: 2, effet: 2, volee: 2.25, deplacement: 2.5, puissance: 0.75, resistance: 1.5 }
+};
+
+function niveauDouble(player, surface, bonusEnergieMisee) {
+    const coefs = COEFFICIENTS_DOUBLE[surface];
+    let total = 0;
+    COMPETENCES.forEach(function (cle) {
+        total += player[cle] * coefs[cle];
+    });
+    total += player.forme + player.points_energie + player['surface_' + surface + '_automatismes'] + (bonusEnergieMisee || 0);
+    return total;
+}
+
+function niveauNormal(player, surface, bonusEnergieMisee) {
+    const coefs = COEFFICIENTS_SURFACE[surface];
+    let total = 0;
+    COMPETENCES.forEach(function (cle) {
+        total += player[cle] * coefs[cle];
+    });
+    // L'energie de base compte integralement (comme avant) ; une mise d'energie sur
+    // ce tournoi s'ajoute PAR-DESSUS (coefficient 5 sur la partie misee uniquement),
+    // conformement a l'exemple chiffre du PDF - jamais une substitution.
+    total += player.forme + player.points_energie + player['surface_' + surface + '_automatismes'] + (bonusEnergieMisee || 0);
+    return total;
+}
+
+function probabiliteVictoireA(diff) {
+    const d = Math.abs(diff);
+    let p;
+    if (d <= 25) p = 50 + (d / 25) * 4;
+    else if (d <= 50) p = 54 + ((d - 25) / 25) * 2.5;
+    else if (d <= 100) p = 56.5 + ((d - 50) / 50) * 2.5;
+    else p = 59 + ((d - 100) / 100) * 2.5;
+    p = Math.min(p, 95);
+    return diff >= 0 ? p / 100 : 1 - (p / 100);
+}
+
+function tirage(niveauA, niveauB) {
+    return Math.random() < probabiliteVictoireA(niveauA - niveauB) ? 'A' : 'B';
+}
+
+function nomJoueur(cle) {
+    return cle === 'A' ? 'Toi' : 'Adversaire';
+}
+
+function resoudreJeu(serveur, niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, pointImportant, libelleAnnonce, motResolution, menacant, stats, evenements) {
+    const premierTirage = tirage(niveauA_normal, niveauB_normal);
+    if (premierTirage === serveur && !pointImportant) {
+        return { vainqueur: serveur, libelleUtilise: null };
+    }
+
+    // A partir d'ici la balle est contestee (menace de break/set/match) : etape 1, on l'annonce,
+    // puis on la rejoue jusqu'a ce que technique et mental s'accordent (etape 2, la resolution).
+    const libelle = libelleAnnonce || 'Balle de break';
+    const mot = motResolution || 'break';
+    evenements.push({ type: 'point_important', texte: libelle + ' pour ' + nomJoueur(menacant) });
+
+    let vainqueurT1 = premierTirage;
+    let iterations = 0;
+    while (iterations < 50) {
+        iterations++;
+        stats.pointsImportants++;
+        const vainqueurT2 = tirage(niveauA_mental, niveauB_mental);
+        if (vainqueurT2 === vainqueurT1) {
+            const motMajuscule = mot.charAt(0).toUpperCase() + mot.slice(1);
+            const texteResolution = vainqueurT1 === menacant
+                ? motMajuscule + ' ' + nomJoueur(vainqueurT1)
+                : motMajuscule + ' sauve par ' + nomJoueur(vainqueurT1);
+            evenements.push({ type: 'point_important', texte: texteResolution });
+            return { vainqueur: vainqueurT1, libelleUtilise: libelle };
+        }
+        // technique et mental se contredisent : on rejoue le point silencieusement
+        vainqueurT1 = tirage(niveauA_normal, niveauB_normal);
+    }
+    return { vainqueur: serveur, libelleUtilise: libelle };
+}
+
+function seraitDecisifTB(pts, autre) {
+    return (pts + 1 >= 7) && (pts + 1 - autre >= 2);
+}
+
+function resoudrePointTB(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacant, stats, evenements) {
+    if (!menacant) {
+        return tirage(niveauA_normal, niveauB_normal);
+    }
+
+    evenements.push({ type: 'point_important', texte: 'Point decisif pour ' + nomJoueur(menacant) });
+
+    let vainqueurT1 = tirage(niveauA_normal, niveauB_normal);
+    let iterations = 0;
+    while (iterations < 50) {
+        iterations++;
+        stats.pointsImportants++;
+        const vainqueurT2 = tirage(niveauA_mental, niveauB_mental);
+        if (vainqueurT2 === vainqueurT1) {
+            const texteResolution = vainqueurT1 === menacant
+                ? 'Point ' + nomJoueur(vainqueurT1)
+                : 'Point sauve par ' + nomJoueur(vainqueurT1);
+            evenements.push({ type: 'point_important', texte: texteResolution });
+            return vainqueurT1;
+        }
+        // technique et mental se contredisent : on rejoue le point silencieusement
+        vainqueurT1 = tirage(niveauA_normal, niveauB_normal);
+    }
+    return tirage(niveauA_normal, niveauB_normal);
+}
+
+function simulerTieBreak(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, stats, evenements, numeroSet, setsA, setsB) {
+    let ptsA = 0, ptsB = 0;
+    evenements.push({ type: 'tie_break_debut', texte: '--- Jeu decisif (tie-break) ---', numeroSet, setsA, setsB, jeuxA: 6, jeuxB: 6 });
+    while (true) {
+        const menacant = seraitDecisifTB(ptsA, ptsB) ? 'A' : (seraitDecisifTB(ptsB, ptsA) ? 'B' : null);
+        const vainqueur = resoudrePointTB(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacant, stats, evenements);
+        if (vainqueur === 'A') ptsA++; else ptsB++;
+        evenements.push({
+            type: 'tie_break_point',
+            texte: 'Point du tie-break remporte par ' + (vainqueur === 'A' ? 'Toi' : 'Adversaire') + ' (score : ' + ptsA + '-' + ptsB + ')',
+            numeroSet, setsA, setsB, ptsA, ptsB
+        });
+        if ((ptsA >= 7 || ptsB >= 7) && Math.abs(ptsA - ptsB) >= 2) break;
+    }
+    return ptsA > ptsB ? 'A' : 'B';
+}
+
+// Styles de jeu (choisis par le joueur reel entre S-1 et S0 d'un tournoi, cf.
+// tournoi_joueurs.style_choisi) : deltas de niveau de jeu par manche pour
+// Sprinter/Marathonien (cape a la derniere valeur au-dela de la 5e manche).
+const STYLE_DELTAS_MANCHE = {
+    sprinter: [20, 13, 6, -1, -8],
+    marathonien: [0, 7, 14, 21, 28]
+};
+
+// Calcule les niveaux (normal/mental) d'un cote ajustes pour la manche en cours
+// selon son style de jeu. Utilisee symetriquement pour A et B : un adversaire
+// lambda/rival n'a simplement jamais de style (styleA falsy = aucun ajustement),
+// mais un 2e vrai joueur (reel-vs-reel, cf. jouerMatchTournoi) en a un comme
+// n'importe quel joueur reel. mentalCourantA n'est necessaire que pour
+// "mental_acier" (seul style qui retraite specifiquement la composante mentale
+// plutot que de decaler le niveau combine).
+function ajusterNiveauxStyle(niveauA_normal, niveauA_mental, styleA, mentalCourantA, numeroSet) {
+    if (!styleA) return { normal: niveauA_normal, mental: niveauA_mental };
+
+    if (styleA === 'sprinter' || styleA === 'marathonien') {
+        const deltas = STYLE_DELTAS_MANCHE[styleA];
+        const delta = deltas[Math.min(numeroSet - 1, deltas.length - 1)];
+        return { normal: niveauA_normal + delta, mental: niveauA_mental + delta };
+    }
+    if (styleA === 'prudence') {
+        return { normal: niveauA_normal - 20, mental: niveauA_mental - 20 };
+    }
+    if (styleA === 'en_avant') {
+        return { normal: niveauA_normal + 20, mental: niveauA_mental + 20 };
+    }
+    if (styleA === 'reperage') {
+        return { normal: niveauA_normal - 15, mental: niveauA_mental - 15 };
+    }
+    if (styleA === 'mental_acier' && mentalCourantA !== undefined) {
+        return { normal: niveauA_normal, mental: niveauA_normal + mentalCourantA * 0.8 };
+    }
+    return { normal: niveauA_normal, mental: niveauA_mental };
+}
+
+function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_mental, styleA, mentalCourantA, styleB, mentalCourantB) {
+    let setsA = 0, setsB = 0;
+    const scoreParManche = [];
+    let totalJeux = 0;
+    let serveur = 'A';
+    const stats = { pointsImportants: 0 };
+    const evenements = [];
+    let numeroSet = 1;
+    let ballesBreakSauveesA = 0, ballesBreakSauveesB = 0;
+
+    while (setsA < 2 && setsB < 2) {
+        const niveauxA = ajusterNiveauxStyle(niveauA_normal, niveauA_mental, styleA, mentalCourantA, numeroSet);
+        const niveauA_normal_manche = niveauxA.normal;
+        const niveauA_mental_manche = niveauxA.mental;
+        const niveauxB = ajusterNiveauxStyle(niveauB_normal, niveauB_mental, styleB, mentalCourantB, numeroSet);
+        const niveauB_normal_manche = niveauxB.normal;
+        const niveauB_mental_manche = niveauxB.mental;
+        evenements.push({
+            type: 'set_debut',
+            texte: '--- Set ' + numeroSet + ' (Service : ' + nomJoueur(serveur) + ') ---',
+            numeroSet, setsA, setsB, jeuxA: 0, jeuxB: 0, serveur
+        });
+        let jeuxA = 0, jeuxB = 0;
+        while (true) {
+            if (jeuxA === 6 && jeuxB === 6) {
+                const vainqueurTB = simulerTieBreak(niveauA_normal_manche, niveauB_normal_manche, niveauA_mental_manche, niveauB_mental_manche, stats, evenements, numeroSet, setsA, setsB);
+                if (vainqueurTB === 'A') jeuxA++; else jeuxB++;
+                totalJeux++;
+                break;
+            }
+
+            const relanceur = serveur === 'A' ? 'B' : 'A';
+            const gamesServeur = serveur === 'A' ? jeuxA : jeuxB;
+            const gamesRelanceur = serveur === 'A' ? jeuxB : jeuxA;
+            const setsServeur = serveur === 'A' ? setsA : setsB;
+            const setsRelanceur = serveur === 'A' ? setsB : setsA;
+
+            const completeraitManchePourServeur = (gamesServeur + 1 >= 6) && (gamesServeur + 1 - gamesRelanceur >= 2);
+            const completeraitManchePourRelanceur = (gamesRelanceur + 1 >= 6) && (gamesRelanceur + 1 - gamesServeur >= 2);
+            const completeraitMatchServeur = completeraitManchePourServeur && (setsServeur + 1 === 2);
+            const completeraitMatchRelanceur = completeraitManchePourRelanceur && (setsRelanceur + 1 === 2);
+
+            // Une balle qui se gagne en cassant le service (le relanceur la remporte) est
+            // toujours au moins une "balle de break" ; si elle termine aussi le set ou le
+            // match, on l'indique en plus (ex: "Balle de break / Balle de set").
+            let libelleAnnonce = null;
+            let motResolution = null;
+            let menacant = relanceur;
+            if (completeraitMatchServeur) {
+                libelleAnnonce = 'Balle de match';
+                motResolution = 'match';
+                menacant = serveur;
+            } else if (completeraitMatchRelanceur) {
+                libelleAnnonce = 'Balle de break / Balle de match';
+                motResolution = 'break';
+                menacant = relanceur;
+            } else if (completeraitManchePourServeur) {
+                libelleAnnonce = 'Balle de set';
+                motResolution = 'set';
+                menacant = serveur;
+            } else if (completeraitManchePourRelanceur) {
+                libelleAnnonce = 'Balle de break / Balle de set';
+                motResolution = 'break';
+                menacant = relanceur;
+            }
+
+            const pointImportant = libelleAnnonce !== null;
+
+            const resultatJeu = resoudreJeu(serveur, niveauA_normal_manche, niveauB_normal_manche, niveauA_mental_manche, niveauB_mental_manche, pointImportant, libelleAnnonce, motResolution, menacant, stats, evenements);
+            const vainqueurJeu = resultatJeu.vainqueur;
+
+            // Balle de break sauvee : le serveur de CE jeu (avant relève ci-dessous)
+            // remporte un jeu qui, s'il l'avait perdu, aurait ete un break pour le
+            // relanceur - jamais compte dans un tie-break (pas de notion de break la-dedans).
+            if (motResolution === 'break' && vainqueurJeu === serveur) {
+                if (serveur === 'A') ballesBreakSauveesA++; else ballesBreakSauveesB++;
+            }
+
+            if (vainqueurJeu === 'A') jeuxA++; else jeuxB++;
+            totalJeux++;
+            serveur = relanceur;
+
+            evenements.push({
+                type: 'jeu',
+                texte: resultatJeu.libelleUtilise
+                    ? resultatJeu.libelleUtilise + ' : Jeu ' + jeuxA + '-' + jeuxB
+                    : 'Jeu remporte par ' + (vainqueurJeu === 'A' ? 'Toi' : 'Adversaire') + ' (score du set : ' + jeuxA + '-' + jeuxB + ')',
+                numeroSet, setsA, setsB, jeuxA, jeuxB
+            });
+
+            if ((jeuxA >= 6 || jeuxB >= 6) && Math.abs(jeuxA - jeuxB) >= 2) break;
+        }
+
+        scoreParManche.push(jeuxA + '-' + jeuxB);
+        if (jeuxA > jeuxB) setsA++; else setsB++;
+        evenements.push({
+            type: 'set_fin',
+            texte: 'Set ' + numeroSet + ' remporte par ' + (jeuxA > jeuxB ? 'Toi' : 'Adversaire') + ' (' + jeuxA + '-' + jeuxB + ')',
+            numeroSet, setsA, setsB, jeuxA, jeuxB, scoreSet: jeuxA + '-' + jeuxB
+        });
+        numeroSet++;
+    }
+
+    evenements.push({
+        type: 'match_fin',
+        texte: 'Match termine : ' + (setsA > setsB ? 'Victoire' : 'Defaite') + ' ' + scoreParManche.join(', '),
+        setsA, setsB
+    });
+
+    return {
+        vainqueur: setsA > setsB ? 'A' : 'B',
+        score: scoreParManche.join(', '),
+        totalJeux,
+        pointsImportants: stats.pointsImportants,
+        ballesBreakSauveesA,
+        ballesBreakSauveesB,
+        evenements
+    };
+}
+
+const ROUND_LABELS = { 2: 'Finale', 4: '1/2 finale', 8: '1/4 finale', 16: '8e de finale', 32: '16e de finale', 64: '32e de finale', 128: '64e de finale' };
+
+// Libelles (pour le selecteur de styles, un par tour possible) de tous les tours
+// qu'un joueur pourrait avoir a jouer dans un tournoi donne, dans l'ordre. Les
+// Masters de fin de saison (format 'poules') ont une structure fixe a part.
+function calculerLabelsTours(tailleTableau, format) {
+    if (format === 'poules') {
+        return ['Phase de poules (match 1)', 'Phase de poules (match 2)', 'Phase de poules (match 3)', 'Demi-finale', 'Finale'];
+    }
+    let taillePuissance2 = 1;
+    while (taillePuissance2 < tailleTableau) taillePuissance2 *= 2;
+    const labels = [];
+    let entrants = taillePuissance2;
+    while (entrants >= 2) {
+        labels.push(ROUND_LABELS[entrants] || (entrants + 'e de finale'));
+        entrants = entrants / 2;
+    }
+    return labels;
+}
+
+// ---------- Pronostics ----------
+
+// Type de pari pour un tournoi donne : cascade (5 tours) pour M1000/GC, simple
+// (vainqueur seul) pour tout le reste (250/500, Masters de fin de saison).
+function typePronostic(tournoi) {
+    return (tournoi.categorie === '1000' || tournoi.categorie === 'slam') ? 'cascade' : 'simple';
+}
+
+// Points pour un pari "vainqueur seul" correct : 5 pour les Masters de fin de
+// saison (rarete/prestige, seuls 8 entrants), 3 pour un tournoi simple normal.
+function pointsVainqueurSimple(tournoi) {
+    return tournoi.categorie === 'finals' ? 5 : 3;
+}
+
+// Decoupe les entrants d'un tableau (tries par position_tableau) en 16 tranches
+// consecutives - "huitieme de finale" designe toujours structurellement 16 joueurs,
+// quelle que soit la taille du tableau (56 ou 128), donc toujours 16 tranches.
+// Les lignes BYE sont exclues (jamais un choix valide, pas un vrai entrant).
+function trancheHuitiemes(entrants, taillePuissance2) {
+    const parTranche = taillePuissance2 / 16;
+    const tranches = [];
+    for (let i = 0; i < 16; i++) {
+        const debut = i * parTranche;
+        tranches.push(entrants.slice(debut, debut + parTranche).filter(function (e) { return e.nom !== 'BYE'; }));
+    }
+    return tranches;
+}
+
+// Verifie qu'une cascade soumise est interieurement coherente : chaque huitieme
+// appartient bien a sa tranche, et chaque tour suivant ne pioche que parmi les 2
+// choix du tour precedent pour la paire concernee. Protege contre un client qui
+// soumettrait des ids incoherents, meme si l'UI normale ne le permet pas.
+function validerCascade(predictions, tranchesHuitiemes) {
+    const huitiemes = predictions.huitiemes, quarts = predictions.quarts, demies = predictions.demies, finale = predictions.finale, vainqueur = predictions.vainqueur;
+    if (!Array.isArray(huitiemes) || huitiemes.length !== 16) return false;
+    if (!Array.isArray(quarts) || quarts.length !== 8) return false;
+    if (!Array.isArray(demies) || demies.length !== 4) return false;
+    if (!Array.isArray(finale) || finale.length !== 2) return false;
+    if (typeof vainqueur !== 'number') return false;
+
+    for (let i = 0; i < 16; i++) {
+        if (!tranchesHuitiemes[i].some(function (e) { return e.id === huitiemes[i]; })) return false;
+    }
+    function verifiePaires(niveauSuivant, niveauPrecedent) {
+        for (let i = 0; i < niveauSuivant.length; i++) {
+            const attendus = [niveauPrecedent[2 * i], niveauPrecedent[2 * i + 1]];
+            if (attendus.indexOf(niveauSuivant[i]) === -1) return false;
+        }
+        return true;
+    }
+    if (!verifiePaires(quarts, huitiemes)) return false;
+    if (!verifiePaires(demies, quarts)) return false;
+    if (!verifiePaires(finale, demies)) return false;
+    if (vainqueur !== finale[0] && vainqueur !== finale[1]) return false;
+
+    return true;
+}
+
+// "Present au moins jusqu'au tour cible" : Vainqueur = present partout ; sinon on
+// compare l'index du tour ou le joueur a reellement perdu a l'index du tour vise,
+// dans l'ordre chronologique donne par calculerLabelsTours (tour le plus tot en
+// premier). Perdre a un tour plus tardif implique avoir ete present a tous les
+// tours precedents (il fallait les gagner pour y arriver).
+function aAtteintTour(tourElimineReel, tourCible, labelsTours) {
+    if (tourElimineReel === 'Vainqueur') return true;
+    const idxReel = labelsTours.indexOf(tourElimineReel);
+    const idxCible = labelsTours.indexOf(tourCible);
+    if (idxReel === -1 || idxCible === -1) return false;
+    return idxReel >= idxCible;
+}
+
+const BAREME_CASCADE = [
+    { cle: 'huitiemes', tour: '8e de finale', pts: 1 },
+    { cle: 'quarts', tour: '1/4 finale', pts: 2 },
+    { cle: 'demies', tour: '1/2 finale', pts: 3 },
+    { cle: 'finale', tour: 'Finale', pts: 4 }
+];
+
+// Calcule et enregistre les points de tous les pronostics en attente pour un
+// tournoi qui vient d'etre simule. Appelee juste apres simulerTournoi/
+// simulerTournoiPoules dans avancer-semaine.
+function calculerPointsPronostics(tournoiId) {
+    const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+    const enAttente = db.prepare('SELECT * FROM pronostics WHERE tournoi_id = ? AND points_gagnes IS NULL').all(tournoiId);
+    if (enAttente.length === 0) return;
+
+    const entrants = db.prepare('SELECT id, tour_elimine FROM tournoi_joueurs WHERE tournoi_id = ?').all(tournoiId);
+    const tourEliminePar = new Map(entrants.map(function (e) { return [e.id, e.tour_elimine]; }));
+
+    const type = typePronostic(tournoi);
+    const labelsTours = type === 'cascade' ? calculerLabelsTours(tournoi.taille_tableau, tournoi.format) : null;
+
+    enAttente.forEach(function (p) {
+        let predictions;
+        try { predictions = JSON.parse(p.predictions); } catch (e) { predictions = null; }
+        if (!predictions) {
+            db.prepare('UPDATE pronostics SET points_gagnes = 0 WHERE id = ?').run(p.id);
+            return;
+        }
+
+        let points = 0;
+        if (type === 'simple') {
+            if (tourEliminePar.get(predictions.vainqueur) === 'Vainqueur') {
+                points = pointsVainqueurSimple(tournoi);
+            }
+        } else {
+            BAREME_CASCADE.forEach(function (etape) {
+                (predictions[etape.cle] || []).forEach(function (id) {
+                    const tourReel = tourEliminePar.get(id);
+                    if (tourReel && aAtteintTour(tourReel, etape.tour, labelsTours)) {
+                        points += etape.pts;
+                    }
+                });
+            });
+            if (tourEliminePar.get(predictions.vainqueur) === 'Vainqueur') {
+                points += 5;
+            }
+        }
+
+        db.prepare('UPDATE pronostics SET points_gagnes = ? WHERE id = ?').run(points, p.id);
+    });
+}
+
+function melanger(liste) {
+    const copie = liste.slice();
+    for (let i = copie.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        const tmp = copie[i];
+        copie[i] = copie[j];
+        copie[j] = tmp;
+    }
+    return copie;
+}
+
+// Roster persistant de rivaux fictifs par coach et par circuit, utilise pour que
+// les Classements (ATP/WTA Live/Race) aient de vrais rivaux qui cumulent des
+// points d'un tournoi a l'autre, plutot que des lambdas jetables. Genere une
+// seule fois (lazy-init) avec une repartition de niveaux en pyramide.
+const ROSTER_SIZE = 200;
+const CATEGORIES_ROSTER = [250, 250, 250, 500, 500, 500, 1000, 1000, 1000, 'slam', 'slam'];
+
+// Fourchette de niveau dediee au roster persistant, volontairement plus basse que
+// NIVEAU_LAMBDA_PAR_CATEGORIE (qui reste inchangee, utilisee par les lambdas
+// jetables de tous les tournois) : les rivaux persistants ne doivent jamais
+// devenir une vraie menace pour un joueur reel developpe, ils servent seulement a
+// completer les tableaux et alimenter les classements avant/independamment de la
+// progression des joueurs reels.
+const NIVEAU_ROSTER_PAR_CATEGORIE = {
+    250: { min: 120, max: 190 },
+    500: { min: 150, max: 220 },
+    1000: { min: 180, max: 250 },
+    slam: { min: 200, max: 270 }
+};
+
+function assurerRoster(circuit) {
+    const existant = db.prepare('SELECT COUNT(*) AS n FROM classement_joueurs WHERE circuit = ?').get(circuit);
+    if (existant.n > 0) return;
+
+    const estFeminin = circuit === 'WTA';
+    const insert = db.prepare('INSERT INTO classement_joueurs (circuit, nom, nationalite, niveau) VALUES (?, ?, ?, ?)');
+    const nomsUtilises = new Set();
+
+    for (let i = 0; i < ROSTER_SIZE; i++) {
+        const categorie = CATEGORIES_ROSTER[Math.floor(Math.random() * CATEGORIES_ROSTER.length)];
+        let rival;
+        do {
+            rival = genererJoueurLambda(categorie, estFeminin);
+        } while (nomsUtilises.has(rival.nom));
+        nomsUtilises.add(rival.nom);
+        const fourchette = NIVEAU_ROSTER_PAR_CATEGORIE[categorie];
+        const niveau = Math.round(fourchette.min + Math.random() * (fourchette.max - fourchette.min));
+        insert.run(circuit, rival.nom, rival.nationalite, niveau);
+    }
+}
+
+// Points des rivaux persistants du roster sur une fenetre de semaines donnee,
+// partage entre calculerClassement (un seul coach) et calculerClassementGlobal
+// (tous les coachs, utilise pour la qualification aux Masters de fin de saison).
+function pointsRivaux(circuit, semaineMin, semaineActuelle) {
+    return db.prepare(`
+        SELECT cj.id, cj.nom, cj.nationalite, cj.niveau,
+               COALESCE(SUM(CASE WHEN t.id IS NOT NULL THEN tj.points_gagnes ELSE 0 END), 0) AS points
+        FROM classement_joueurs cj
+        LEFT JOIN tournoi_joueurs tj ON tj.rival_id = cj.id
+        LEFT JOIN tournois t ON t.id = tj.tournoi_id AND t.semaine > ? AND t.semaine <= ?
+        WHERE cj.circuit = ?
+        GROUP BY cj.id
+    `).all(semaineMin, semaineActuelle, circuit);
+}
+
+// Classement (Live ou Race selon les bornes de semaine passees) pour un coach et un
+// circuit donnes : rivaux persistants du roster + le joueur reel, tries par points.
+// `cle` identifie chaque ligne ('rival:id' ou 'joueur:id') pour permettre de retrouver
+// le rang de n'importe quel participant d'un tournoi (voir calculerRangsLive).
+function calculerClassement(userId, circuit, semaineMin, semaineActuelle) {
+    const liste = pointsRivaux(circuit, semaineMin, semaineActuelle).map(function (r) {
+        return { cle: 'rival:' + r.id, nom: r.nom, nationalite: r.nationalite, drapeau: drapeau(r.nationalite), points: r.points, estMoi: false };
+    });
+
+    const joueurCircuit = db.prepare("SELECT * FROM players WHERE user_id = ? AND statut = 'valide'").all(userId)
+        .find(function (p) { return (p.type === 'joueur' ? 'ATP' : 'WTA') === circuit; });
+    if (joueurCircuit) {
+        const totalMoi = db.prepare(`
+            SELECT COALESCE(SUM(tj.points_gagnes), 0) AS points
+            FROM tournoi_joueurs tj
+            JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.semaine > ? AND t.semaine <= ?
+        `).get(joueurCircuit.id, semaineMin, semaineActuelle);
+        liste.push({
+            cle: 'joueur:' + joueurCircuit.id,
+            nom: joueurCircuit.prenom + ' ' + joueurCircuit.nom,
+            nationalite: joueurCircuit.nationalite,
+            drapeau: drapeau(joueurCircuit.nationalite),
+            points: totalMoi.points,
+            estMoi: true
+        });
+    }
+
+    liste.sort(function (a, b) { return b.points - a.points; });
+    return liste;
+}
+
+// Classement TOUS coachs confondus (pas un seul) pour un circuit et une fenetre de
+// semaines donnes : rivaux persistants + TOUS les joueurs reels valides de ce
+// circuit. Utilise pour la qualification aux Masters de fin de saison (Top 8 Race)
+// et pour l'annuaire (Top Live par nation) - jamais pour l'affichage "estMoi" d'un
+// coach precis, qui reste sur calculerClassement.
+function calculerClassementGlobal(circuit, semaineMin, semaineActuelle) {
+    const liste = pointsRivaux(circuit, semaineMin, semaineActuelle).map(function (r) {
+        return { cle: 'rival:' + r.id, nom: r.nom, nationalite: r.nationalite, drapeau: drapeau(r.nationalite), points: r.points, niveau: r.niveau, playerId: null, rivalId: r.id, userId: null };
+    });
+
+    const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
+    const joueursReels = db.prepare("SELECT * FROM players WHERE type = ? AND statut = 'valide'").all(type);
+    joueursReels.forEach(function (p) {
+        const total = db.prepare(`
+            SELECT COALESCE(SUM(tj.points_gagnes), 0) AS points
+            FROM tournoi_joueurs tj
+            JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.semaine > ? AND t.semaine <= ?
+        `).get(p.id, semaineMin, semaineActuelle);
+        liste.push({
+            cle: 'joueur:' + p.id,
+            nom: p.prenom + ' ' + p.nom,
+            prenom: p.prenom,
+            nomFamille: p.nom,
+            nationalite: p.nationalite,
+            drapeau: drapeau(p.nationalite),
+            points: total.points,
+            niveau: p.niveau,
+            playerId: p.id,
+            rivalId: null,
+            userId: p.user_id
+        });
+    });
+
+    liste.sort(function (a, b) { return b.points - a.points; });
+    return liste;
+}
+
+// Rang Live (fenetre glissante de 52 semaines) de chaque participant d'un circuit,
+// sous forme de Map cle -> rang (1-based), pour afficher le classement dans le
+// tableau d'un tournoi sans recalculer une requete par participant.
+function calculerRangsLive(userId, circuit) {
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const liste = calculerClassement(userId, circuit, etat.semaine_actuelle - LONGUEUR_SAISON, etat.semaine_actuelle);
+    const rangs = new Map();
+    liste.forEach(function (j, i) { rangs.set(j.cle, i + 1); });
+    return rangs;
+}
+
+// Rang Live GLOBAL (tous coachs + rivaux confondus, PAS le point de vue d'un seul
+// coach comme calculerRangsLive) sous forme de Map cle -> rang - utilise pour
+// afficher le "Classement" actuel sur une fiche adversaire (reel ou rival).
+function calculerRangsLiveGlobal(circuit) {
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const liste = calculerClassementGlobal(circuit, etat.semaine_actuelle - LONGUEUR_SAISON, etat.semaine_actuelle);
+    const rangs = new Map();
+    liste.forEach(function (j, i) { rangs.set(j.cle, i + 1); });
+    return rangs;
+}
+
+// Meilleur classement Live jamais atteint par un participant (rival ou joueur reel)
+// + le nombre de semaines passees a ce rang exact, d'apres classement_historique
+// (alimente semaine par semaine dans executerAvancementSemaine, pas d'historique
+// retroactif). Retourne null si ce cle n'a encore aucune semaine enregistree.
+function meilleurClassement(circuit, cle) {
+    const meilleur = db.prepare('SELECT MIN(rang) AS rang FROM classement_historique WHERE cle = ? AND circuit = ?').get(cle, circuit);
+    if (!meilleur.rang) return null;
+    const nb = db.prepare('SELECT COUNT(*) AS n FROM classement_historique WHERE cle = ? AND circuit = ? AND rang = ?').get(cle, circuit, meilleur.rang);
+    return { rang: meilleur.rang, semaines: nb.n };
+}
+
+// Classement Live d'un participant (rival ou joueur reel) A UNE SEMAINE PRECISE
+// (contrairement a meilleurClassement, qui cherche le meilleur de toute la
+// carriere) - utilise pour afficher "le classement de l'adversaire au moment du
+// match". Retourne null si `cle` est absent (adversaire lambda, jamais classe) ou
+// si cette semaine precise n'a pas encore ete photographiee dans classement_historique.
+function classementALaSemaine(circuit, cle, semaine) {
+    if (!cle) return null;
+    const row = db.prepare('SELECT rang FROM classement_historique WHERE cle = ? AND circuit = ? AND semaine = ?').get(cle, circuit, semaine);
+    return row ? row.rang : null;
+}
+
+// Un tournoi nouvellement cree est toujours un pool 100% lambda/rivaux (plus jamais
+// seede avec un joueur reel a la creation) : dans le modele global, TOUTE inscription
+// reelle passe uniformement par le mecanisme "voler un slot lambda" de
+// inscrireJoueurAuTournoi, qu'il s'agisse du 1er coach a s'inscrire ou du 50e.
+// SEULE EXCEPTION : les Masters de fin de saison (categorie 'finals'), qui court-
+// circuitent cette fonction au profit de genererEntrantsFinals (qualification
+// automatique, pas d'inscription volontaire) - voir creerTournoi.
+function genererEntrants(entreeCalendrier, rivauxUtilises) {
+    const tailleReelle = entreeCalendrier.taille_tableau;
+    const estFeminin = entreeCalendrier.circuit === 'WTA';
+    const utilises = rivauxUtilises || new Set();
+    const entrants = [];
+
+    // Contingent de rivaux persistants (le quart du tableau, meme logique que le
+    // nombre de tetes de serie dans tirerAuSort) : ils cumuleront des points pour
+    // le classement (roster global, partage par tous les coachs). Le reste du
+    // tableau reste des lambdas jetables comme avant.
+    assurerRoster(entreeCalendrier.circuit);
+    const nbRosterSlots = Math.max(4, Math.round(tailleReelle / 4));
+    const roster = db.prepare('SELECT * FROM classement_joueurs WHERE circuit = ?').all(entreeCalendrier.circuit);
+    const disponibles = roster
+        .filter(function (r) { return !utilises.has(r.id); })
+        .sort(function (a, b) { return b.niveau - a.niveau; })
+        .slice(0, nbRosterSlots);
+
+    disponibles.forEach(function (r) {
+        utilises.add(r.id);
+        entrants.push({ nom: r.nom, nationalite: r.nationalite, niveau: r.niveau, est_reel: 0, player_id: null, rival_id: r.id });
+    });
+
+    while (entrants.length < tailleReelle) {
+        const lambda = genererJoueurLambda(entreeCalendrier.categorie, estFeminin);
+        entrants.push({ nom: lambda.nom, nationalite: lambda.nationalite, niveau: lambda.niveau, est_reel: 0, player_id: null, rival_id: null });
+    }
+
+    return entrants;
+}
+
+// Entrants des Masters de fin de saison : les 8 (taille_tableau) premiers du
+// classement Race du circuit, tous coachs confondus, calcules a la date de creation
+// du pool (S-5 avant le tournoi dans le deroulement normal). Melange naturellement
+// rivaux persistants et joueurs reels selon leurs points.
+function genererEntrantsFinals(entreeCalendrier, semaine) {
+    assurerRoster(entreeCalendrier.circuit);
+
+    const positionSaisonBrute = ((semaine - 1) % LONGUEUR_SAISON) + 1;
+    const debutSaison = semaine - positionSaisonBrute + 2;
+
+    const classement = calculerClassementGlobal(entreeCalendrier.circuit, debutSaison, semaine);
+    return classement.slice(0, entreeCalendrier.taille_tableau).map(function (c) {
+        return {
+            nom: c.nom, nationalite: c.nationalite, niveau: c.niveau,
+            est_reel: !!c.playerId, player_id: c.playerId || null, rival_id: c.rivalId || null
+        };
+    });
+}
+
+// Ordre canonique de tetes de serie pour un tableau de n places (n = puissance de
+// 2) : position -> numero de tete de serie, construit recursivement pour que le
+// seed 1 et le seed 2 soient toujours sur des moities opposees, 3-4 dans les deux
+// quarts restants, etc. (convention standard des tableaux de tennis).
+function ordreSeeds(n) {
+    if (n === 1) return [1];
+    const precedent = ordreSeeds(n / 2);
+    const resultat = [];
+    precedent.forEach(function (s) {
+        resultat.push(s);
+        resultat.push(n + 1 - s);
+    });
+    return resultat;
+}
+
+// Tirage au sort : fige les tetes de serie et les positions dans le tableau (avec
+// exemptions/byes pour les tailles non-puissance-de-2) a partir des entrants deja
+// connus (crees a l'ouverture des inscriptions, S-5). Appele a S-1.
+function tirerAuSort(tournoiId, entreeCalendrier) {
+    const tailleReelle = entreeCalendrier.taille_tableau;
+    let taillePuissance2 = 1;
+    while (taillePuissance2 < tailleReelle) taillePuissance2 *= 2;
+    const nbByes = taillePuissance2 - tailleReelle;
+
+    const entrants = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ?').all(tournoiId);
+    const parNiveauDesc = entrants.slice().sort(function (a, b) { return b.niveau - a.niveau; });
+    const nbTetes = Math.min(entrants.length, Math.max(1, Math.floor(taillePuissance2 / 4)));
+
+    const majTeteDeSerie = db.prepare('UPDATE tournoi_joueurs SET tete_de_serie = ? WHERE id = ?');
+    parNiveauDesc.forEach(function (e, i) {
+        e.tete_de_serie = i < nbTetes ? i + 1 : null;
+        majTeteDeSerie.run(e.tete_de_serie, e.id);
+    });
+
+    // Positions canoniques des tetes de serie (au lieu d'un tirage totalement
+    // aleatoire qui pouvait faire se rencontrer 2 grosses tetes de serie des le
+    // 1er tour) : seed i place a la position ou l'ordre canonique vaut i.
+    const positionDeSeed = {};
+    ordreSeeds(taillePuissance2).forEach(function (seed, position) { positionDeSeed[seed] = position; });
+
+    // Convention reelle des tableaux de tennis : la tete de serie 2 est toujours a
+    // l'extremite opposee du tableau (tout en bas), pas juste "quelque part dans
+    // l'autre moitie" comme le produit l'algorithme recursif seul.
+    if (nbTetes >= 2) {
+        positionDeSeed[2] = taillePuissance2 - 1;
+    }
+
+    const slots = new Array(taillePuissance2).fill(undefined);
+    for (let i = 0; i < nbTetes; i++) {
+        slots[positionDeSeed[i + 1]] = parNiveauDesc[i];
+    }
+
+    // Exemptions (byes) donnees en priorite aux meilleures tetes de serie, placees
+    // dans la case adverse du round 1 de leur beneficiaire (comme en vrai : un
+    // joueur exempte n'a simplement personne en face au 1er tour).
+    for (let i = 0; i < nbByes; i++) {
+        const positionSeed = positionDeSeed[i + 1];
+        const positionAdverse = positionSeed % 2 === 0 ? positionSeed + 1 : positionSeed - 1;
+        slots[positionAdverse] = 'BYE';
+    }
+
+    const nonSeedes = melanger(parNiveauDesc.slice(nbTetes));
+    let curseur = 0;
+    for (let i = 0; i < slots.length; i++) {
+        if (slots[i] === undefined) {
+            slots[i] = nonSeedes[curseur];
+            curseur++;
+        }
+    }
+
+    const majPosition = db.prepare('UPDATE tournoi_joueurs SET position_tableau = ? WHERE id = ?');
+    const insertBye = db.prepare(`
+        INSERT INTO tournoi_joueurs (tournoi_id, nom, nationalite, niveau, est_reel, player_id, position_tableau, tete_de_serie)
+        VALUES (?, 'BYE', NULL, -1, 0, NULL, ?, NULL)
+    `);
+
+    slots.forEach(function (e, index) {
+        if (e === 'BYE') {
+            insertBye.run(tournoiId, index);
+        } else {
+            majPosition.run(index, e.id);
+        }
+    });
+
+    db.prepare("UPDATE tournois SET statut = 'a_venir' WHERE id = ?").run(tournoiId);
+}
+
+// Style de jeu en cours pour un joueur reel a l'interieur d'un tournoi : deduit du
+// nombre de matchs deja enregistres pour lui dans ce tournoi (jamais incremente par
+// un bye ou un adversaire lambda, donc fiable en elimination comme en poules sans
+// faire remonter d'index explicite depuis simulerTournoi).
+function styleDuTourCourant(tournoiId, player, entrant) {
+    const dejaJoues = db.prepare('SELECT COUNT(*) AS n FROM matchs WHERE tournoi_id = ? AND player_id = ?').get(tournoiId, player.id).n;
+    let stylesChoisis = [];
+    try { stylesChoisis = JSON.parse(entrant.style_choisi || '[]'); } catch (e) { stylesChoisis = []; }
+    return stylesChoisis[dejaJoues] || 'aucun';
+}
+
+// Consequences post-match sur un joueur reel (forme/usure/mental/automatisme/
+// condition) selon SON PROPRE style. Taux de perte de forme (Prudence 0.08 / En
+// Avant 0.12 / defaut 0.10), de gain de mental max (Mental d'acier 0.15 / defaut
+// 0.1) et de gain d'automatisme (Reperage 6 / defaut 3) cf. tournoi_joueurs.style_choisi.
+function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants) {
+    const tauxPerteForme = style === 'prudence' ? 0.08 : (style === 'en_avant' ? 0.12 : 0.10);
+    const tauxGainMentalMax = style === 'mental_acier' ? 0.15 : 0.1;
+    const gainAutomatisme = style === 'reperage' ? 6 : 3;
+    const nouvelleForme = Math.max(0, player.forme - totalJeux * tauxPerteForme);
+    const nouvelleUsure = player.usure + 1;
+    const nouveauMentalMax = Math.round((player.mental_max + pointsImportants * tauxGainMentalMax) * 10) / 10;
+    const nouveauMentalCourant = Math.max(0, Math.round((player.mental_courant - 0.5) * 10) / 10);
+    const cleAutomatisme = 'surface_' + surface + '_automatismes';
+    const nouvelAutomatisme = Math.min(30, player[cleAutomatisme] + gainAutomatisme);
+    const nouvelleCondition = degraderCondition(player.condition, player.forme, player.points_energie, totalJeux);
+    db.prepare(`UPDATE players SET forme = ?, usure = ?, mental_max = ?, mental_courant = ?, ${cleAutomatisme} = ?, condition = ? WHERE id = ?`).run(
+        Math.round(nouvelleForme * 10) / 10, nouvelleUsure, nouveauMentalMax, nouveauMentalCourant, nouvelAutomatisme, nouvelleCondition, player.id
+    );
+    return { kineIntervenu: conditionSestDegradee(player.condition, nouvelleCondition) };
+}
+
+// Le moteur (simulerMatch/resoudreJeu) etiquette toujours son cote gagnant potentiel
+// "A" comme "Toi" dans les textes d'evenements bruts. Pour la 2e ligne matchs d'un
+// match reel-contre-reel (le journal du coach du cote B), il faut un miroir exact du
+// meme deroule (pas une resimulation, qui tirerait un resultat different) : on
+// inverse le texte Toi/Adversaire et les champs positionnels A/B.
+function miroirEvenements(evenements) {
+    return evenements.map(function (evt) {
+        const copie = Object.assign({}, evt);
+        if (typeof copie.texte === 'string') {
+            copie.texte = copie.texte
+                .replace(/\bToi\b/g, '@@MIROIR@@')
+                .replace(/\bAdversaire\b/g, 'Toi')
+                .replace(/@@MIROIR@@/g, 'Adversaire');
+        }
+        if (copie.setsA !== undefined && copie.setsB !== undefined) { const t = copie.setsA; copie.setsA = copie.setsB; copie.setsB = t; }
+        if (copie.jeuxA !== undefined && copie.jeuxB !== undefined) { const t = copie.jeuxA; copie.jeuxA = copie.jeuxB; copie.jeuxB = t; }
+        if (copie.ptsA !== undefined && copie.ptsB !== undefined) { const t = copie.ptsA; copie.ptsA = copie.ptsB; copie.ptsB = t; }
+        if (copie.serveur === 'A') copie.serveur = 'B'; else if (copie.serveur === 'B') copie.serveur = 'A';
+        return copie;
+    });
+}
+
+function miroirScore(score) {
+    return score.split(', ').map(function (set) {
+        const parts = set.split('-');
+        return parts[1] + '-' + parts[0];
+    }).join(', ');
+}
+
+function jouerMatchTournoi(tournoi, label, j1, j2) {
+    if (j1.est_reel && j2.est_reel) {
+        return jouerMatchReelVsReel(tournoi, label, j1, j2);
+    }
+
+    const reel = j1.est_reel ? j1 : j2;
+    const lambda = j1.est_reel ? j2 : j1;
+
+    const player = db.prepare('SELECT * FROM players WHERE id = ?').get(reel.player_id);
+    const niveauReel_normal = niveauNormal(player, tournoi.surface, (reel.energie_misee || 0) * 5);
+
+    if (player.condition === 'blesse') {
+        // Regle du PDF : un joueur blesse est contraint a l'abandon et declare forfait
+        // pour ses eventuels autres matchs de la semaine (donc tous les tours restants
+        // de ce tournoi, joues au fil des echeances de simulerUnTour). Aucune
+        // simulation, aucun impact sur
+        // forme/usure/mental/automatismes/condition puisqu'aucun match n'est reellement joue.
+        const evenementForfait = [{ type: 'match_fin', texte: player.prenom + ' ' + player.nom.toUpperCase() + ' declare forfait (blesse) et perd le match.' }];
+        const insertionForfait = db.prepare(`
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            player.user_id, player.id, tournoi.surface, 'tournoi', tournoi.semaine,
+            'adversaire', 'Forfait (blessure)', Math.round(niveauReel_normal), Math.round(lambda.niveau),
+            JSON.stringify(evenementForfait), tournoi.id, label
+        );
+        return { vainqueur: lambda, score: 'Forfait (blessure)', matchId: insertionForfait.lastInsertRowid, matchIdJ2: null };
+    }
+
+    const niveauReel_mental = niveauReel_normal + player.mental_courant;
+    const niveauLambda_normal = lambda.niveau;
+    const niveauLambda_mental = niveauLambda_normal + 100;
+
+    const styleA = styleDuTourCourant(tournoi.id, player, reel);
+
+    // Le joueur reel est toujours simule cote "A" : les evenements du moteur
+    // (simulerMatch/resoudreJeu) etiquettent toujours 'A' comme "Toi", quelle que
+    // soit sa position dans le tableau du tournoi.
+    const resultat = simulerMatch(niveauReel_normal, niveauReel_mental, niveauLambda_normal, niveauLambda_mental, styleA, player.mental_courant);
+
+    const { kineIntervenu } = appliquerEtatPostMatch(player, tournoi.surface, styleA, resultat.totalJeux, resultat.pointsImportants);
+
+    const vainqueurEstReel = resultat.vainqueur === 'A';
+
+    const insertion = db.prepare(`
+        INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour, kine_intervenu, balles_break_sauvees)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        player.user_id, player.id, tournoi.surface, 'tournoi', tournoi.semaine,
+        vainqueurEstReel ? 'joueur' : 'adversaire',
+        resultat.score,
+        Math.round(niveauReel_normal), Math.round(niveauLambda_normal),
+        JSON.stringify(resultat.evenements),
+        tournoi.id, label, kineIntervenu ? 1 : 0, resultat.ballesBreakSauveesA
+    );
+
+    return { vainqueur: vainqueurEstReel ? reel : lambda, score: resultat.score, matchId: insertion.lastInsertRowid, matchIdJ2: null };
+}
+
+// Reel-contre-reel : deux coachs differents se retrouvent dans le meme tableau.
+// Chaque cote garde ses propres stats/mental/style/forfait (pas de cote "lambda"
+// simplifie) ; DEUX lignes matchs sont ecrites (une par coach, chacune de son propre
+// point de vue), et tournoi_matchs.match_id/match_id_j2 les relient toutes les deux.
+function jouerMatchReelVsReel(tournoi, label, j1, j2) {
+    const player1 = db.prepare('SELECT * FROM players WHERE id = ?').get(j1.player_id);
+    const player2 = db.prepare('SELECT * FROM players WHERE id = ?').get(j2.player_id);
+
+    const blesse1 = player1.condition === 'blesse';
+    const blesse2 = player2.condition === 'blesse';
+
+    if (blesse1 || blesse2) {
+        // Si les deux sont blesses en meme temps (rarissime), le cote 1 est
+        // arbitrairement celui qui declare forfait - deterministe, aucune simulation
+        // dans tous les cas des qu'un seul cote est blesse.
+        const perdant = blesse1 ? player1 : player2;
+        const gagnant = blesse1 ? player2 : player1;
+        const perdantEntrant = blesse1 ? j1 : j2;
+        const gagnantEntrant = blesse1 ? j2 : j1;
+        const gagnantEstJ1 = !blesse1;
+        const evenementForfait = [{ type: 'match_fin', texte: perdant.prenom + ' ' + perdant.nom.toUpperCase() + ' declare forfait (blesse) et perd le match.' }];
+
+        const matchIdPerdant = db.prepare(`
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            perdant.user_id, perdant.id, tournoi.surface, 'tournoi', tournoi.semaine,
+            'adversaire', 'Forfait (blessure)',
+            Math.round(niveauNormal(perdant, tournoi.surface, (perdantEntrant.energie_misee || 0) * 5)),
+            Math.round(niveauNormal(gagnant, tournoi.surface, (gagnantEntrant.energie_misee || 0) * 5)),
+            JSON.stringify(evenementForfait), tournoi.id, label
+        ).lastInsertRowid;
+        const matchIdGagnant = db.prepare(`
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            gagnant.user_id, gagnant.id, tournoi.surface, 'tournoi', tournoi.semaine,
+            'joueur', 'Forfait (blessure adverse)',
+            Math.round(niveauNormal(gagnant, tournoi.surface, (gagnantEntrant.energie_misee || 0) * 5)),
+            Math.round(niveauNormal(perdant, tournoi.surface, (perdantEntrant.energie_misee || 0) * 5)),
+            JSON.stringify(evenementForfait), tournoi.id, label
+        ).lastInsertRowid;
+
+        return {
+            vainqueur: gagnantEstJ1 ? j1 : j2, score: 'Forfait (blessure)',
+            matchId: gagnantEstJ1 ? matchIdGagnant : matchIdPerdant,
+            matchIdJ2: gagnantEstJ1 ? matchIdPerdant : matchIdGagnant
+        };
+    }
+
+    const niveau1_normal = niveauNormal(player1, tournoi.surface, (j1.energie_misee || 0) * 5);
+    const niveau1_mental = niveau1_normal + player1.mental_courant;
+    const niveau2_normal = niveauNormal(player2, tournoi.surface, (j2.energie_misee || 0) * 5);
+    const niveau2_mental = niveau2_normal + player2.mental_courant;
+
+    const style1 = styleDuTourCourant(tournoi.id, player1, j1);
+    const style2 = styleDuTourCourant(tournoi.id, player2, j2);
+
+    const resultat = simulerMatch(niveau1_normal, niveau1_mental, niveau2_normal, niveau2_mental, style1, player1.mental_courant, style2, player2.mental_courant);
+
+    const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants);
+    const etat2 = appliquerEtatPostMatch(player2, tournoi.surface, style2, resultat.totalJeux, resultat.pointsImportants);
+
+    const j1Gagne = resultat.vainqueur === 'A';
+
+    const matchId1 = db.prepare(`
+        INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour, kine_intervenu, balles_break_sauvees)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        player1.user_id, player1.id, tournoi.surface, 'tournoi', tournoi.semaine,
+        j1Gagne ? 'joueur' : 'adversaire', resultat.score,
+        Math.round(niveau1_normal), Math.round(niveau2_normal),
+        JSON.stringify(resultat.evenements), tournoi.id, label, etat1.kineIntervenu ? 1 : 0, resultat.ballesBreakSauveesA
+    ).lastInsertRowid;
+
+    const matchId2 = db.prepare(`
+        INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour, kine_intervenu, balles_break_sauvees)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        player2.user_id, player2.id, tournoi.surface, 'tournoi', tournoi.semaine,
+        j1Gagne ? 'adversaire' : 'joueur', miroirScore(resultat.score),
+        Math.round(niveau2_normal), Math.round(niveau1_normal),
+        JSON.stringify(miroirEvenements(resultat.evenements)), tournoi.id, label, etat2.kineIntervenu ? 1 : 0, resultat.ballesBreakSauveesB
+    ).lastInsertRowid;
+
+    return { vainqueur: j1Gagne ? j1 : j2, score: resultat.score, matchId: matchId1, matchIdJ2: matchId2 };
+}
+
+function resoudreMatchAdversaire(tournoi, label, j1, j2) {
+    if (j1.est_reel || j2.est_reel) {
+        return jouerMatchTournoi(tournoi, label, j1, j2);
+    }
+    // Meme les matchs 100% lambda jouent un vrai match (score plausible) plutot qu'un
+    // simple tirage, pour que le tableau et les resultats du tournoi restent lisibles
+    // et consultables meme quand le joueur du coach n'est pas implique.
+    const resultat = simulerMatch(j1.niveau, j1.niveau + 100, j2.niveau, j2.niveau + 100);
+    return { vainqueur: resultat.vainqueur === 'A' ? j1 : j2, score: resultat.score, matchId: null, matchIdJ2: null };
+}
+
+function enregistrerMatchTournoi(tournoiId, label, ordre, j1, j2, vainqueur, score, matchId, matchIdJ2) {
+    db.prepare(`
+        INSERT INTO tournoi_matchs (tournoi_id, numero_tour, ordre, joueur1_id, joueur2_id, vainqueur_id, score, match_id, match_id_j2)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(tournoiId, label, ordre, j1.id, j2 ? j2.id : null, vainqueur ? vainqueur.id : null, score || null, matchId || null, matchIdJ2 || null);
+}
+
+// XP verse en une fois a l'elimination/victoire, selon le nombre total de tours du
+// tournoi et l'index (0-based, dans l'ordre de calculerLabelsTours) du tour atteint.
+// Tournois 7 tours (2 semaines) : les valeurs des index 3-6 sont le COMPLEMENT verse
+// a l'elimination/victoire en semaine 2 - le bonus fixe de qualification (verse a
+// part, des la survie du tour d'index 2) n'est pas inclus ici.
+const XP_QUALIFICATION_SEMAINE2 = 7;
+const XP_TOURNOI = {
+    5: [10, 10, 10, 9, 9],
+    6: [10, 10, 11, 10, 9, 9],
+    7: [10, 10, 11, 10, 10, 9, 9]
+};
+
+// Plafond de mise d'energie sacrifiable a l'inscription, selon la categorie du
+// tournoi (PDF, table "Miser des points d'energie").
+const PLAFOND_MISE_ENERGIE = { slam: 10, finals: 10, '1000': 10, '500': 5, '250': 5 };
+
+function verserXpTournoi(entrant, nbTours, tourIndex) {
+    if (!entrant.est_reel || !entrant.player_id) return;
+    const table = XP_TOURNOI[nbTours];
+    const xp = table ? (table[tourIndex] || 0) : 0;
+    if (xp > 0) {
+        db.prepare('UPDATE players SET points_experience = points_experience + ? WHERE id = ?').run(xp, entrant.player_id);
+    }
+}
+
+function verserXpQualificationSemaine2(entrant) {
+    if (!entrant.est_reel || !entrant.player_id) return;
+    db.prepare('UPDATE players SET points_experience = points_experience + ? WHERE id = ?').run(XP_QUALIFICATION_SEMAINE2, entrant.player_id);
+}
+
+// Cout en fin de parcours (elimination ou victoire finale) pour un entrant reel :
+// 1 PE fixe de participation + la mise eventuelle, definitivement perdue (PDF).
+function deduireEnergieFinTournoi(entrant) {
+    if (!entrant.est_reel || !entrant.player_id) return;
+    const cout = 1 + (entrant.energie_misee || 0);
+    db.prepare('UPDATE players SET points_energie = MAX(0, points_energie - ?) WHERE id = ?').run(cout, entrant.player_id);
+}
+
+// Simule UN SEUL tour d'un tournoi a elimination directe (le prochain non joue,
+// deduit de tournois.tour_actuel), au lieu du tournoi entier d'un coup - appelee par
+// executerAvancementTour au moment ou son creneau horaire est atteint (voir section
+// creneaux). Idempotent : si le tournoi est deja termine, ne fait rien.
+function simulerUnTour(tournoiId) {
+    const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+    if (!tournoi || tournoi.statut !== 'a_venir') return;
+
+    const bareme = BAREME_POINTS[tournoi.bareme] || [0];
+    const labelsTours = calculerLabelsTours(tournoi.taille_tableau, tournoi.format);
+    const nbTours = labelsTours.length;
+    const tourIndex = tournoi.tour_actuel; // 0-based : prochain tour a jouer
+
+    const vivants = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine IS NULL ORDER BY position_tableau').all(tournoiId);
+    const joueursAvantTour = vivants.length;
+    const label = ROUND_LABELS[joueursAvantTour] || (joueursAvantTour + 'e de finale');
+    const estDernierTour = joueursAvantTour === 2;
+    const qualifiesSemaine2 = [];
+
+    for (let i = 0; i < vivants.length; i += 2) {
+        const j1 = vivants[i];
+        const j2 = vivants[i + 1];
+
+        let vainqueur, score = null, matchId = null, matchIdJ2 = null;
+        if (j1.nom === 'BYE') {
+            vainqueur = j2;
+        } else if (j2.nom === 'BYE') {
+            vainqueur = j1;
+        } else {
+            const resultat = resoudreMatchAdversaire(tournoi, label, j1, j2);
+            vainqueur = resultat.vainqueur;
+            score = resultat.score;
+            matchId = resultat.matchId;
+            matchIdJ2 = resultat.matchIdJ2;
+        }
+
+        enregistrerMatchTournoi(tournoiId, label, i / 2, j1, j2, vainqueur, score, matchId, matchIdJ2);
+
+        const perdant = vainqueur === j1 ? j2 : j1;
+        if (perdant.nom !== 'BYE') {
+            const profondeur = Math.round(Math.log2(joueursAvantTour));
+            const points = bareme[Math.min(profondeur, bareme.length - 1)];
+            db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run(label, points, perdant.id);
+            verserXpTournoi(perdant, nbTours, tourIndex);
+            deduireEnergieFinTournoi(perdant);
+        } else {
+            // Le BYE lui-meme doit sortir de "vivants" (aucun point/XP/energie, ce
+            // n'est pas un vrai competiteur) - sinon il reste tour_elimine IS NULL
+            // indefiniment et fausse le compte des tours suivants des que le tableau
+            // n'est pas une puissance de 2 exacte (28/48/56/96, tres frequent).
+            db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ? WHERE id = ?').run(label, perdant.id);
+        }
+
+        if (estDernierTour && vainqueur.nom !== 'BYE') {
+            db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run('Vainqueur', bareme[0], vainqueur.id);
+            verserXpTournoi(vainqueur, nbTours, tourIndex);
+            deduireEnergieFinTournoi(vainqueur);
+        } else if (nbTours === 7 && tourIndex === 2 && vainqueur.nom !== 'BYE') {
+            qualifiesSemaine2.push(vainqueur);
+        }
+    }
+
+    qualifiesSemaine2.forEach(function (v) { verserXpQualificationSemaine2(v); });
+
+    const nouveauTourActuel = tourIndex + 1;
+    db.prepare('UPDATE tournois SET tour_actuel = ? WHERE id = ?').run(nouveauTourActuel, tournoiId);
+    if (estDernierTour) {
+        db.prepare("UPDATE tournois SET statut = 'termine' WHERE id = ?").run(tournoiId);
+        calculerPointsPronostics(tournoiId);
+    }
+}
+
+// Calendrier fixe (methode du cercle) pour un round-robin a 4 joueurs : 3 tours, 2 matchs par tour.
+const SCHEDULE_POULE_4 = [
+    [[0, 3], [1, 2]],
+    [[0, 2], [3, 1]],
+    [[0, 1], [2, 3]]
+];
+
+// Repartition en 2 groupes de 4 par "serpentin" (1er, 4e, 5e, 8e niveau contre 2e,
+// 3e, 6e, 7e) pour eviter que les deux meilleurs niveaux se retrouvent dans le meme
+// groupe. Purement deterministe a partir du niveau (fixe depuis le tirage), donc
+// recalculable a l'identique a chaque appel sans rien avoir a stocker.
+function groupesPoules(tournoiId) {
+    const joueurs = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? ORDER BY niveau DESC').all(tournoiId);
+    return {
+        A: [joueurs[0], joueurs[3], joueurs[4], joueurs[7]],
+        B: [joueurs[1], joueurs[2], joueurs[5], joueurs[6]]
+    };
+}
+
+// Classement d'un groupe (victoires puis confrontation directe puis niveau),
+// reconstruit a partir des tournoi_matchs "Phase de poules" deja joues - permet de
+// rappeler cette fonction a n'importe quel moment (demi-finales, finale) sans avoir
+// besoin de stocker le classement entre deux appels de simulerUnTourPoules.
+function classementGroupe(tournoiId, groupe) {
+    const idsGroupe = new Set(groupe.map(function (j) { return j.id; }));
+    const matchs = db.prepare("SELECT * FROM tournoi_matchs WHERE tournoi_id = ? AND numero_tour = 'Phase de poules'").all(tournoiId)
+        .filter(function (m) { return idsGroupe.has(m.joueur1_id); });
+
+    const victoires = new Map();
+    const faceAFace = new Map();
+    groupe.forEach(function (j) { victoires.set(j.id, 0); });
+    matchs.forEach(function (m) {
+        if (m.vainqueur_id == null) return;
+        victoires.set(m.vainqueur_id, (victoires.get(m.vainqueur_id) || 0) + 1);
+        faceAFace.set(m.joueur1_id + '-' + m.joueur2_id, m.vainqueur_id);
+        faceAFace.set(m.joueur2_id + '-' + m.joueur1_id, m.vainqueur_id);
+    });
+
+    // (approximation : le vrai bareme ATP/WTA departage aussi par % de sets/jeux gagnes, non suivi ici).
+    return groupe.slice().sort(function (a, b) {
+        const diff = (victoires.get(b.id) || 0) - (victoires.get(a.id) || 0);
+        if (diff !== 0) return diff;
+        const confrontation = faceAFace.get(a.id + '-' + b.id);
+        if (confrontation === a.id) return -1;
+        if (confrontation === b.id) return 1;
+        return b.niveau - a.niveau;
+    });
+}
+
+// Simule UNE SEULE etape des 5 que compte le format poules (Masters de fin de
+// saison) : match 1/2/3 de la phase de groupes (les 2 groupes en meme temps),
+// demi-finales, finale - au lieu de tout jouer d'un coup. Meme esprit que
+// simulerUnTour pour l'elimination directe, pilotee par tournois.tour_actuel.
+function simulerUnTourPoules(tournoiId) {
+    const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+    if (!tournoi || tournoi.statut !== 'a_venir') return;
+
+    const bareme = BAREME_POINTS[tournoi.bareme] || [0];
+    const nbTours = 5; // le format poules compte toujours 5 etapes (calculerLabelsTours)
+    const tourIndex = tournoi.tour_actuel;
+    const groupes = groupesPoules(tournoiId);
+
+    function eliminer(label, indexPoints, perdant) {
+        const points = bareme[Math.min(indexPoints, bareme.length - 1)];
+        db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run(label, points, perdant.id);
+        verserXpTournoi(perdant, nbTours, tourIndex);
+        deduireEnergieFinTournoi(perdant);
+    }
+
+    if (tourIndex <= 2) {
+        // Manche (tourIndex+1) sur 3 de la phase de poules, simultanement dans les 2 groupes.
+        let ordre = 0;
+        [groupes.A, groupes.B].forEach(function (groupe) {
+            SCHEDULE_POULE_4[tourIndex].forEach(function (paire) {
+                const j1 = groupe[paire[0]];
+                const j2 = groupe[paire[1]];
+                const resultat = resoudreMatchAdversaire(tournoi, 'Phase de poules', j1, j2);
+                enregistrerMatchTournoi(tournoiId, 'Phase de poules', ordre++, j1, j2, resultat.vainqueur, resultat.score, resultat.matchId, resultat.matchIdJ2);
+            });
+        });
+
+        if (tourIndex === 2) {
+            // Derniere manche jouee : classement final de chaque groupe, elimination des 3e/4e.
+            const classementA = classementGroupe(tournoiId, groupes.A);
+            const classementB = classementGroupe(tournoiId, groupes.B);
+            classementA.slice(2).forEach(function (p) { eliminer('Poules', 3, p); });
+            classementB.slice(2).forEach(function (p) { eliminer('Poules', 3, p); });
+        }
+    } else if (tourIndex === 3) {
+        // Demi-finales : 1er groupe A vs 2e groupe B, 1er groupe B vs 2e groupe A.
+        const classementA = classementGroupe(tournoiId, groupes.A);
+        const classementB = classementGroupe(tournoiId, groupes.B);
+
+        const sf1 = resoudreMatchAdversaire(tournoi, 'Demi-finale', classementA[0], classementB[1]);
+        enregistrerMatchTournoi(tournoiId, 'Demi-finale', 100, classementA[0], classementB[1], sf1.vainqueur, sf1.score, sf1.matchId, sf1.matchIdJ2);
+        eliminer('Demi-finale', 2, sf1.vainqueur === classementA[0] ? classementB[1] : classementA[0]);
+
+        const sf2 = resoudreMatchAdversaire(tournoi, 'Demi-finale', classementB[0], classementA[1]);
+        enregistrerMatchTournoi(tournoiId, 'Demi-finale', 101, classementB[0], classementA[1], sf2.vainqueur, sf2.score, sf2.matchId, sf2.matchIdJ2);
+        eliminer('Demi-finale', 2, sf2.vainqueur === classementB[0] ? classementA[1] : classementB[0]);
+    } else if (tourIndex === 4) {
+        // Finale : les 2 seuls joueurs encore en lice.
+        const finalistes = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine IS NULL').all(tournoiId);
+        const resultat = resoudreMatchAdversaire(tournoi, 'Finale', finalistes[0], finalistes[1]);
+        enregistrerMatchTournoi(tournoiId, 'Finale', 102, finalistes[0], finalistes[1], resultat.vainqueur, resultat.score, resultat.matchId, resultat.matchIdJ2);
+        const champion = resultat.vainqueur;
+        const runnerUp = champion.id === finalistes[0].id ? finalistes[1] : finalistes[0];
+        eliminer('Finale', 1, runnerUp);
+        db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run('Vainqueur', bareme[0], champion.id);
+        verserXpTournoi(champion, nbTours, tourIndex);
+        deduireEnergieFinTournoi(champion);
+    }
+
+    db.prepare('UPDATE tournois SET tour_actuel = ? WHERE id = ?').run(tourIndex + 1, tournoiId);
+    if (tourIndex === 4) {
+        db.prepare("UPDATE tournois SET statut = 'termine' WHERE id = ?").run(tournoiId);
+        calculerPointsPronostics(tournoiId);
+    }
+}
+
+app.get('/api/tournois/historique/:playerId', (req, res) => {
+    try {
+        const { playerId } = req.params;
+        const { userId } = req.query;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        const historique = db.prepare(`
+            SELECT tournois.nom, tournois.semaine, tournois.categorie, tournois.surface, tournois.calendrier_id,
+                   tj.tour_elimine, tj.points_gagnes,
+                   EXISTS(
+                       SELECT 1 FROM matchs
+                       WHERE matchs.tournoi_id = tournois.id AND matchs.player_id = tj.player_id AND matchs.kine_intervenu = 1
+                   ) AS kine_intervenu
+            FROM tournois
+            JOIN tournoi_joueurs tj ON tj.tournoi_id = tournois.id AND tj.player_id = ? AND tj.est_reel = 1
+            WHERE tournois.statut = 'termine'
+            ORDER BY tournois.semaine DESC
+        `).all(playerId);
+
+        historique.forEach(function (h) { h.positionSemaine = positionSemaineAffichee(h.semaine); h.kineIntervenu = !!h.kine_intervenu; delete h.kine_intervenu; });
+
+        const totalPoints = historique.reduce(function (s, h) { return s + (h.points_gagnes || 0); }, 0);
+
+        res.json({ success: true, historique, totalPoints });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/tournois/calendrier/:playerId', (req, res) => {
+    try {
+        const { playerId } = req.params;
+        const { userId } = req.query;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const debut = etat.semaine_actuelle + 1;
+        const finOuvert = debut + 4;
+        const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
+        const cycleLongueur = LONGUEUR_SAISON;
+
+        // On s'arrete a la fin du passage en cours dans le cycle (pas de bouclage sur la
+        // saison suivante) : apres les Masters de fin de saison, plus rien a afficher tant
+        // qu'on n'a pas vraiment atteint la semaine 1 de la nouvelle saison.
+        const positionDebut = ((debut - 1) % cycleLongueur) + 1;
+        const finAnnee = debut + (cycleLongueur - positionDebut);
+
+        const eligibles = [];
+        for (let semaine = debut; semaine <= finAnnee; semaine++) {
+            const phase = phaseDeSemaine(semaine);
+            if (phase.type !== 'tournoi') continue;
+            CALENDRIER_TOURNOIS
+                .filter(function (t) { return t.circuit === circuit && t.semaine_debut === phase.positionSemaine; })
+                .forEach(function (t) { eligibles.push(Object.assign({}, t, { semaine, positionSemaine: t.semaine_debut, ouvert: semaine <= finOuvert })); });
+        }
+
+        const tournoisExistants = db.prepare('SELECT id, calendrier_id, semaine, statut FROM tournois WHERE semaine BETWEEN ? AND ?').all(debut, finAnnee);
+        const tournoiMap = new Map(tournoisExistants.map(function (t) { return [t.calendrier_id + '-' + t.semaine, t]; }));
+
+        const inscriptionsReelles = db.prepare(`
+            SELECT tournois.calendrier_id, tournois.semaine
+            FROM tournois
+            JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
+            WHERE tournois.semaine BETWEEN ? AND ?
+              AND tournoi_joueurs.player_id = ? AND tournoi_joueurs.est_reel = 1
+        `).all(debut, finAnnee, playerId);
+        const inscritSet = new Set(inscriptionsReelles.map(function (i) { return i.calendrier_id + '-' + i.semaine; }));
+
+        const favoris = db.prepare('SELECT calendrier_id, semaine FROM tournoi_favoris WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, debut, finAnnee);
+        const favoriSet = new Set(favoris.map(function (f) { return f.calendrier_id + '-' + f.semaine; }));
+
+        eligibles.forEach(function (t) {
+            const tournoi = tournoiMap.get(t.id + '-' + t.semaine);
+            t.inscrit = inscritSet.has(t.id + '-' + t.semaine);
+            t.tournoiId = tournoi ? tournoi.id : null;
+            // Inscriptions fermees une fois le tableau tire (S-1), meme si "ouvert" au sens
+            // de la fenetre de 5 semaines : coherent avec le vrai delai avant tirage au sort.
+            t.inscriptionFermee = !!tournoi && tournoi.statut !== 'inscriptions';
+            t.favori = favoriSet.has(t.id + '-' + t.semaine);
+        });
+
+        res.json({ success: true, semaineActuelle: etat.semaine_actuelle, debut, finOuvert, tournois: eligibles });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/tournois/mes/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        // "Mes" tournois = ceux ou l'un de mes joueurs a une inscription reelle
+        // (tournoi_joueurs.player_id parmi mes joueurs, est_reel = 1) - le tournoi
+        // lui-meme est un objet partage, l'appartenance vit sur l'inscription.
+        const tournois = db.prepare(`
+            SELECT tournois.*, players.prenom, players.nom AS nom_joueur, players.type,
+                   moi.tour_elimine AS tour_elimine_joueur, moi.points_gagnes AS points_gagnes_joueur,
+                   vainqueur_j.nom AS nom_vainqueur
+            FROM tournoi_joueurs AS moi
+            JOIN tournois ON tournois.id = moi.tournoi_id
+            JOIN players ON players.id = moi.player_id
+            LEFT JOIN tournoi_joueurs AS vainqueur_j
+                ON vainqueur_j.tournoi_id = tournois.id AND vainqueur_j.tour_elimine = 'Vainqueur'
+            WHERE moi.est_reel = 1 AND players.user_id = ?
+            ORDER BY tournois.semaine DESC, tournois.id DESC
+        `).all(userId);
+        tournois.forEach(function (t) { t.positionSemaine = positionSemaineAffichee(t.semaine); });
+        res.json({ success: true, tournois });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/tournois/passes/:playerId', (req, res) => {
+    try {
+        const { playerId } = req.params;
+        const { userId } = req.query;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
+        const cycleLongueur = LONGUEUR_SAISON;
+        const phaseActuelle = phaseDeSemaine(etat.semaine_actuelle);
+
+        // Uniquement le passage en cours dans le cycle (saison en cours) : les tournois
+        // d'un cycle precedent ne sont pas remontes ici pour l'instant. Pendant la
+        // Pre-saison/Semaine 0, la saison en cours n'a encore rien joue.
+        const passes = phaseActuelle.type === 'tournoi'
+            ? CALENDRIER_TOURNOIS
+                .filter(function (t) { return t.circuit === circuit && t.semaine_debut <= phaseActuelle.positionSemaine; })
+                .map(function (t) {
+                    const semaine = etat.semaine_actuelle - (phaseActuelle.positionSemaine - t.semaine_debut);
+                    return Object.assign({}, t, { semaine, positionSemaine: t.semaine_debut });
+                })
+            : [];
+
+        // Mes inscriptions reelles (le tournoi lui-meme est partage, l'appartenance vit
+        // sur tournoi_joueurs.player_id/est_reel), jointes a tournois pour le statut et
+        // le resultat propre a CE joueur (tj.tour_elimine/points_gagnes, pas une colonne
+        // denormalisee sur tournois qui n'aurait plus de sens sur une ligne partagee).
+        const registrations = db.prepare(`
+            SELECT t.id, t.calendrier_id, t.semaine, t.statut, tj.tour_elimine AS tour_elimine_joueur, tj.points_gagnes AS points_gagnes_joueur
+            FROM tournoi_joueurs tj
+            JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.semaine BETWEEN ? AND ?
+        `).all(playerId, etat.semaine_actuelle - cycleLongueur, etat.semaine_actuelle);
+        const regMap = new Map(registrations.map(function (r) { return [r.calendrier_id + '-' + r.semaine, r]; }));
+
+        passes.forEach(function (t) {
+            const reg = regMap.get(t.id + '-' + t.semaine);
+            if (reg && reg.statut === 'termine') {
+                const vainqueur = db.prepare("SELECT nom FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine = 'Vainqueur'").get(reg.id);
+                t.participe = true;
+                t.tourElimineJoueur = reg.tour_elimine_joueur;
+                t.pointsGagnesJoueur = reg.points_gagnes_joueur;
+                t.nomVainqueur = vainqueur ? vainqueur.nom : null;
+            } else {
+                t.participe = false;
+            }
+        });
+
+        passes.sort(function (a, b) { return b.semaine - a.semaine; });
+
+        res.json({ success: true, tournois: passes });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/tournois/:id', (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(id);
+        if (!tournoi) {
+            return res.status(404).json({ error: 'Tournoi introuvable.' });
+        }
+
+        const joueurs = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? ORDER BY position_tableau').all(id);
+
+        res.json({ success: true, tournoi, joueurs });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Cree un tournoi au stade "inscriptions" : le pool d'entrants existe (visible dans
+// l'onglet Inscrits) mais le tableau n'est pas encore tire au sort (ca arrive a S-1,
+// voir tirerAuSort). position_tableau = -1 est le marqueur "pas encore tire".
+function creerTournoi(entree, semaine, rivauxUtilises) {
+    const insertionTournoi = db.prepare(`
+        INSERT INTO tournois (calendrier_id, nom, circuit, categorie, surface, taille_tableau, semaine, bareme, format, statut)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'inscriptions')
+    `).run(
+        entree.id, entree.nom, entree.circuit, String(entree.categorie),
+        entree.surface, entree.taille_tableau, semaine, entree.bareme, entree.format || 'elimination'
+    );
+
+    const tournoiId = insertionTournoi.lastInsertRowid;
+    const entrants = entree.categorie === 'finals'
+        ? genererEntrantsFinals(entree, semaine)
+        : genererEntrants(entree, rivauxUtilises);
+
+    const insertJoueur = db.prepare(`
+        INSERT INTO tournoi_joueurs (tournoi_id, nom, nationalite, niveau, est_reel, player_id, rival_id, position_tableau, tete_de_serie)
+        VALUES (?, ?, ?, ?, ?, ?, ?, -1, NULL)
+    `);
+    entrants.forEach(function (entrant) {
+        insertJoueur.run(
+            tournoiId, entrant.nom, entrant.nationalite || null, entrant.niveau,
+            entrant.est_reel ? 1 : 0, entrant.player_id || null, entrant.rival_id || null
+        );
+    });
+
+    return tournoiId;
+}
+
+function inscrireJoueurAuTournoi(userId, player, entree, semaine, energieMisee) {
+    // Filet de securite (deja valide/rejete cote route pour une inscription directe) :
+    // jamais plus que le plafond de la categorie, ni plus que l'energie disponible.
+    const plafondCategorie = PLAFOND_MISE_ENERGIE[String(entree.categorie)] || 0;
+    const mise = Math.max(0, Math.min(Math.floor(Number(energieMisee) || 0), plafondCategorie, player.points_energie));
+    // Un joueur blesse est contraint de declarer forfait pour les tournois a venir
+    // (regle du PDF) : pas de nouvelle inscription tant que la condition n'est pas
+    // revenue a "en_forme" (recuperation via une semaine de repos).
+    if (player.condition === 'blesse') {
+        return { error: 'Ce joueur est blesse et ne peut pas s inscrire a un tournoi tant qu il ne s est pas repose.' };
+    }
+
+    // Le tournoi est un objet GLOBAL partage par tous les coachs : le pool peut deja
+    // exister (cree a l'ouverture des inscriptions S-5, ou par un autre coach deja
+    // inscrit) independamment de ce joueur precis.
+    const dejaInscrit = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaine);
+
+    if (dejaInscrit) {
+        const dejaReel = db.prepare('SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(dejaInscrit.id, player.id);
+        if (dejaReel) {
+            return { error: 'Deja inscrit a ce tournoi.' };
+        }
+        if (dejaInscrit.statut !== 'inscriptions') {
+            return { error: 'Les inscriptions sont fermees pour ce tournoi (le tableau a deja ete tire).' };
+        }
+    }
+
+    const autreTournoiCetteSemaine = db.prepare(`
+        SELECT tournois.id
+        FROM tournois
+        JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
+        WHERE tournois.semaine = ?
+          AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
+          AND tournois.calendrier_id != ?
+    `).get(semaine, player.id, entree.id);
+    if (autreTournoiCetteSemaine) {
+        return { error: 'Ce joueur est deja inscrit a un autre tournoi cette semaine-la.' };
+    }
+
+    // Assure l'existence du pool partage (le cree si personne, coach ou lambda, n'y
+    // est encore jamais entre), puis vole toujours un slot lambda existant — meme
+    // mecanisme que le 1er coach ou le 50e, plus de branche speciale "creation avec
+    // joueur reel deja dedans".
+    const tournoiId = dejaInscrit ? dejaInscrit.id : creerTournoi(entree, semaine);
+    const unLambda = db.prepare("SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 0 AND nom != 'BYE' ORDER BY RANDOM() LIMIT 1").get(tournoiId);
+    if (!unLambda) {
+        return { error: 'Impossible de rejoindre ce tournoi (tableau complet).' };
+    }
+    db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 1, player_id = ?, rival_id = NULL, energie_misee = ? WHERE id = ?').run(
+        player.prenom + ' ' + player.nom, player.nationalite, Math.round(niveauNormal(player, entree.surface)), player.id, mise, unLambda.id
+    );
+
+    return { tournoiId };
+}
+
+app.post('/api/tournois/inscription', (req, res) => {
+    try {
+        const { userId, playerId, calendrierId, semaine } = req.body;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        if (player.statut !== 'valide') {
+            return res.status(400).json({ error: 'Ce joueur doit d abord etre valide par l administrateur.' });
+        }
+        if (aDesPertesDispositionsEnAttente(playerId)) {
+            return res.status(400).json({ error: 'Il faut d abord repartir les points de disposition a retirer.' });
+        }
+
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === calendrierId; });
+        if (!entree) {
+            return res.status(400).json({ error: 'Tournoi introuvable dans le calendrier.' });
+        }
+        if (entree.circuit !== (player.type === 'joueur' ? 'ATP' : 'WTA')) {
+            return res.status(400).json({ error: 'Ce tournoi n est pas sur le circuit de ce joueur.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        if (semaine <= etat.semaine_actuelle || semaine > etat.semaine_actuelle + 5) {
+            return res.status(400).json({ error: 'Ce tournoi n est pas (ou plus) ouvert aux inscriptions.' });
+        }
+
+        // La mise d energie ne se choisit plus ici : elle se regle sur la page
+        // planification, juste a cote des styles de jeu, tant que le tournoi n a pas
+        // commence (voir POST /api/tournois/mise-energie). L inscription demarre donc
+        // toujours a 0.
+        const resultat = inscrireJoueurAuTournoi(userId, player, entree, semaine);
+        if (resultat.error) {
+            return res.status(409).json({ error: resultat.error });
+        }
+
+        res.json({ success: true, tournoiId: resultat.tournoiId });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/tournois/favori', (req, res) => {
+    try {
+        const { userId, playerId, calendrierId, semaine } = req.body;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        if (aDesPertesDispositionsEnAttente(playerId)) {
+            return res.status(400).json({ error: 'Il faut d abord repartir les points de disposition a retirer.' });
+        }
+
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === calendrierId; });
+        if (!entree) {
+            return res.status(400).json({ error: 'Tournoi introuvable dans le calendrier.' });
+        }
+
+        const existant = db.prepare('SELECT id, calendrier_id FROM tournoi_favoris WHERE player_id = ? AND semaine = ?').get(playerId, semaine);
+        if (existant && existant.calendrier_id === calendrierId) {
+            db.prepare('DELETE FROM tournoi_favoris WHERE id = ?').run(existant.id);
+            return res.json({ success: true, favori: false });
+        }
+
+        db.prepare(`
+            INSERT INTO tournoi_favoris (player_id, calendrier_id, semaine) VALUES (?, ?, ?)
+            ON CONFLICT(player_id, semaine) DO UPDATE SET calendrier_id = excluded.calendrier_id
+        `).run(playerId, calendrierId, semaine);
+
+        res.json({ success: true, favori: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/tournois/desinscription', (req, res) => {
+    try {
+        const { userId, playerId, tournoiId } = req.body;
+
+        // Le tournoi lui-meme est partage (plus de user_id/player_id dessus) :
+        // l'ownership passe par le joueur (players.user_id) + sa ligne d'inscription
+        // reelle (tournoi_joueurs.player_id/est_reel) dans ce tournoi precis.
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        if (aDesPertesDispositionsEnAttente(playerId)) {
+            return res.status(400).json({ error: 'Il faut d abord repartir les points de disposition a retirer.' });
+        }
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+        if (!tournoi) {
+            return res.status(404).json({ error: 'Inscription introuvable.' });
+        }
+        if (tournoi.statut === 'termine') {
+            return res.status(400).json({ error: 'Ce tournoi est deja termine, impossible de se desinscrire.' });
+        }
+
+        const ligneReelle = db.prepare('SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoiId, playerId);
+        if (!ligneReelle) {
+            return res.status(400).json({ error: 'Ce joueur n est pas inscrit a ce tournoi.' });
+        }
+
+        // On ne supprime plus tout le tournoi (le pool d'entrants reste consultable,
+        // visible depuis l'ouverture des inscriptions) : on remplace juste la ligne du
+        // joueur reel par un nouveau joueur lambda.
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
+        const lambda = genererJoueurLambda(entree.categorie, entree.circuit === 'WTA');
+        db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 0, player_id = NULL, rival_id = NULL WHERE id = ?').run(
+            lambda.nom, lambda.nationalite, lambda.niveau, ligneReelle.id
+        );
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Styles interdits pour un tournoi donne : l'ensemble (sans doublon, "aucun" exclu)
+// de tous les styles utilises a n'importe quel tour du tournoi PRECEDENT joue par ce
+// joueur (le plus recent par semaine, strictement avant `semaineTournoiActuel`, avec
+// un style_choisi non nul). Pas de restriction a l'interieur d'un meme tournoi : on
+// peut tres bien garder le meme style a tous les tours, y compris consecutifs.
+function stylesInterditsDuTournoiPrecedent(playerId, semaineTournoiActuel) {
+    const precedent = db.prepare(`
+        SELECT tj.style_choisi
+        FROM tournois t
+        JOIN tournoi_joueurs tj ON tj.tournoi_id = t.id AND tj.player_id = ? AND tj.est_reel = 1
+        WHERE t.semaine < ? AND tj.style_choisi IS NOT NULL
+        ORDER BY t.semaine DESC
+        LIMIT 1
+    `).get(playerId, semaineTournoiActuel);
+
+    if (!precedent) return [];
+    let stylesPrecedents = [];
+    try { stylesPrecedents = JSON.parse(precedent.style_choisi || '[]'); } catch (e) { stylesPrecedents = []; }
+    return Array.from(new Set(stylesPrecedents.filter(function (s) { return s !== 'aucun'; })));
+}
+
+app.post('/api/tournois/style', (req, res) => {
+    try {
+        const { userId, playerId, tournoiId, styles } = req.body;
+
+        if (!Array.isArray(styles) || styles.length === 0) {
+            return res.status(400).json({ error: 'Liste de styles invalide.' });
+        }
+        if (!styles.every(function (s) { return STYLES_JEU.includes(s); })) {
+            return res.status(400).json({ error: 'Un des styles de jeu choisis est invalide.' });
+        }
+
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        if (aDesPertesDispositionsEnAttente(playerId)) {
+            return res.status(400).json({ error: 'Il faut d abord repartir les points de disposition a retirer.' });
+        }
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+        if (!tournoi) {
+            return res.status(404).json({ error: 'Tournoi introuvable.' });
+        }
+        if (tournoi.statut !== 'a_venir') {
+            return res.status(400).json({ error: 'Les styles de jeu ne peuvent etre choisis qu une fois le tableau tire, et avant le debut du tournoi.' });
+        }
+
+        const stylesInterdits = stylesInterditsDuTournoiPrecedent(playerId, tournoi.semaine);
+        if (styles.some(function (s) { return stylesInterdits.includes(s); })) {
+            return res.status(400).json({ error: 'Impossible d utiliser un style deja utilise au tournoi precedent.' });
+        }
+
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
+        const labelsAttendus = calculerLabelsTours(entree.taille_tableau, tournoi.format);
+        if (styles.length !== labelsAttendus.length) {
+            return res.status(400).json({ error: 'Il faut choisir exactement un style pour chacun des ' + labelsAttendus.length + ' tours possibles de ce tournoi.' });
+        }
+
+        const ligneReelle = db.prepare('SELECT id, style_choisi FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoiId, playerId);
+        if (!ligneReelle) {
+            return res.status(400).json({ error: 'Ce joueur n est pas inscrit a ce tournoi.' });
+        }
+
+        if (ligneReelle.style_choisi) {
+            // Resoumission : verrouillee, sauf pour les tournois 2 semaines (7 tours) -
+            // dans ce cas les tours deja joues restent figes, seuls ceux a venir sont
+            // modifiables, sans limite de fenetre temporelle (des le depart).
+            if (labelsAttendus.length !== 7) {
+                return res.status(400).json({ error: 'Les styles de ce tournoi ne peuvent etre choisis qu une seule fois.' });
+            }
+            let stylesActuels = [];
+            try { stylesActuels = JSON.parse(ligneReelle.style_choisi); } catch (e) { stylesActuels = []; }
+            for (let i = 0; i < tournoi.tour_actuel; i++) {
+                if (styles[i] !== stylesActuels[i]) {
+                    return res.status(400).json({ error: 'Impossible de modifier le style d un tour deja joue.' });
+                }
+            }
+        }
+
+        db.prepare('UPDATE tournoi_joueurs SET style_choisi = ? WHERE id = ?').run(JSON.stringify(styles), ligneReelle.id);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/tournois/style-en-attente/:playerId', (req, res) => {
+    try {
+        const { playerId } = req.params;
+        const { userId } = req.query;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+
+        // La semaine >= semaine_actuelle exclut toute ligne orpheline restee bloquee en
+        // 'a_venir' tres loin dans le passe (ne devrait jamais arriver en temps normal,
+        // mais protege contre une donnee corrompue plutot que de choisir la mauvaise ligne).
+        const tournoi = db.prepare(`
+            SELECT tournois.*
+            FROM tournois
+            JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
+            WHERE tournois.statut = 'a_venir' AND tournois.semaine >= ?
+              AND tournoi_joueurs.player_id = ? AND tournoi_joueurs.est_reel = 1
+            ORDER BY tournois.semaine ASC
+            LIMIT 1
+        `).get(etat.semaine_actuelle, playerId);
+
+        if (!tournoi) {
+            return res.json({ success: true, tournoi: null });
+        }
+
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
+        const labelsTours = calculerLabelsTours(entree.taille_tableau, tournoi.format);
+
+        const ligneReelle = db.prepare('SELECT style_choisi, energie_misee FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoi.id, playerId);
+        let stylesActuels = [];
+        try { stylesActuels = JSON.parse(ligneReelle.style_choisi || '[]'); } catch (e) { stylesActuels = []; }
+
+        const stylesInterdits = stylesInterditsDuTournoiPrecedent(playerId, tournoi.semaine);
+
+        res.json({
+            success: true,
+            tournoi: { id: tournoi.id, nom: tournoi.nom, calendrierId: tournoi.calendrier_id, semaine: tournoi.semaine, tour_actuel: tournoi.tour_actuel },
+            labelsTours,
+            stylesActuels,
+            stylesInterdits,
+            energieMiseeActuelle: ligneReelle.energie_misee || 0,
+            plafondMiseEnergie: PLAFOND_MISE_ENERGIE[String(entree.categorie)] || 0,
+            pointsEnergieDisponibles: player.points_energie
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Reglage de la mise d energie, deplace sur la page planification (juste a cote des
+// styles de jeu) plutot qu a l inscription : librement modifiable tant que le
+// tournoi n a pas commence (tour_actuel === 0), verrouille ensuite - la mise
+// s applique a la totalite du tournoi, pas tour par tour, donc pas de logique de
+// re-choix partiel comme pour les styles des tournois 7 tours.
+app.post('/api/tournois/mise-energie', (req, res) => {
+    try {
+        const { userId, playerId, tournoiId, energieMisee } = req.body;
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+        if (!tournoi) {
+            return res.status(404).json({ error: 'Tournoi introuvable.' });
+        }
+        if (tournoi.statut !== 'a_venir' || tournoi.tour_actuel > 0) {
+            return res.status(400).json({ error: 'La mise d energie ne peut plus etre modifiee, le tournoi a deja commence.' });
+        }
+
+        const ligneReelle = db.prepare('SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoiId, playerId);
+        if (!ligneReelle) {
+            return res.status(400).json({ error: 'Ce joueur n est pas inscrit a ce tournoi.' });
+        }
+
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
+        const plafondCategorie = PLAFOND_MISE_ENERGIE[String(entree.categorie)] || 0;
+        const miseDemandee = Math.floor(Number(energieMisee) || 0);
+        if (miseDemandee < 0 || miseDemandee > plafondCategorie) {
+            return res.status(400).json({ error: 'La mise d energie doit etre comprise entre 0 et ' + plafondCategorie + ' pour ce tournoi.' });
+        }
+        if (miseDemandee > player.points_energie) {
+            return res.status(400).json({ error: 'Ce joueur n a pas assez de points d energie pour cette mise.' });
+        }
+
+        db.prepare('UPDATE tournoi_joueurs SET energie_misee = ? WHERE id = ?').run(miseDemandee, ligneReelle.id);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
+    try {
+        const { calendrierId } = req.params;
+        const { userId, playerId, semaine } = req.query;
+
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === calendrierId; });
+        if (!entree) {
+            return res.status(404).json({ error: 'Tournoi introuvable dans le calendrier.' });
+        }
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        const semaineNum = parseInt(semaine, 10);
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const bareme = BAREME_POINTS[entree.bareme] || [];
+
+        const instanceRow = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(calendrierId, semaineNum);
+
+        let instance = null;
+        let estInscrit = false;
+        if (instanceRow) {
+            const rangs = calculerRangsLive(userId, entree.circuit);
+            function rangDe(rivalId, estReel, playerId) {
+                if (rivalId) return rangs.get('rival:' + rivalId) || null;
+                if (estReel) return rangs.get('joueur:' + playerId) || null;
+                return null;
+            }
+
+            const joueurs = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? ORDER BY position_tableau').all(instanceRow.id);
+            joueurs.forEach(function (j) {
+                j.drapeau = drapeau(j.nationalite);
+                j.rang = rangDe(j.rival_id, j.est_reel, j.player_id);
+            });
+            instance = Object.assign({}, instanceRow, { joueurs });
+            estInscrit = joueurs.some(function (j) { return j.est_reel && j.player_id === Number(playerId); });
+
+            const matchs = db.prepare(`
+                SELECT tournoi_matchs.*,
+                       j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite, j1.est_reel AS joueur1_est_reel,
+                       j1.rival_id AS joueur1_rival_id, j1.player_id AS joueur1_player_id, j1.tete_de_serie AS joueur1_seed,
+                       j2.nom AS joueur2_nom, j2.nationalite AS joueur2_nationalite, j2.est_reel AS joueur2_est_reel,
+                       j2.rival_id AS joueur2_rival_id, j2.player_id AS joueur2_player_id, j2.tete_de_serie AS joueur2_seed,
+                       vj.nom AS vainqueur_nom
+                FROM tournoi_matchs
+                JOIN tournoi_joueurs AS j1 ON j1.id = tournoi_matchs.joueur1_id
+                LEFT JOIN tournoi_joueurs AS j2 ON j2.id = tournoi_matchs.joueur2_id
+                LEFT JOIN tournoi_joueurs AS vj ON vj.id = tournoi_matchs.vainqueur_id
+                WHERE tournoi_matchs.tournoi_id = ?
+                ORDER BY tournoi_matchs.ordre
+            `).all(instanceRow.id);
+            matchs.forEach(function (m) {
+                m.joueur1_drapeau = drapeau(m.joueur1_nationalite);
+                m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
+                m.joueur1_rang = rangDe(m.joueur1_rival_id, m.joueur1_est_reel, m.joueur1_player_id);
+                m.joueur2_rang = rangDe(m.joueur2_rival_id, m.joueur2_est_reel, m.joueur2_player_id);
+                // Match reel-contre-reel : 2 lignes matchs distinctes existent (une par
+                // coach), tournoi_matchs.match_id/match_id_j2 les relient toutes les deux.
+                // On ne renvoie au client que celle qui appartient au joueur consulte (ou
+                // rien s'il n'est implique dans ce match precis) - meme contrat qu'avant
+                // pour le frontend (un seul champ m.match_id), aucun changement JS requis.
+                if (m.joueur2_player_id === Number(playerId)) {
+                    m.match_id = m.match_id_j2;
+                } else if (m.joueur1_player_id !== Number(playerId)) {
+                    m.match_id = null;
+                }
+            });
+            instance.matchs = matchs;
+        }
+
+        const autreTournoiCetteSemaine = db.prepare(`
+            SELECT tournois.id
+            FROM tournois
+            JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
+            WHERE tournois.semaine = ?
+              AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
+              AND tournois.calendrier_id != ?
+        `).get(semaineNum, playerId, calendrierId);
+
+        const peutInscrire = !estInscrit
+            && semaineNum > etat.semaine_actuelle
+            && semaineNum <= etat.semaine_actuelle + 5
+            && (!instanceRow || instanceRow.statut === 'inscriptions')
+            && !autreTournoiCetteSemaine
+            && player.condition !== 'blesse';
+
+        const palmares = db.prepare(`
+            SELECT tournois.*, vainqueur_j.nom AS nom_vainqueur
+            FROM tournois
+            JOIN tournoi_joueurs AS participant
+                ON participant.tournoi_id = tournois.id AND participant.player_id = ? AND participant.est_reel = 1
+            LEFT JOIN tournoi_joueurs AS vainqueur_j
+                ON vainqueur_j.tournoi_id = tournois.id AND vainqueur_j.tour_elimine = 'Vainqueur'
+            WHERE tournois.calendrier_id = ? AND tournois.statut = 'termine'
+            ORDER BY tournois.semaine DESC
+        `).all(playerId, calendrierId);
+        palmares.forEach(function (p) { p.positionSemaine = positionSemaineAffichee(p.semaine); });
+
+        res.json({
+            success: true,
+            info: Object.assign({}, entree, { baremePoints: bareme, paysDrapeau: drapeau(entree.pays) }),
+            semaine: semaineNum,
+            estInscrit,
+            peutInscrire,
+            joueurCondition: player.condition,
+            instance,
+            palmares
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Vue d'ensemble "Accueil" : TOUS les tournois actuellement en cours de
+// deroulement (tableau deja tire, pas encore termine) sur les deux circuits -
+// pas seulement ceux ou le coach a un personnage engage. Un "(Toi)" est ajoute
+// sur les tournois ou l'un de ses 2 personnages a une inscription reelle.
+function estMoiDansTournoi(tournoiId, userId) {
+    return !!db.prepare(`
+        SELECT 1 FROM tournoi_joueurs tj
+        JOIN players p ON p.id = tj.player_id
+        WHERE tj.tournoi_id = ? AND tj.est_reel = 1 AND p.user_id = ?
+    `).get(tournoiId, userId);
+}
+
+app.get('/api/accueil/tournois-en-cours/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+
+        const lignes = db.prepare("SELECT * FROM tournois WHERE statut = 'a_venir' ORDER BY semaine ASC, circuit ASC").all();
+
+        const tournois = lignes.map(function (t) {
+            let etat;
+            if (t.tour_actuel === 0) {
+                etat = 'Tableau tiré — pas encore commencé';
+            } else {
+                const labels = calculerLabelsTours(t.taille_tableau, t.format);
+                etat = 'En cours — prochain tour : ' + (labels[t.tour_actuel] || 'tour final');
+            }
+            return {
+                nom: t.nom, circuit: t.circuit, categorie: t.categorie, etat,
+                estMoi: estMoiDansTournoi(t.id, userId),
+                calendrierId: t.calendrier_id, semaine: t.semaine
+            };
+        });
+
+        res.json({ success: true, tournois });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Versions publiques (page d'accueil avant connexion) des deux blocs ci-dessus :
+// memes donnees globales, sans aucune notion de coach ("estMoi" / classement
+// d'un userId precis) puisqu'aucun visiteur n'est identifie a ce stade.
+app.get('/api/public/tournois-en-cours', (req, res) => {
+    try {
+        const lignes = db.prepare("SELECT * FROM tournois WHERE statut = 'a_venir' ORDER BY semaine ASC, circuit ASC").all();
+
+        const tournois = lignes.map(function (t) {
+            let etat;
+            if (t.tour_actuel === 0) {
+                etat = 'Tableau tiré — pas encore commencé';
+            } else {
+                const labels = calculerLabelsTours(t.taille_tableau, t.format);
+                etat = 'En cours — prochain tour : ' + (labels[t.tour_actuel] || 'tour final');
+            }
+            return { nom: t.nom, circuit: t.circuit, categorie: t.categorie, etat };
+        });
+
+        res.json({ success: true, tournois });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/public/classement', (req, res) => {
+    try {
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+
+        function top5(circuit) {
+            return calculerClassementGlobal(circuit, semaineActuelle - LONGUEUR_SAISON, semaineActuelle)
+                .slice(0, 5)
+                .map(function (c, i) {
+                    return { rang: i + 1, nom: c.nom, drapeau: c.drapeau, points: c.points };
+                });
+        }
+
+        res.json({ success: true, atp: top5('ATP'), wta: top5('WTA') });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/classement/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+        // Debut de saison = fin de la Semaine 0 en cours (borne exclue : la Race ne
+        // compte que les points marques a partir de S1). Pendant la Pre-saison/S0
+        // elle-meme, cette borne tombe dans le futur -> Race a 0 partout, voulu.
+        const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+        const debutSaison = semaineActuelle - positionSaisonBrute + 2;
+
+        res.json({
+            success: true,
+            atp: { live: calculerClassement(userId, 'ATP', semaineActuelle - LONGUEUR_SAISON, semaineActuelle), race: calculerClassement(userId, 'ATP', debutSaison, semaineActuelle) },
+            wta: { live: calculerClassement(userId, 'WTA', semaineActuelle - LONGUEUR_SAISON, semaineActuelle), race: calculerClassement(userId, 'WTA', debutSaison, semaineActuelle) }
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Annuaire : joueurs valides d'un circuit tries par nation puis par classement Live
+// decroissant a l'interieur de la nation (jamais Race, qui retombe a 0 pendant
+// chaque Pre-saison/Semaine 0 - peu adapte a un annuaire consultable en permanence).
+app.get('/api/annuaire/joueurs/:circuit', (req, res) => {
+    try {
+        const circuit = req.params.circuit === 'WTA' ? 'WTA' : 'ATP';
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+
+        const classement = calculerClassementGlobal(circuit, semaineActuelle - LONGUEUR_SAISON, semaineActuelle)
+            .filter(function (c) { return c.playerId !== null; });
+
+        const joueurs = classement.map(function (c) {
+            return {
+                prenom: c.prenom, nom: c.nomFamille,
+                nationalite: c.nationalite, drapeau: c.drapeau, points: c.points,
+                coachNom: nomCoach(c.userId), coachUserId: c.userId
+            };
+        });
+
+        joueurs.sort(function (a, b) {
+            if (a.nationalite !== b.nationalite) return (a.nationalite || '').localeCompare(b.nationalite || '');
+            return b.points - a.points;
+        });
+
+        res.json({ success: true, joueurs });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Annuaire : tous les coachs (au moins un personnage valide), tries par ordre
+// alphabetique de leur pseudo (users.pseudo).
+app.get('/api/annuaire/coachs', (req, res) => {
+    try {
+        const userIds = db.prepare("SELECT DISTINCT user_id FROM players WHERE statut = 'valide'").all()
+            .map(function (r) { return r.user_id; });
+
+        const coachs = userIds.map(function (userId) {
+            const joueur = db.prepare("SELECT * FROM players WHERE user_id = ? AND type = 'joueur'").get(userId);
+            const joueuse = db.prepare("SELECT * FROM players WHERE user_id = ? AND type = 'joueuse'").get(userId);
+            return {
+                userId: userId,
+                nomTri: nomCoach(userId),
+                joueur: joueur ? { prenom: joueur.prenom, nom: joueur.nom, nationalite: joueur.nationalite, drapeau: drapeau(joueur.nationalite), statut: joueur.statut } : null,
+                joueuse: joueuse ? { prenom: joueuse.prenom, nom: joueuse.nom, nationalite: joueuse.nationalite, drapeau: drapeau(joueuse.nationalite), statut: joueuse.statut } : null
+            };
+        });
+
+        coachs.sort(function (a, b) { return a.nomTri.localeCompare(b.nomTri); });
+
+        res.json({ success: true, coachs });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/pronostics/disponibles/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const tournois = db.prepare(`
+            SELECT tournois.id, tournois.calendrier_id, tournois.nom, tournois.circuit, tournois.categorie, tournois.semaine,
+                   pronostics.id AS pronostic_id
+            FROM tournois
+            LEFT JOIN pronostics ON pronostics.tournoi_id = tournois.id AND pronostics.user_id = ?
+            WHERE tournois.statut = 'a_venir'
+            ORDER BY tournois.semaine, tournois.nom
+        `).all(userId);
+        tournois.forEach(function (t) {
+            t.dejaPronostique = !!t.pronostic_id;
+            t.type = typePronostic(t);
+            delete t.pronostic_id;
+        });
+        res.json({ success: true, tournois });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/pronostics/tournoi/:tournoiId', (req, res) => {
+    try {
+        const { tournoiId } = req.params;
+        const { userId } = req.query;
+
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+        if (!tournoi) {
+            return res.status(404).json({ error: 'Tournoi introuvable.' });
+        }
+
+        const entrants = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? ORDER BY position_tableau').all(tournoiId);
+        entrants.forEach(function (e) { e.drapeau = drapeau(e.nationalite); });
+
+        let taillePuissance2 = 1;
+        while (taillePuissance2 < tournoi.taille_tableau) taillePuissance2 *= 2;
+
+        const type = typePronostic(tournoi);
+
+        let pronosticActuel = null;
+        if (userId) {
+            const ligne = db.prepare('SELECT predictions, points_gagnes FROM pronostics WHERE tournoi_id = ? AND user_id = ?').get(tournoiId, userId);
+            if (ligne) {
+                let predictions = null;
+                try { predictions = JSON.parse(ligne.predictions); } catch (e) { predictions = null; }
+                pronosticActuel = { predictions, pointsGagnes: ligne.points_gagnes };
+            }
+        }
+
+        res.json({
+            success: true,
+            tournoi: { id: tournoi.id, nom: tournoi.nom, circuit: tournoi.circuit, categorie: tournoi.categorie, statut: tournoi.statut, semaine: tournoi.semaine },
+            type,
+            entrants: type === 'simple' ? entrants.filter(function (e) { return e.nom !== 'BYE'; }) : null,
+            tranchesHuitiemes: type === 'cascade' ? trancheHuitiemes(entrants, taillePuissance2) : null,
+            pronosticActuel
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/pronostics', (req, res) => {
+    try {
+        const { userId, tournoiId, predictions } = req.body;
+
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+        if (!tournoi) {
+            return res.status(404).json({ error: 'Tournoi introuvable.' });
+        }
+        if (tournoi.statut !== 'a_venir') {
+            return res.status(400).json({ error: 'Les pronostics ne sont plus modifiables pour ce tournoi (tableau pas encore tire, ou tournoi deja commence).' });
+        }
+
+        const type = typePronostic(tournoi);
+        const entrants = db.prepare('SELECT id, nom, position_tableau FROM tournoi_joueurs WHERE tournoi_id = ? ORDER BY position_tableau').all(tournoiId);
+
+        if (type === 'simple') {
+            if (!predictions || typeof predictions.vainqueur !== 'number') {
+                return res.status(400).json({ error: 'Pronostic invalide.' });
+            }
+            const cible = entrants.find(function (e) { return e.id === predictions.vainqueur; });
+            if (!cible || cible.nom === 'BYE') {
+                return res.status(400).json({ error: 'Joueur pronostique introuvable dans ce tableau.' });
+            }
+        } else {
+            let taillePuissance2 = 1;
+            while (taillePuissance2 < tournoi.taille_tableau) taillePuissance2 *= 2;
+            const tranches = trancheHuitiemes(entrants, taillePuissance2);
+            if (!predictions || !validerCascade(predictions, tranches)) {
+                return res.status(400).json({ error: 'Pronostic incoherent - verifie que chaque tour ne reprend que tes propres choix du tour precedent.' });
+            }
+        }
+
+        db.prepare(`
+            INSERT INTO pronostics (user_id, tournoi_id, predictions) VALUES (?, ?, ?)
+            ON CONFLICT(user_id, tournoi_id) DO UPDATE SET predictions = excluded.predictions
+        `).run(userId, tournoiId, JSON.stringify(predictions));
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Classement des coachs par points de pronostics cumules (pas un classement de
+// joueurs de tennis) - le nom affiche pour chaque coach reprend celui de son
+// personnage reel sur le circuit concerne, jamais son email (coherent avec le
+// reste du jeu, ou personne n'expose son adresse aux autres coachs).
+function classementPronosParCircuit(circuit) {
+    return db.prepare(`
+        SELECT p.user_id, SUM(p.points_gagnes) AS points
+        FROM pronostics p
+        JOIN tournois t ON t.id = p.tournoi_id
+        WHERE p.points_gagnes IS NOT NULL AND t.circuit = ?
+        GROUP BY p.user_id
+        ORDER BY points DESC
+    `).all(circuit);
+}
+
+function classementPronosCombine() {
+    return db.prepare(`
+        SELECT p.user_id, SUM(p.points_gagnes) AS points
+        FROM pronostics p
+        WHERE p.points_gagnes IS NOT NULL
+        GROUP BY p.user_id
+        ORDER BY points DESC
+    `).all();
+}
+
+// Identite d'un coach = son pseudo (users.pseudo, obligatoire a l'inscription) -
+// jamais le nom de l'un de ses personnages, qui n'a rien a voir avec le coach lui-
+// meme. Independant du circuit desormais (un seul pseudo par compte), le fallback
+// "Coach #id" ne sert que pour les comptes crees avant l'ajout de ce champ.
+function nomCoach(userId) {
+    const user = db.prepare('SELECT pseudo FROM users WHERE id = ?').get(userId);
+    return user && user.pseudo ? user.pseudo : ('Coach #' + userId);
+}
+
+app.get('/api/pronostics/classement/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const atp = classementPronosParCircuit('ATP').map(function (r) {
+            return { userId: r.user_id, nom: nomCoach(r.user_id), points: r.points, estMoi: Number(r.user_id) === Number(userId) };
+        });
+        const wta = classementPronosParCircuit('WTA').map(function (r) {
+            return { userId: r.user_id, nom: nomCoach(r.user_id), points: r.points, estMoi: Number(r.user_id) === Number(userId) };
+        });
+        const combine = classementPronosCombine().map(function (r) {
+            return { userId: r.user_id, nom: nomCoach(r.user_id), points: r.points, estMoi: Number(r.user_id) === Number(userId) };
+        });
+        res.json({ success: true, atp, wta, combine });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Classement Pronos decoupe par SAISON AFFICHEE (contrairement a
+// classementPronosParCircuit/classementPronosCombine, qui cumulent tout depuis
+// toujours) : { [numeroSaison]: { [user_id]: points } }. circuit = null pour le
+// classement Combine.
+function classementPronosParSaison(circuit) {
+    const rows = circuit
+        ? db.prepare(`SELECT p.user_id, p.points_gagnes, t.semaine FROM pronostics p JOIN tournois t ON t.id = p.tournoi_id WHERE p.points_gagnes IS NOT NULL AND t.circuit = ?`).all(circuit)
+        : db.prepare(`SELECT p.user_id, p.points_gagnes, t.semaine FROM pronostics p JOIN tournois t ON t.id = p.tournoi_id WHERE p.points_gagnes IS NOT NULL`).all();
+
+    const parSaison = {};
+    rows.forEach(function (r) {
+        const saison = phaseAffichee(r.semaine).numeroSaison;
+        if (!parSaison[saison]) parSaison[saison] = {};
+        parSaison[saison][r.user_id] = (parSaison[saison][r.user_id] || 0) + r.points_gagnes;
+    });
+    return parSaison;
+}
+
+// Historique du classement Pronos d'UN coach, saison par saison : rang + points
+// pour chaque saison ou il a au moins un point marque (la saison en cours est
+// marquee `enCours`, son rang/points ne sont pas encore definitifs).
+function historiquePronosCoach(userId, circuit) {
+    const parSaison = classementPronosParSaison(circuit);
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const saisonActuelle = phaseAffichee(etat.semaine_actuelle).numeroSaison;
+
+    return Object.keys(parSaison)
+        .map(function (s) { return Number(s); })
+        .sort(function (a, b) { return a - b; })
+        .map(function (saison) {
+            const points = parSaison[saison];
+            const classement = Object.keys(points)
+                .map(function (uid) { return { userId: Number(uid), points: points[uid] }; })
+                .sort(function (a, b) { return b.points - a.points; });
+            const rang = classement.findIndex(function (c) { return c.userId === Number(userId); }) + 1;
+            if (rang === 0) return null;
+            return { saison, rang, points: points[userId], enCours: saison === saisonActuelle };
+        })
+        .filter(function (r) { return r !== null; });
+}
+
+// ---------- Fiche coach ----------
+
+// Palmares COMBINE des 2 personnages d'un coach (contrairement au palmares d'un
+// seul joueur sur adversaire.html) - chaque ligne precise quel personnage a
+// remporte le titre (`joueurType`), tries par semaine desc comme le palmares joueur.
+function palmaresCoach(joueurId, joueuseId) {
+    const ids = [joueurId, joueuseId].filter(function (id) { return id; });
+    if (ids.length === 0) return [];
+    const placeholders = ids.map(function () { return '?'; }).join(',');
+    const rows = db.prepare(`
+        SELECT tournois.nom, tournois.semaine, tournois.categorie, tournois.surface,
+               players.type AS joueurType, players.prenom AS joueurPrenom, players.nom AS joueurNom
+        FROM tournoi_joueurs tj
+        JOIN tournois ON tournois.id = tj.tournoi_id
+        JOIN players ON players.id = tj.player_id
+        WHERE tj.player_id IN (${placeholders}) AND tj.est_reel = 1 AND tj.tour_elimine = 'Vainqueur'
+        ORDER BY tournois.semaine DESC
+    `).all(...ids);
+    rows.forEach(function (r) { r.positionSemaine = positionSemaineAffichee(r.semaine); });
+    return rows;
+}
+
+app.get('/api/coach/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const user = db.prepare('SELECT id, pseudo, discord FROM users WHERE id = ?').get(userId);
+        if (!user) {
+            return res.status(404).json({ error: 'Coach introuvable.' });
+        }
+
+        const joueur = db.prepare("SELECT id, prenom, nom, nationalite, statut FROM players WHERE user_id = ? AND type = 'joueur'").get(userId);
+        const joueuse = db.prepare("SELECT id, prenom, nom, nationalite, statut FROM players WHERE user_id = ? AND type = 'joueuse'").get(userId);
+
+        res.json({
+            success: true,
+            userId: user.id,
+            pseudo: nomCoach(user.id),
+            discord: user.discord || null,
+            joueur: joueur ? { id: joueur.id, prenom: joueur.prenom, nom: joueur.nom, nationalite: joueur.nationalite, drapeau: drapeau(joueur.nationalite), statut: joueur.statut } : null,
+            joueuse: joueuse ? { id: joueuse.id, prenom: joueuse.prenom, nom: joueuse.nom, nationalite: joueuse.nationalite, drapeau: drapeau(joueuse.nationalite), statut: joueuse.statut } : null,
+            palmares: palmaresCoach(joueur ? joueur.id : null, joueuse ? joueuse.id : null),
+            pronosHistorique: {
+                atp: historiquePronosCoach(userId, 'ATP'),
+                wta: historiquePronosCoach(userId, 'WTA'),
+                combine: historiquePronosCoach(userId, null)
+            },
+            badges: calculerBadgesCoach(userId)
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Edition du profil coach (pseudo + lien Discord) - pas de vraie session serveur
+// dans ce jeu (cf. CLAUDE.md), fait confiance a userId comme partout ailleurs.
+app.post('/api/coach/profil', (req, res) => {
+    try {
+        const { userId, pseudo, discord } = req.body;
+        const pseudoNettoye = (pseudo || '').trim();
+        if (!pseudoNettoye) {
+            return res.status(400).json({ error: 'Le pseudo de coach est obligatoire.' });
+        }
+        const discordNettoye = (discord || '').trim() || null;
+        db.prepare('UPDATE users SET pseudo = ?, discord = ? WHERE id = ?').run(pseudoNettoye, discordNettoye, userId);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// V/D global, par surface et par "saison" (meme decoupage 52 semaines que le Race
+// des classements, pas de vrai calendrier dans ce jeu) a partir d'une liste uniforme
+// de { surface, semaine, victoire (bool) } - alimentee differemment selon que
+// l'adversaire est un vrai joueur (table matchs) ou un rival (tournoi_matchs).
+function calculerStatsVD(rows) {
+    const global = { victoires: 0, defaites: 0 };
+    const parSurface = {};
+    const parSaison = {};
+    rows.forEach(function (r) {
+        global[r.victoire ? 'victoires' : 'defaites']++;
+        if (!parSurface[r.surface]) parSurface[r.surface] = { victoires: 0, defaites: 0 };
+        parSurface[r.surface][r.victoire ? 'victoires' : 'defaites']++;
+        const saison = phaseAffichee(r.semaine).numeroSaison;
+        if (!parSaison[saison]) parSaison[saison] = { victoires: 0, defaites: 0 };
+        parSaison[saison][r.victoire ? 'victoires' : 'defaites']++;
+    });
+    return { global, parSurface, parSaison };
+}
+
+// Face-a-face : lignes tournoi_matchs (seule table qui connait l'identite des DEUX
+// cotes d'un match, contrairement a `matchs`) ou l'un des cotes est mon joueur
+// (player_id = monPlayerId, est_reel = 1) - fonctionne pareil que l'autre cote soit
+// un vrai joueur ou un rival, la condition specifique a chaque cas est dans la
+// requete SQL appelante, pas ici.
+function calculerFaceAFace(rows, monPlayerId) {
+    const parSurface = {};
+    const parSaison = {};
+    let victoires = 0, defaites = 0;
+    rows.forEach(function (r) {
+        const monCoteId = (r.j1_player_id === Number(monPlayerId) && r.j1_est_reel) ? r.j1_id : r.j2_id;
+        const jaiGagne = r.vainqueur_id === monCoteId;
+        if (jaiGagne) victoires++; else defaites++;
+        if (!parSurface[r.surface]) parSurface[r.surface] = { victoires: 0, defaites: 0 };
+        parSurface[r.surface][jaiGagne ? 'victoires' : 'defaites']++;
+        const saison = phaseAffichee(r.semaine).numeroSaison;
+        if (!parSaison[saison]) parSaison[saison] = { victoires: 0, defaites: 0 };
+        parSaison[saison][jaiGagne ? 'victoires' : 'defaites']++;
+    });
+    return { nbConfrontations: rows.length, victoires, defaites, parSurface, parSaison };
+}
+
+app.get('/api/adversaire/reel/:playerId', (req, res) => {
+    try {
+        const { playerId } = req.params;
+        const { monUserId } = req.query;
+
+        const adversaire = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
+        if (!adversaire) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+
+        const circuitAdversaire = adversaire.type === 'joueur' ? 'ATP' : 'WTA';
+        const cleAdversaire = 'joueur:' + adversaire.id;
+        const infos = {
+            prenom: adversaire.prenom, nom: adversaire.nom, age: adversaire.age, taille: adversaire.taille,
+            nationalite: adversaire.nationalite, drapeau: drapeau(adversaire.nationalite),
+            main_forte: adversaire.main_forte, type: adversaire.type,
+            circuit: circuitAdversaire,
+            classement: calculerRangsLiveGlobal(circuitAdversaire).get(cleAdversaire) || null,
+            meilleurClassement: meilleurClassement(circuitAdversaire, cleAdversaire),
+            coachUserId: adversaire.user_id, coachNom: nomCoach(adversaire.user_id)
+        };
+
+        const palmares = db.prepare(`
+            SELECT tournois.nom, tournois.semaine, tournois.categorie, tournois.surface
+            FROM tournoi_joueurs tj
+            JOIN tournois ON tournois.id = tj.tournoi_id
+            WHERE tj.player_id = ? AND tj.est_reel = 1 AND tj.tour_elimine = 'Vainqueur'
+            ORDER BY tournois.semaine DESC
+        `).all(playerId);
+        palmares.forEach(function (p) { p.positionSemaine = positionSemaineAffichee(p.semaine); });
+
+        const matchsBruts = db.prepare(`
+            SELECT matchs.id, matchs.surface, matchs.semaine, matchs.vainqueur, matchs.score, matchs.tournoi_id, matchs.numero_tour, matchs.kine_intervenu,
+                   tournois.nom AS tournoi_nom, tournois.calendrier_id AS tournoi_calendrier_id, tournois.categorie AS tournoi_categorie,
+                   tj1.player_id AS tj1_player_id, tj1.rival_id AS tj1_rival_id, tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite,
+                   tj2.player_id AS tj2_player_id, tj2.rival_id AS tj2_rival_id, tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite
+            FROM matchs
+            LEFT JOIN tournois ON tournois.id = matchs.tournoi_id
+            LEFT JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id OR tm.match_id_j2 = matchs.id
+            LEFT JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
+            LEFT JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
+            WHERE matchs.player_id = ?
+            ORDER BY matchs.id DESC
+        `).all(playerId);
+        matchsBruts.forEach(function (m) {
+            if (!m.tournoi_id) return;
+            const jeSuisTj1 = m.tj1_player_id === Number(playerId);
+            m.adversaire_nom = jeSuisTj1 ? m.tj2_nom : m.tj1_nom;
+            m.adversaire_nationalite = jeSuisTj1 ? m.tj2_nationalite : m.tj1_nationalite;
+            const adversairePlayerId = jeSuisTj1 ? m.tj2_player_id : m.tj1_player_id;
+            const adversaireRivalId = jeSuisTj1 ? m.tj2_rival_id : m.tj1_rival_id;
+            const adversaireCle = adversairePlayerId ? ('joueur:' + adversairePlayerId) : (adversaireRivalId ? ('rival:' + adversaireRivalId) : null);
+            m.adversaire_classement = classementALaSemaine(circuitAdversaire, adversaireCle, m.semaine);
+        });
+
+        // "Derniers matchs" n'est plus plafonne a 20 : tous les matchs de la SAISON
+        // demandee (`?saison=N`, saison affichee courante par defaut) sont renvoyes.
+        // `saisonsDisponibles` liste les saisons ou ce joueur a au moins un match, pour
+        // alimenter le selecteur cote client.
+        const etatSemaine = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const saisonCourante = phaseAffichee(etatSemaine.semaine_actuelle).numeroSaison;
+        const saisonsDisponibles = Array.from(new Set(matchsBruts.map(function (m) { return phaseAffichee(m.semaine).numeroSaison; })))
+            .sort(function (a, b) { return b - a; });
+        const saisonAffichee = req.query.saison ? Number(req.query.saison) : saisonCourante;
+
+        const derniersMatchs = matchsBruts
+            .filter(function (m) { return phaseAffichee(m.semaine).numeroSaison === saisonAffichee; })
+            .map(function (m) {
+                return {
+                    matchId: m.id, surface: m.surface, semaine: m.semaine, positionSemaine: positionSemaineAffichee(m.semaine),
+                    victoire: m.vainqueur === 'joueur', score: m.score, tournoi: !!m.tournoi_id, numeroTour: m.numero_tour,
+                    kineIntervenu: !!m.kine_intervenu,
+                    tournoiId: m.tournoi_id, tournoiNom: m.tournoi_nom, tournoiCalendrierId: m.tournoi_calendrier_id, categorie: m.tournoi_categorie,
+                    adversaireNom: m.adversaire_nom || null, adversaireDrapeau: drapeau(m.adversaire_nationalite),
+                    adversaireClassement: m.adversaire_classement || null
+                };
+            });
+
+        const stats = calculerStatsVD(matchsBruts.map(function (m) { return { surface: m.surface, semaine: m.semaine, victoire: m.vainqueur === 'joueur' }; }));
+
+        let faceAFace = { nbConfrontations: 0, victoires: 0, defaites: 0, parSurface: {}, parSaison: {} };
+        if (monUserId) {
+            const monJoueur = db.prepare('SELECT id FROM players WHERE user_id = ? AND type = ?').get(monUserId, adversaire.type);
+            if (monJoueur) {
+                const confrontations = db.prepare(`
+                    SELECT tm.vainqueur_id, t.surface, t.semaine,
+                           j1.id AS j1_id, j1.player_id AS j1_player_id, j1.est_reel AS j1_est_reel,
+                           j2.id AS j2_id, j2.player_id AS j2_player_id, j2.est_reel AS j2_est_reel
+                    FROM tournoi_matchs tm
+                    JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
+                    JOIN tournoi_joueurs j2 ON j2.id = tm.joueur2_id
+                    JOIN tournois t ON t.id = tm.tournoi_id
+                    WHERE (j1.player_id = ? AND j1.est_reel = 1 AND j2.player_id = ? AND j2.est_reel = 1)
+                       OR (j2.player_id = ? AND j2.est_reel = 1 AND j1.player_id = ? AND j1.est_reel = 1)
+                `).all(monJoueur.id, playerId, monJoueur.id, playerId);
+                faceAFace = calculerFaceAFace(confrontations, monJoueur.id);
+            }
+        }
+
+        const badges = calculerBadges(circuitAdversaire, cleAdversaire, 'player_id', playerId);
+
+        res.json({ success: true, infos, palmares, derniersMatchs, stats, faceAFace, badges, saisonAffichee, saisonsDisponibles });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/adversaire/rival/:rivalId', (req, res) => {
+    try {
+        const { rivalId } = req.params;
+        const { monUserId } = req.query;
+
+        const rival = db.prepare('SELECT * FROM classement_joueurs WHERE id = ?').get(rivalId);
+        if (!rival) {
+            return res.status(404).json({ error: 'Rival introuvable.' });
+        }
+
+        const cleRival = 'rival:' + rival.id;
+        const infos = {
+            nom: rival.nom, nationalite: rival.nationalite, drapeau: drapeau(rival.nationalite), circuit: rival.circuit,
+            classement: calculerRangsLiveGlobal(rival.circuit).get(cleRival) || null,
+            meilleurClassement: meilleurClassement(rival.circuit, cleRival)
+        };
+
+        const palmares = db.prepare(`
+            SELECT tournois.nom, tournois.semaine, tournois.categorie, tournois.surface
+            FROM tournoi_joueurs tj
+            JOIN tournois ON tournois.id = tj.tournoi_id
+            WHERE tj.rival_id = ? AND tj.tour_elimine = 'Vainqueur'
+            ORDER BY tournois.semaine DESC
+        `).all(rivalId);
+        palmares.forEach(function (p) { p.positionSemaine = positionSemaineAffichee(p.semaine); });
+
+        const matchsBruts = db.prepare(`
+            SELECT t.id AS tournoi_id, t.nom AS tournoi_nom, t.calendrier_id AS tournoi_calendrier_id, t.semaine, t.surface, tm.numero_tour, tm.score, tm.vainqueur_id,
+                   j1.id AS j1_id, j1.rival_id AS j1_rival_id, j1.nom AS j1_nom,
+                   j2.id AS j2_id, j2.rival_id AS j2_rival_id, j2.nom AS j2_nom
+            FROM tournoi_matchs tm
+            JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
+            JOIN tournoi_joueurs j2 ON j2.id = tm.joueur2_id
+            JOIN tournois t ON t.id = tm.tournoi_id
+            WHERE j1.rival_id = ? OR j2.rival_id = ?
+            ORDER BY t.semaine DESC, tm.id DESC
+        `).all(rivalId, rivalId);
+
+        const matchsForme = matchsBruts.filter(function (m) { return m.score; }).map(function (m) {
+            const rivalEstJ1 = m.j1_rival_id === Number(rivalId);
+            const monId = rivalEstJ1 ? m.j1_id : m.j2_id;
+            const victoire = m.vainqueur_id === monId;
+            const adversaireNom = rivalEstJ1 ? m.j2_nom : m.j1_nom;
+            const score = rivalEstJ1 ? m.score : miroirScore(m.score);
+            return {
+                tournoiId: m.tournoi_id, tournoiCalendrierId: m.tournoi_calendrier_id,
+                tournoiNom: m.tournoi_nom, semaine: m.semaine, positionSemaine: positionSemaineAffichee(m.semaine),
+                surface: m.surface, numeroTour: m.numero_tour, adversaireNom, victoire, score
+            };
+        });
+
+        // "Derniers matchs" n'est plus plafonne a 20 : tous les matchs de la SAISON
+        // demandee (`?saison=N`, saison affichee courante par defaut) sont renvoyes.
+        const etatSemaine = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const saisonCourante = phaseAffichee(etatSemaine.semaine_actuelle).numeroSaison;
+        const saisonsDisponibles = Array.from(new Set(matchsForme.map(function (m) { return phaseAffichee(m.semaine).numeroSaison; })))
+            .sort(function (a, b) { return b - a; });
+        const saisonAffichee = req.query.saison ? Number(req.query.saison) : saisonCourante;
+
+        const derniersMatchs = matchsForme.filter(function (m) { return phaseAffichee(m.semaine).numeroSaison === saisonAffichee; });
+        const stats = calculerStatsVD(matchsForme.map(function (m) { return { surface: m.surface, semaine: m.semaine, victoire: m.victoire }; }));
+
+        let faceAFace = { nbConfrontations: 0, victoires: 0, defaites: 0, parSurface: {}, parSaison: {} };
+        if (monUserId) {
+            const monJoueur = db.prepare('SELECT id FROM players WHERE user_id = ? AND type = ?').get(monUserId, rival.circuit === 'ATP' ? 'joueur' : 'joueuse');
+            if (monJoueur) {
+                const confrontations = db.prepare(`
+                    SELECT tm.vainqueur_id, t.surface, t.semaine,
+                           j1.id AS j1_id, j1.player_id AS j1_player_id, j1.est_reel AS j1_est_reel,
+                           j2.id AS j2_id, j2.player_id AS j2_player_id, j2.est_reel AS j2_est_reel
+                    FROM tournoi_matchs tm
+                    JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
+                    JOIN tournoi_joueurs j2 ON j2.id = tm.joueur2_id
+                    JOIN tournois t ON t.id = tm.tournoi_id
+                    WHERE (j1.player_id = ? AND j1.est_reel = 1 AND j2.rival_id = ?)
+                       OR (j2.player_id = ? AND j2.est_reel = 1 AND j1.rival_id = ?)
+                `).all(monJoueur.id, rivalId, monJoueur.id, rivalId);
+                faceAFace = calculerFaceAFace(confrontations, monJoueur.id);
+            }
+        }
+
+        const badges = calculerBadges(rival.circuit, cleRival, 'rival_id', rivalId);
+
+        res.json({ success: true, infos, palmares, derniersMatchs, stats, faceAFace, badges, saisonAffichee, saisonsDisponibles });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// ---------- Badges ----------
+
+// 6 paliers (index 0 = sombre/non atteint) : "seuils" contient les 5 valeurs
+// minimales pour bronze/argent/or/platine/diamant. Un badge par statistique
+// deja suivie en base (titres, victoires, classement) - pas de nouvelle
+// mecanique de jeu, juste une lecture/mise en forme de compteurs existants.
+// Affiches directement sur la fiche adversaire (Infos/Palmares/... + Badges),
+// aussi bien pour un vrai joueur que pour un rival persistant.
+const NOMS_PALIERS = ['sombre', 'bronze', 'argent', 'or', 'platine', 'diamant'];
+
+function palierBadge(valeur, seuils) {
+    let palier = 0;
+    for (let i = 0; i < seuils.length; i++) {
+        if (valeur >= seuils[i]) palier = i + 1;
+    }
+    return palier;
+}
+
+function construireBadges(liste) {
+    return liste.map(function (b) {
+        return {
+            id: b.id, nom: b.nom, description: b.description, valeur: b.valeur, seuils: b.seuils,
+            palier: palierBadge(b.valeur, b.seuils), palierNom: NOMS_PALIERS[palierBadge(b.valeur, b.seuils)],
+            prochainSeuil: b.seuils[palierBadge(b.valeur, b.seuils)] || null
+        };
+    });
+}
+
+// Score au format "6-3, 7-5" toujours oriente du point de vue de CE joueur/rival
+// (mirroirScore deja applique si besoin par l'appelant) - utilise pour detecter
+// un match "sans perdre le moindre jeu" (chaque set gagne 6-0/7-0).
+function estIntouchable(score) {
+    if (!score) return false;
+    return score.split(', ').every(function (set) {
+        const parts = set.split('-').map(Number);
+        return parts.length === 2 && !isNaN(parts[1]) && parts[1] === 0;
+    });
+}
+
+// Historique chronologique (ordre tm.id, seul proxy disponible - pas de vraie
+// date par match) des matchs de tournoi d'un joueur/rival, TOUJOURS oriente de
+// son propre point de vue (mirroirScore applique si ce joueur/rival etait cote
+// j2) - sert de base commune aux badges "Intouchable" et "Serie de victoires",
+// qui ont besoin du score/de l'issue de CHAQUE match, pas juste d'un total.
+function matchsOrientes(filtreColonne, id) {
+    const filtreJ1 = filtreColonne === 'player_id' ? 'j1.player_id = ? AND j1.est_reel = 1' : 'j1.rival_id = ?';
+    const filtreJ2 = filtreColonne === 'player_id' ? 'j2.player_id = ? AND j2.est_reel = 1' : 'j2.rival_id = ?';
+    const rows = db.prepare(`
+        SELECT tm.id, tm.score, tm.vainqueur_id,
+               j1.id AS j1_id, j1.player_id AS j1_player_id, j1.rival_id AS j1_rival_id,
+               j2.id AS j2_id, j2.player_id AS j2_player_id, j2.rival_id AS j2_rival_id
+        FROM tournoi_matchs tm
+        JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
+        JOIN tournoi_joueurs j2 ON j2.id = tm.joueur2_id
+        WHERE (${filtreJ1}) OR (${filtreJ2})
+        ORDER BY tm.id ASC
+    `).all(id, id);
+
+    return rows.filter(function (r) { return r.score; }).map(function (r) {
+        const estJ1 = filtreColonne === 'player_id' ? r.j1_player_id === Number(id) : r.j1_rival_id === Number(id);
+        const monId = estJ1 ? r.j1_id : r.j2_id;
+        return { victoire: r.vainqueur_id === monId, score: estJ1 ? r.score : miroirScore(r.score) };
+    });
+}
+
+// filtreColonne = 'player_id' (vrai joueur, avec est_reel = 1) ou 'rival_id'
+// (rival persistant du roster) - les deux colonnes sont mutuellement exclusives
+// dans tournoi_joueurs, donc pas besoin d'un est_reel explicite pour rival_id.
+// Jeux Olympiques delibirement absents (n'existent pas dans le jeu, cf. CLAUDE.md
+// "Pas encore fait") : "Grand chelem differents" plafonne donc a 4/5 realistement
+// tant que les JO ne sont pas implementes (choix explicite de l'utilisateur).
+function calculerBadges(circuit, cle, filtreColonne, id) {
+    const filtreDirect = filtreColonne === 'player_id' ? 'player_id = ? AND est_reel = 1' : 'rival_id = ?';
+    const filtreJoint = filtreColonne === 'player_id' ? 'tj.player_id = ? AND tj.est_reel = 1' : 'tj.rival_id = ?';
+
+    function titresParCategorie(categorie) {
+        return db.prepare(`
+            SELECT COUNT(*) AS n FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE ${filtreJoint} AND tj.tour_elimine = 'Vainqueur' AND t.categorie = ?
+        `).get(id, categorie).n;
+    }
+
+    function titresParNom(nom) {
+        return db.prepare(`
+            SELECT COUNT(*) AS n FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE ${filtreJoint} AND tj.tour_elimine = 'Vainqueur' AND t.nom = ?
+        `).get(id, nom).n;
+    }
+
+    function victoiresParSurface(surface) {
+        return db.prepare(`
+            SELECT COUNT(*) AS n FROM tournoi_matchs tm JOIN tournoi_joueurs tj ON tj.id = tm.vainqueur_id
+            JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE ${filtreJoint} AND t.surface = ?
+        `).get(id, surface).n;
+    }
+
+    const titres = db.prepare(`SELECT COUNT(*) AS n FROM tournoi_joueurs WHERE ${filtreDirect} AND tour_elimine = 'Vainqueur'`).get(id).n;
+    const titresGC = titresParCategorie('slam');
+    const titresM1000 = titresParCategorie('1000');
+    const titresMasters = titresParCategorie('finals');
+
+    const gcDifferents = db.prepare(`
+        SELECT COUNT(DISTINCT t.nom) AS n FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE ${filtreJoint} AND tj.tour_elimine = 'Vainqueur' AND t.categorie = 'slam'
+    `).get(id).n;
+
+    const victoires = db.prepare(`
+        SELECT COUNT(*) AS n FROM tournoi_matchs tm JOIN tournoi_joueurs tj ON tj.id = tm.vainqueur_id
+        WHERE ${filtreJoint}
+    `).get(id).n;
+
+    const semainesTop10 = db.prepare(`SELECT COUNT(*) AS n FROM classement_historique WHERE cle = ? AND circuit = ? AND rang <= 10`).get(cle, circuit).n;
+    const semainesNum1 = db.prepare(`SELECT COUNT(*) AS n FROM classement_historique WHERE cle = ? AND circuit = ? AND rang = 1`).get(cle, circuit).n;
+
+    const qualifMasters = db.prepare(`
+        SELECT COUNT(*) AS n FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE ${filtreJoint} AND t.categorie = 'finals'
+    `).get(id).n;
+
+    const matchs = matchsOrientes(filtreColonne, id);
+    const intouchable = matchs.filter(function (m) { return m.victoire && estIntouchable(m.score); }).length;
+    let meilleureSerie = 0, serieActuelle = 0;
+    matchs.forEach(function (m) {
+        if (m.victoire) { serieActuelle++; meilleureSerie = Math.max(meilleureSerie, serieActuelle); }
+        else { serieActuelle = 0; }
+    });
+
+    // Balles de break sauvees : uniquement trackees sur la table `matchs`, qui
+    // n'existe que pour un VRAI joueur (jamais de ligne `matchs` pour un rival,
+    // meme quand il affronte un reel) - toujours 0 pour un rival, faute de donnee.
+    const ballesBreakSauvees = filtreColonne === 'player_id'
+        ? db.prepare('SELECT COALESCE(SUM(balles_break_sauvees), 0) AS n FROM matchs WHERE player_id = ?').get(id).n
+        : 0;
+
+    return construireBadges([
+        { id: 'victoires', nom: 'Victoires en tournoi', description: 'Matchs de tournoi remportés, toute la carrière', valeur: victoires, seuils: [50, 100, 150, 250, 500] },
+        { id: 'victoires_dur', nom: 'Matchs gagnés sur dur', description: 'Matchs remportés sur surface dure', valeur: victoiresParSurface('dur'), seuils: [5, 10, 15, 25, 50] },
+        { id: 'victoires_terre', nom: 'Matchs gagnés sur terre', description: 'Matchs remportés sur terre battue', valeur: victoiresParSurface('terre'), seuils: [5, 10, 15, 25, 50] },
+        { id: 'victoires_herbe', nom: 'Matchs gagnés sur herbe', description: 'Matchs remportés sur herbe', valeur: victoiresParSurface('herbe'), seuils: [5, 10, 15, 25, 50] },
+        { id: 'titres', nom: 'Titres remportés', description: 'Tournois remportés, toutes catégories confondues', valeur: titres, seuils: [5, 10, 15, 25, 50] },
+        { id: 'titres_gc', nom: 'Titres du Grand Chelem', description: 'Open d\'Australie, Roland-Garros, Wimbledon, US Open remportés', valeur: titresGC, seuils: [5, 10, 15, 25, 50] },
+        { id: 'gc_differents', nom: 'Grand Chelem différents gagnés', description: 'Nombre de Grand Chelem distincts remportés au moins une fois', valeur: gcDifferents, seuils: [1, 2, 3, 4, 5] },
+        { id: 'titres_m1000', nom: 'Titres Masters 1000', description: 'Tournois Masters 1000 remportés', valeur: titresM1000, seuils: [5, 10, 15, 25, 50] },
+        { id: 'top10', nom: 'Semaines dans le Top 10', description: 'Semaines passées dans le top 10 du classement Live', valeur: semainesTop10, seuils: [1, 10, 25, 50, 100] },
+        { id: 'numero1', nom: 'Semaines N°1', description: 'Semaines passées n°1 du classement Live', valeur: semainesNum1, seuils: [1, 4, 12, 26, 52] },
+        { id: 'masters_qualif', nom: 'Qualifications aux Masters', description: 'Qualifications au tournoi des Masters de fin de saison', valeur: qualifMasters, seuils: [1, 10, 25, 50, 100] },
+        { id: 'victoire_ao', nom: 'Victoire Open d\'Australie', description: 'Titres remportés à l\'Open d\'Australie', valeur: titresParNom('Open d\'Australie'), seuils: [1, 2, 3, 5, 8] },
+        { id: 'victoire_rg', nom: 'Victoire Roland-Garros', description: 'Titres remportés à Roland-Garros', valeur: titresParNom('Roland-Garros'), seuils: [1, 2, 3, 5, 8] },
+        { id: 'victoire_wimbledon', nom: 'Victoire Wimbledon', description: 'Titres remportés à Wimbledon', valeur: titresParNom('Wimbledon'), seuils: [1, 2, 3, 5, 8] },
+        { id: 'victoire_usopen', nom: 'Victoire US Open', description: 'Titres remportés à l\'US Open', valeur: titresParNom('US Open'), seuils: [1, 2, 3, 5, 8] },
+        { id: 'victoire_masters', nom: 'Victoire Masters', description: 'Titres remportés au tournoi des Masters de fin de saison', valeur: titresMasters, seuils: [1, 2, 3, 5, 8] },
+        { id: 'intouchable', nom: 'Intouchable', description: 'Matchs remportés sans perdre le moindre jeu', valeur: intouchable, seuils: [1, 5, 15, 25, 50] },
+        { id: 'serie_victoires', nom: 'Série de victoires', description: 'Meilleure série de matchs gagnés à la suite', valeur: meilleureSerie, seuils: [5, 10, 15, 25, 50] },
+        { id: 'sang_froid', nom: 'Sang-froid', description: 'Balles de break sauvées, cumulées sur la carrière', valeur: ballesBreakSauvees, seuils: [10, 25, 50, 100, 200] }
+    ]);
+}
+
+// Badges du COACH (distincts des badges par joueur ci-dessus) : cumules sur les
+// 2 personnages + statistiques propres au coach (pronostics, saisons jouees).
+// Jeux Olympiques delibirement absents (cf. calculerBadges ci-dessus).
+function calculerBadgesCoach(userId) {
+    const joueurs = db.prepare("SELECT id, type FROM players WHERE user_id = ? AND statut = 'valide'").all(userId);
+    const idsJoueurs = joueurs.map(function (j) { return j.id; });
+    const joueurRow = joueurs.find(function (j) { return j.type === 'joueur'; });
+    const joueuseRow = joueurs.find(function (j) { return j.type === 'joueuse'; });
+
+    let titres = 0, gcCumules = 0, mastersCumules = 0, appelKine = 0;
+    if (idsJoueurs.length > 0) {
+        const placeholders = idsJoueurs.map(function () { return '?'; }).join(',');
+        titres = db.prepare(`
+            SELECT COUNT(*) AS n FROM tournoi_joueurs WHERE player_id IN (${placeholders}) AND est_reel = 1 AND tour_elimine = 'Vainqueur'
+        `).get(...idsJoueurs).n;
+
+        gcCumules = db.prepare(`
+            SELECT COUNT(*) AS n FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE tj.player_id IN (${placeholders}) AND tj.est_reel = 1 AND tj.tour_elimine = 'Vainqueur' AND t.categorie = 'slam'
+        `).get(...idsJoueurs).n;
+
+        mastersCumules = db.prepare(`
+            SELECT COUNT(*) AS n FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE tj.player_id IN (${placeholders}) AND tj.est_reel = 1 AND tj.tour_elimine = 'Vainqueur' AND t.categorie = 'finals'
+        `).get(...idsJoueurs).n;
+
+        appelKine = db.prepare(`SELECT COUNT(*) AS n FROM matchs WHERE player_id IN (${placeholders}) AND kine_intervenu = 1`).get(...idsJoueurs).n;
+    }
+
+    // Nombre de saisons ou LES DEUX personnages ont chacun remporte au moins un
+    // Grand Chelem (JO non compris, cf. Why plus haut).
+    let gcMemeSaison = 0;
+    if (joueurRow && joueuseRow) {
+        function saisonsGC(playerId) {
+            return new Set(db.prepare(`
+                SELECT t.semaine FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+                WHERE tj.player_id = ? AND tj.est_reel = 1 AND tj.tour_elimine = 'Vainqueur' AND t.categorie = 'slam'
+            `).all(playerId).map(function (r) { return phaseAffichee(r.semaine).numeroSaison; }));
+        }
+        const saisonsJoueur = saisonsGC(joueurRow.id);
+        const saisonsJoueuse = saisonsGC(joueuseRow.id);
+        saisonsJoueur.forEach(function (s) { if (saisonsJoueuse.has(s)) gcMemeSaison++; });
+    }
+
+    // Semaines Top 10 ou les 2 personnages y sont EN MEME TEMPS (pas la somme des
+    // semaines de chacun separement).
+    let top10Simultanees = 0;
+    if (joueurRow && joueuseRow) {
+        top10Simultanees = db.prepare(`
+            SELECT COUNT(*) AS n FROM classement_historique a JOIN classement_historique b ON a.semaine = b.semaine
+            WHERE a.cle = ? AND a.circuit = 'ATP' AND a.rang <= 10 AND b.cle = ? AND b.circuit = 'WTA' AND b.rang <= 10
+        `).get('joueur:' + joueurRow.id, 'joueur:' + joueuseRow.id).n;
+    }
+
+    const pointsPronos = db.prepare(`SELECT COALESCE(SUM(points_gagnes), 0) AS n FROM pronostics WHERE user_id = ? AND points_gagnes IS NOT NULL`).get(userId).n;
+
+    const saisonsRows = db.prepare(`
+        SELECT DISTINCT t.semaine FROM pronostics p JOIN tournois t ON t.id = p.tournoi_id WHERE p.user_id = ?
+    `).all(userId);
+    const saisonsJouees = new Set(saisonsRows.map(function (r) { return phaseAffichee(r.semaine).numeroSaison; })).size;
+
+    return construireBadges([
+        { id: 'titres_coach', nom: 'Titres cumulés', description: 'Titres remportés, cumulés sur les 2 personnages', valeur: titres, seuils: [1, 25, 50, 100, 250] },
+        { id: 'gc_cumules', nom: 'Grand Chelems cumulés', description: 'Titres du Grand Chelem, cumulés sur les 2 personnages', valeur: gcCumules, seuils: [2, 5, 10, 20, 30] },
+        { id: 'gc_meme_saison', nom: 'Grand Chelem la même saison', description: 'Saisons où les 2 personnages ont chacun remporté un Grand Chelem', valeur: gcMemeSaison, seuils: [1, 2, 3, 4, 5] },
+        { id: 'masters_cumules', nom: 'Masters de fin d\'année cumulés', description: 'Titres du tournoi des Masters, cumulés sur les 2 personnages', valeur: mastersCumules, seuils: [1, 2, 3, 5, 8] },
+        { id: 'points_pronos', nom: 'Points de pronostics', description: 'Points de pronostics cumulés, toute la carrière', valeur: pointsPronos, seuils: [25, 40, 70, 100, 200] },
+        { id: 'top10_simultane', nom: 'Semaines dans le Top 10 ensemble', description: 'Semaines où les 2 personnages sont dans le top 10 du classement Live en même temps', valeur: top10Simultanees, seuils: [1, 2, 3, 5, 10] },
+        { id: 'saisons_jouees', nom: 'Saisons jouées', description: 'Saisons avec au moins un pronostic soumis', valeur: saisonsJouees, seuils: [1, 3, 5, 10, 20] },
+        { id: 'appel_kine', nom: 'Appel au kiné', description: 'Interventions du kiné, cumulées sur les 2 personnages', valeur: appelKine, seuils: [5, 10, 15, 25, 50] }
+    ]);
+}
+
+app.get('/api/matchs/semaine/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+
+        const joueurs = db.prepare("SELECT id FROM players WHERE user_id = ? AND statut = 'valide'").all(userId);
+        if (joueurs.length === 0) {
+            return res.json({ success: true, tournois: [] });
+        }
+
+        // Meme tolerance d'un ecart de 1 semaine que /api/matchs (cf. bug Live) : un
+        // tournoi se joue integralement au moment ou semaine_actuelle avance dans la
+        // meme requete, donc au moment ou le coach consulte la page, la semaine
+        // courante a deja avance d'un cran par rapport a tournois.semaine.
+        const placeholders = joueurs.map(function () { return '?'; }).join(',');
+        const tournois = db.prepare(`
+            SELECT DISTINCT tournois.id, tournois.nom, tournois.circuit, tournois.surface,
+                   tournois.calendrier_id, tournoi_joueurs.player_id, tournois.semaine
+            FROM tournois
+            JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
+            WHERE tournois.semaine >= ? AND tournois.semaine <= ?
+              AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id IN (${placeholders})
+        `).all(semaineActuelle - 1, semaineActuelle, ...joueurs.map(function (p) { return p.id; }));
+
+        const resultat = tournois.map(function (t) {
+            const matchs = db.prepare(`
+                SELECT tournoi_matchs.numero_tour, tournoi_matchs.ordre, tournoi_matchs.score,
+                       j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite,
+                       j2.nom AS joueur2_nom, j2.nationalite AS joueur2_nationalite
+                FROM tournoi_matchs
+                JOIN tournoi_joueurs AS j1 ON j1.id = tournoi_matchs.joueur1_id
+                LEFT JOIN tournoi_joueurs AS j2 ON j2.id = tournoi_matchs.joueur2_id
+                WHERE tournoi_matchs.tournoi_id = ? AND tournoi_matchs.match_id IS NULL
+                  AND j1.nom != 'BYE' AND (j2.nom IS NULL OR j2.nom != 'BYE')
+                ORDER BY tournoi_matchs.ordre
+            `).all(t.id);
+            matchs.forEach(function (m) {
+                m.joueur1_drapeau = drapeau(m.joueur1_nationalite);
+                m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
+            });
+            return {
+                tournoiId: t.id, nom: t.nom, circuit: t.circuit, surface: t.surface,
+                calendrierId: t.calendrier_id, playerId: t.player_id, semaine: t.semaine,
+                positionSemaine: positionSemaineAffichee(t.semaine), matchs: matchs
+            };
+        }).filter(function (t) { return t.matchs.length > 0; });
+
+        res.json({ success: true, tournois: resultat });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/matchs/:userId', (req, res) => {
+    try {
+        const { userId } = req.params;
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+
+        const matchs = db.prepare(`
+            SELECT matchs.id, matchs.player_id, matchs.surface, matchs.difficulte, matchs.semaine,
+                   matchs.vainqueur, matchs.score, matchs.niveau_joueur, matchs.niveau_adversaire, matchs.date_creation,
+                   matchs.tournoi_id, matchs.numero_tour, matchs.coupe_equipe_id, tournois.nom AS tournoi_nom, tournois.calendrier_id AS tournoi_calendrier_id,
+                   players.prenom, players.nom, players.type, players.nationalite,
+                   tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite, tj1.est_reel AS tj1_est_reel,
+                   tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite, tj2.est_reel AS tj2_est_reel
+            FROM matchs
+            JOIN players ON players.id = matchs.player_id
+            LEFT JOIN tournois ON tournois.id = matchs.tournoi_id
+            LEFT JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id
+            LEFT JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
+            LEFT JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
+            WHERE matchs.user_id = ?
+            ORDER BY matchs.id DESC
+        `).all(userId);
+
+        const nbDivisionsCoupeCache = {};
+        matchs.forEach(function (m) {
+            // Un tournoi se joue integralement a la semaine "semaine" au moment ou
+            // avancer-semaine incremente semaine_actuelle dans la meme requete : au
+            // moment ou le coach peut voir le match, semaine_actuelle a deja avance
+            // d'un cran. D'ou la tolerance d'un ecart de 1 (sinon le Live d'un match
+            // de tournoi ne serait jamais accessible).
+            m.estSemaineActuelle = etat.semaine_actuelle - m.semaine <= 1;
+            m.positionSemaine = positionSemaineAffichee(m.semaine);
+            // Les matchs amicaux (pas de tournoi_id) peuvent avoir lieu meme en
+            // Pre-saison/Semaine 0, ou positionSemaine est null - libelle de repli
+            // complet pour ce cas precis (jamais utilise pour un match de tournoi,
+            // toujours en semaine de type 'tournoi' donc positionSemaine deja valide).
+            const phaseM = phaseDeSemaine(m.semaine);
+            m.semaineLabel = phaseM.type === 'tournoi' ? ('Semaine ' + phaseM.positionSemaine)
+                : (phaseM.type === 'presaison' ? 'Pré-saison' : 'Semaine 0');
+            m.joueur_drapeau = drapeau(m.nationalite);
+            if (m.tournoi_id) {
+                const adversaireEstTj1 = m.tj1_est_reel === 0;
+                m.adversaire_nom = adversaireEstTj1 ? m.tj1_nom : m.tj2_nom;
+                m.adversaire_nationalite = adversaireEstTj1 ? m.tj1_nationalite : m.tj2_nationalite;
+                m.adversaire_drapeau = drapeau(m.adversaire_nationalite);
+            } else if (m.difficulte === 'coupe' && m.coupe_equipe_id) {
+                const tieCoupe = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(m.coupe_equipe_id);
+                const rubber = db.prepare(`
+                    SELECT * FROM coupe_rubbers WHERE coupe_equipe_id = ?
+                    AND ((domicile_est_reel = 1 AND (domicile_id = ? OR domicile_id2 = ?))
+                      OR (exterieur_est_reel = 1 AND (exterieur_id = ? OR exterieur_id2 = ?)))
+                `).all(m.coupe_equipe_id, m.player_id, m.player_id, m.player_id, m.player_id)
+                    .find(function (r) { return libelleRubber(r.numero) === m.numero_tour; });
+
+                if (rubber) {
+                    const jeSuisDomicile = rubber.domicile_est_reel === 1 && (rubber.domicile_id === m.player_id || rubber.domicile_id2 === m.player_id);
+                    const advEstReel = jeSuisDomicile ? !!rubber.exterieur_est_reel : !!rubber.domicile_est_reel;
+                    const adv1 = identiteJoueurOuRival(advEstReel, jeSuisDomicile ? rubber.exterieur_id : rubber.domicile_id);
+                    const adv2Id = jeSuisDomicile ? rubber.exterieur_id2 : rubber.domicile_id2;
+                    const adv2 = adv2Id ? identiteJoueurOuRival(advEstReel, adv2Id) : null;
+                    m.adversaire_nom = adv2 ? (adv1.nom + ' / ' + adv2.nom) : (adv1 ? adv1.nom : null);
+                    m.adversaire_nationalite = adv1 ? adv1.nationalite : null;
+                    m.adversaire_drapeau = drapeau(m.adversaire_nationalite);
+                }
+                if (tieCoupe) {
+                    m.coupe_manche = LABELS_MANCHE[tieCoupe.manche] || tieCoupe.manche;
+                    m.coupe_nation_domicile = tieCoupe.nation_domicile;
+                    m.coupe_nation_exterieur = tieCoupe.nation_exterieur;
+                    const cleDivisions = tieCoupe.saison + '_' + tieCoupe.circuit;
+                    if (!(cleDivisions in nbDivisionsCoupeCache)) {
+                        nbDivisionsCoupeCache[cleDivisions] = db.prepare('SELECT MAX(division) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ?').get(tieCoupe.saison, tieCoupe.circuit).n || 1;
+                    }
+                    m.coupe_division = nbDivisionsCoupeCache[cleDivisions] > 1 ? tieCoupe.division : null;
+                }
+            }
+        });
+
+        res.json({ success: true, matchs, semaineActuelle: etat.semaine_actuelle });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/matchs/detail/:matchId', (req, res) => {
+    try {
+        const { matchId } = req.params;
+        const { userId } = req.query;
+
+        // Un match de tournoi est public (le tableau lui-meme l'est deja, cf. fiche
+        // adversaire) - seuls les matchs amicaux (tournoi_id NULL) restent prives au
+        // coach qui les a joues.
+        const match = db.prepare(`
+            SELECT matchs.*, tournois.nom AS tournoi_nom, players.prenom, players.nom, players.type
+            FROM matchs
+            JOIN players ON players.id = matchs.player_id
+            LEFT JOIN tournois ON tournois.id = matchs.tournoi_id
+            WHERE matchs.id = ? AND (matchs.user_id = ? OR matchs.tournoi_id IS NOT NULL)
+        `).get(matchId, userId);
+
+        if (!match) {
+            return res.status(404).json({ error: 'Match introuvable.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        match.evenements = JSON.parse(match.evenements);
+        match.estSemaineActuelle = etat.semaine_actuelle - match.semaine <= 1;
+
+        res.json({ success: true, match });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// ---------- Statistiques ----------
+
+// Confrontations entre VRAIS joueurs uniquement (les lambdas jetables des tournois
+// n'ont pas d'identite stable d'un tournoi a l'autre, et les 200 rivaux persistants
+// par circuit rendraient une matrice complete enorme et peu lisible pour peu de
+// confrontations repetees). tournoi_matchs est la seule table qui connait les DEUX
+// cotes d'un match (contrairement a `matchs`, cote unique).
+app.get('/api/statistiques/confrontations', (req, res) => {
+    try {
+        const rows = db.prepare(`
+            SELECT j1.player_id AS p1, j2.player_id AS p2, j1.id AS j1_id, j2.id AS j2_id, tm.vainqueur_id
+            FROM tournoi_matchs tm
+            JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
+            JOIN tournoi_joueurs j2 ON j2.id = tm.joueur2_id
+            WHERE j1.est_reel = 1 AND j2.est_reel = 1 AND tm.vainqueur_id IS NOT NULL
+        `).all();
+
+        const parPaire = new Map();
+        rows.forEach(function (r) {
+            const vainqueurPlayerId = r.vainqueur_id === r.j1_id ? r.p1 : r.p2;
+            const a = Math.min(r.p1, r.p2), b = Math.max(r.p1, r.p2);
+            const cle = a + '-' + b;
+            if (!parPaire.has(cle)) parPaire.set(cle, { a, b, victoiresA: 0, victoiresB: 0 });
+            const entree = parPaire.get(cle);
+            if (vainqueurPlayerId === a) entree.victoiresA++; else entree.victoiresB++;
+        });
+
+        const joueursParId = new Map(
+            db.prepare("SELECT id, prenom, nom, nationalite, type FROM players WHERE statut = 'valide'").all()
+                .map(function (p) { return [p.id, p]; })
+        );
+
+        const confrontations = Array.from(parPaire.values())
+            .filter(function (c) { return joueursParId.has(c.a) && joueursParId.has(c.b); })
+            .map(function (c) {
+                const ja = joueursParId.get(c.a);
+                const jb = joueursParId.get(c.b);
+                return {
+                    joueur1: { id: ja.id, prenom: ja.prenom, nom: ja.nom, drapeau: drapeau(ja.nationalite), type: ja.type },
+                    joueur2: { id: jb.id, prenom: jb.prenom, nom: jb.nom, drapeau: drapeau(jb.nationalite), type: jb.type },
+                    victoires1: c.victoiresA, victoires2: c.victoiresB,
+                    nbMatchs: c.victoiresA + c.victoiresB
+                };
+            })
+            .sort(function (x, y) { return y.nbMatchs - x.nbMatchs; });
+
+        res.json({ success: true, confrontations });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Almanach : palmares + top 10 par saison COMPLETE (la saison en cours n'est pas
+// archivee tant qu'elle n'est pas terminee). Le classement de fin de saison est
+// recalcule a la volee sur la fenetre exacte de cette saison (calculerClassementGlobal),
+// pas relu depuis classement_historique qui ne stocke que des photos Live (fenetre
+// glissante de 52 semaines) - le "classement de fin de saison" traditionnel, lui,
+// correspond a la Race (points marques dans la saison), recalculable a tout moment
+// puisque tournois/tournoi_joueurs ne sont jamais purges.
+app.get('/api/statistiques/almanach', (req, res) => {
+    try {
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const saisonCouranteAffichee = phaseAffichee(etat.semaine_actuelle).numeroSaison;
+        const offset = decalageSaison();
+
+        function top10(circuit, semaineDebut, semaineFin) {
+            return calculerClassementGlobal(circuit, semaineDebut, semaineFin).slice(0, 10).map(function (c, i) {
+                return { rang: i + 1, nom: c.nom, drapeau: c.drapeau, points: c.points };
+            });
+        }
+
+        const saisons = [];
+        for (let n = 1; n < saisonCouranteAffichee; n++) {
+            const absN = n + offset;
+            const semaineDebut = (absN - 1) * LONGUEUR_SAISON + 1;
+            const semaineFin = absN * LONGUEUR_SAISON;
+
+            const tournois = db.prepare(`
+                SELECT t.nom, t.circuit, t.categorie,
+                       tj.nom AS vainqueur_nom, tj.nationalite AS vainqueur_nationalite,
+                       tj.player_id AS vainqueur_player_id, tj.rival_id AS vainqueur_rival_id, tj.est_reel AS vainqueur_est_reel
+                FROM tournois t
+                LEFT JOIN tournoi_joueurs tj ON tj.tournoi_id = t.id AND tj.tour_elimine = 'Vainqueur'
+                WHERE t.categorie IN ('slam', 'finals') AND t.statut = 'termine' AND t.semaine BETWEEN ? AND ?
+                ORDER BY t.semaine ASC, t.circuit ASC
+            `).all(semaineDebut, semaineFin).map(function (t) {
+                return {
+                    nom: t.nom, circuit: t.circuit, categorie: t.categorie,
+                    vainqueur: t.vainqueur_nom ? {
+                        nom: t.vainqueur_nom, drapeau: drapeau(t.vainqueur_nationalite),
+                        type: t.vainqueur_est_reel ? 'reel' : 'rival',
+                        id: t.vainqueur_est_reel ? t.vainqueur_player_id : t.vainqueur_rival_id
+                    } : null
+                };
+            });
+
+            if (tournois.length === 0) continue;
+
+            saisons.push({
+                numeroSaison: n, tournois,
+                topAtp: top10('ATP', semaineDebut, semaineFin),
+                topWta: top10('WTA', semaineDebut, semaineFin)
+            });
+        }
+
+        saisons.sort(function (a, b) { return b.numeroSaison - a.numeroSaison; });
+
+        res.json({ success: true, saisons });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// ---------- Statistiques : Records ----------
+// Uniquement des VRAIS joueurs partout ici (comme Confrontations) - les requetes
+// de base ci-dessous ne filtrent jamais par type/circuit, elles renvoient une
+// valeur par player_id ; c'est seulement au moment d'agreger (par joueur ATP, par
+// joueuse WTA, ou par coach en sommant ses 2 personnages) qu'on filtre par type.
+// Un forfait (blessure) n'est jamais un match "joue" pour ces records.
+
+function joueursReelsParId() {
+    return new Map(
+        db.prepare("SELECT id, user_id, prenom, nom, nationalite, type FROM players WHERE statut = 'valide'").all()
+            .map(function (p) { return [p.id, p]; })
+    );
+}
+
+function clauseEtParamSurface(colonne, surfaceValide, paramsBase) {
+    if (!surfaceValide) return { clause: '', params: paramsBase };
+    return { clause: ' AND ' + colonne + ' = ?', params: paramsBase.concat([surfaceValide]) };
+}
+
+function donneesTrophees(surfaceValide) {
+    const { clause, params } = clauseEtParamSurface('t.surface', surfaceValide, []);
+    return db.prepare(`
+        SELECT tj.player_id AS playerId, COUNT(*) AS valeur
+        FROM tournoi_joueurs tj
+        JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE tj.est_reel = 1 AND tj.tour_elimine = 'Vainqueur'${clause}
+        GROUP BY tj.player_id
+    `).all(...params);
+}
+
+function donneesVictoires(surfaceValide) {
+    const { clause, params } = clauseEtParamSurface('surface', surfaceValide, []);
+    return db.prepare(`
+        SELECT player_id AS playerId, COUNT(*) AS valeur
+        FROM matchs
+        WHERE vainqueur = 'joueur' AND score NOT LIKE 'Forfait%'${clause}
+        GROUP BY player_id
+    `).all(...params);
+}
+
+function donneesTotalMatchs(surfaceValide) {
+    const { clause, params } = clauseEtParamSurface('surface', surfaceValide, []);
+    return db.prepare(`
+        SELECT player_id AS playerId, COUNT(*) AS valeur
+        FROM matchs
+        WHERE score NOT LIKE 'Forfait%'${clause}
+        GROUP BY player_id
+    `).all(...params);
+}
+
+const MIN_MATCHS_RATIO = 5;
+
+function donneesRatioVictoire(surfaceValide) {
+    const victoires = new Map(donneesVictoires(surfaceValide).map(function (r) { return [r.playerId, r.valeur]; }));
+    const totaux = donneesTotalMatchs(surfaceValide);
+    return totaux
+        .filter(function (r) { return r.valeur >= MIN_MATCHS_RATIO; })
+        .map(function (r) { return { playerId: r.playerId, valeur: (victoires.get(r.playerId) || 0) / r.valeur, victoires: victoires.get(r.playerId) || 0, total: r.valeur }; });
+}
+
+function donneesStreakVictoires(surfaceValide) {
+    const { clause, params } = clauseEtParamSurface('surface', surfaceValide, []);
+    const rows = db.prepare(`
+        SELECT player_id AS playerId, semaine, vainqueur
+        FROM matchs
+        WHERE score NOT LIKE 'Forfait%'${clause}
+        ORDER BY player_id, semaine ASC, id ASC
+    `).all(...params);
+
+    const parJoueur = new Map();
+    rows.forEach(function (r) {
+        if (!parJoueur.has(r.playerId)) parJoueur.set(r.playerId, []);
+        parJoueur.get(r.playerId).push(r.vainqueur === 'joueur');
+    });
+
+    const resultats = [];
+    parJoueur.forEach(function (victoiresOrdonnees, playerId) {
+        let courant = 0, meilleur = 0;
+        victoiresOrdonnees.forEach(function (v) {
+            courant = v ? courant + 1 : 0;
+            if (courant > meilleur) meilleur = courant;
+        });
+        resultats.push({ playerId, valeur: meilleur });
+    });
+    return resultats;
+}
+
+function donneesNum1Total() {
+    const rows = db.prepare(`
+        SELECT cle, COUNT(*) AS valeur FROM classement_historique WHERE rang = 1 AND cle LIKE 'joueur:%' GROUP BY cle
+    `).all();
+    return rows.map(function (r) { return { playerId: Number(r.cle.split(':')[1]), valeur: r.valeur }; });
+}
+
+function donneesNum1Consecutif() {
+    const rows = db.prepare(`
+        SELECT cle, semaine, rang FROM classement_historique WHERE cle LIKE 'joueur:%' ORDER BY cle, semaine ASC
+    `).all();
+    const parCle = new Map();
+    rows.forEach(function (r) {
+        if (!parCle.has(r.cle)) parCle.set(r.cle, []);
+        parCle.get(r.cle).push(r);
+    });
+    const resultats = [];
+    parCle.forEach(function (liste, cle) {
+        let courant = 0, meilleur = 0, semainePrecedente = null;
+        liste.forEach(function (r) {
+            if (r.rang === 1 && semainePrecedente !== null && r.semaine === semainePrecedente + 1) courant++;
+            else if (r.rang === 1) courant = 1;
+            else courant = 0;
+            if (courant > meilleur) meilleur = courant;
+            semainePrecedente = r.semaine;
+        });
+        resultats.push({ playerId: Number(cle.split(':')[1]), valeur: meilleur });
+    });
+    return resultats;
+}
+
+function donneesPointsRace() {
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const semaineActuelle = etat.semaine_actuelle;
+    const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+    const debutSaison = semaineActuelle - positionSaisonBrute + 2;
+    const resultats = [];
+    ['ATP', 'WTA'].forEach(function (circuit) {
+        calculerClassementGlobal(circuit, debutSaison, semaineActuelle)
+            .filter(function (c) { return c.playerId !== null; })
+            .forEach(function (c) { resultats.push({ playerId: c.playerId, valeur: c.points }); });
+    });
+    return resultats;
+}
+
+function donneesBreakSauveesMatch(surfaceValide) {
+    const { clause, params } = clauseEtParamSurface('surface', surfaceValide, []);
+    return db.prepare(`
+        SELECT player_id AS playerId, MAX(balles_break_sauvees) AS valeur
+        FROM matchs
+        WHERE score NOT LIKE 'Forfait%'${clause}
+        GROUP BY player_id
+    `).all(...params);
+}
+
+function donneesBreakSauveesTournoi(surfaceValide) {
+    const { clause, params } = clauseEtParamSurface('m.surface', surfaceValide, []);
+    const rows = db.prepare(`
+        SELECT m.player_id AS playerId, m.tournoi_id AS tournoiId, t.nom AS tournoiNom, SUM(m.balles_break_sauvees) AS total
+        FROM matchs m
+        JOIN tournoi_joueurs tj ON tj.tournoi_id = m.tournoi_id AND tj.player_id = m.player_id AND tj.est_reel = 1
+        JOIN tournois t ON t.id = m.tournoi_id
+        WHERE tj.tour_elimine = 'Vainqueur' AND m.score NOT LIKE 'Forfait%'${clause}
+        GROUP BY m.player_id, m.tournoi_id
+    `).all(...params);
+
+    const meilleurParJoueur = new Map();
+    rows.forEach(function (r) {
+        const actuel = meilleurParJoueur.get(r.playerId);
+        if (!actuel || r.total > actuel.valeur) meilleurParJoueur.set(r.playerId, { valeur: r.total, tournoiId: r.tournoiId, tournoiNom: r.tournoiNom });
+    });
+    return Array.from(meilleurParJoueur.entries()).map(function ([playerId, v]) { return { playerId, valeur: v.valeur, tournoiId: v.tournoiId, tournoiNom: v.tournoiNom }; });
+}
+
+function donneesRivalite(surfaceValide) {
+    const { clause, params } = clauseEtParamSurface('t.surface', surfaceValide, []);
+    const rows = db.prepare(`
+        SELECT j1.player_id AS p1, j2.player_id AS p2, j1.id AS j1_id, j2.id AS j2_id, tm.vainqueur_id
+        FROM tournoi_matchs tm
+        JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
+        JOIN tournoi_joueurs j2 ON j2.id = tm.joueur2_id
+        JOIN tournois t ON t.id = tm.tournoi_id
+        WHERE j1.est_reel = 1 AND j2.est_reel = 1 AND tm.vainqueur_id IS NOT NULL${clause}
+    `).all(...params);
+
+    const parPaire = new Map();
+    rows.forEach(function (r) {
+        const vainqueurPlayerId = r.vainqueur_id === r.j1_id ? r.p1 : r.p2;
+        const a = Math.min(r.p1, r.p2), b = Math.max(r.p1, r.p2);
+        const cle = a + '-' + b;
+        if (!parPaire.has(cle)) parPaire.set(cle, { a, b, victoiresA: 0, victoiresB: 0 });
+        const entree = parPaire.get(cle);
+        if (vainqueurPlayerId === a) entree.victoiresA++; else entree.victoiresB++;
+    });
+    return Array.from(parPaire.values());
+}
+
+// Formate le detenteur d'un record cote joueur (fiche adversaire.html?type=reel).
+function detenteurJoueur(joueursById, playerId) {
+    const j = joueursById.get(playerId);
+    if (!j) return null;
+    return { id: j.id, prenom: j.prenom, nom: j.nom, drapeau: drapeau(j.nationalite), type: j.type };
+}
+
+// Meilleur joueur d'un circuit donne pour une serie de donnees {playerId, valeur}.
+function meilleurJoueurCircuit(donnees, joueursById, type) {
+    let meilleur = null;
+    donnees.forEach(function (d) {
+        const j = joueursById.get(d.playerId);
+        if (!j || j.type !== type) return;
+        if (!meilleur || d.valeur > meilleur.valeur) meilleur = d;
+    });
+    if (!meilleur) return null;
+    return { valeur: meilleur.valeur, joueur: detenteurJoueur(joueursById, meilleur.playerId), extra: meilleur };
+}
+
+// Meilleur coach pour une serie de donnees {playerId, valeur}, en agregeant les 2
+// personnages d'un meme coach : 'somme' pour les stats cumulatives (trophees,
+// victoires, matchs, points Race), 'max' pour les series/records ponctuels (streak,
+// duree num1 consecutive, meilleure perf sur un seul match/tournoi) qui n'ont pas de
+// sens additionnes entre 2 personnages/circuits differents.
+function meilleurCoach(donnees, joueursById, mode) {
+    const parCoach = new Map();
+    donnees.forEach(function (d) {
+        const j = joueursById.get(d.playerId);
+        if (!j) return;
+        if (mode === 'max') {
+            const actuel = parCoach.get(j.user_id);
+            if (!actuel || d.valeur > actuel.valeur) parCoach.set(j.user_id, d);
+        } else {
+            const actuel = parCoach.get(j.user_id) || 0;
+            parCoach.set(j.user_id, actuel + d.valeur);
+        }
+    });
+    let meilleurUserId = null, meilleurValeur = -Infinity, meilleurExtra = null;
+    parCoach.forEach(function (valeurOuObjet, userId) {
+        const valeur = mode === 'max' ? valeurOuObjet.valeur : valeurOuObjet;
+        if (valeur > meilleurValeur) { meilleurValeur = valeur; meilleurUserId = userId; meilleurExtra = mode === 'max' ? valeurOuObjet : null; }
+    });
+    if (meilleurUserId === null || meilleurValeur <= 0) return null;
+    return { valeur: meilleurValeur, coach: { userId: meilleurUserId, pseudo: nomCoach(meilleurUserId) }, extra: meilleurExtra };
+}
+
+function meilleureRivaliteCircuit(paires, joueursById, type) {
+    let meilleure = null;
+    paires.forEach(function (p) {
+        const ja = joueursById.get(p.a), jb = joueursById.get(p.b);
+        if (!ja || !jb || ja.type !== type || jb.type !== type) return;
+        const nbMatchs = p.victoiresA + p.victoiresB;
+        if (!meilleure || nbMatchs > meilleure.nbMatchs) {
+            meilleure = { nbMatchs, joueur1: detenteurJoueur(joueursById, p.a), joueur2: detenteurJoueur(joueursById, p.b), victoires1: p.victoiresA, victoires2: p.victoiresB };
+        }
+    });
+    return meilleure;
+}
+
+function meilleureRivaliteCoachs(paires, joueursById) {
+    const parPaireCoach = new Map();
+    paires.forEach(function (p) {
+        const ja = joueursById.get(p.a), jb = joueursById.get(p.b);
+        if (!ja || !jb || ja.user_id === jb.user_id) return;
+        const uA = Math.min(ja.user_id, jb.user_id), uB = Math.max(ja.user_id, jb.user_id);
+        const cle = uA + '-' + uB;
+        const nbMatchs = p.victoiresA + p.victoiresB;
+        parPaireCoach.set(cle, (parPaireCoach.get(cle) || 0) + nbMatchs);
+    });
+    let meilleurCle = null, meilleurValeur = 0;
+    parPaireCoach.forEach(function (valeur, cle) {
+        if (valeur > meilleurValeur) { meilleurValeur = valeur; meilleurCle = cle; }
+    });
+    if (!meilleurCle) return null;
+    const [uA, uB] = meilleurCle.split('-').map(Number);
+    return { nbMatchs: meilleurValeur, coach1: { userId: uA, pseudo: nomCoach(uA) }, coach2: { userId: uB, pseudo: nomCoach(uB) } };
+}
+
+app.get('/api/statistiques/records', (req, res) => {
+    try {
+        const vue = ['ATP', 'WTA', 'coachs'].includes(req.query.vue) ? req.query.vue : 'ATP';
+        const surfaceValide = ['dur', 'terre', 'herbe'].includes(req.query.surface) ? req.query.surface : null;
+        const joueursById = joueursReelsParId();
+        const type = vue === 'WTA' ? 'joueuse' : 'joueur';
+
+        const rivalite = donneesRivalite(surfaceValide);
+        const trophees = donneesTrophees(surfaceValide);
+        const victoires = donneesVictoires(surfaceValide);
+        const streak = donneesStreakVictoires(surfaceValide);
+        const totalMatchs = donneesTotalMatchs(surfaceValide);
+        const ratio = donneesRatioVictoire(surfaceValide);
+        const breakMatch = donneesBreakSauveesMatch(surfaceValide);
+        const breakTournoi = donneesBreakSauveesTournoi(surfaceValide);
+
+        let resultats;
+        if (vue === 'coachs') {
+            resultats = {
+                rivalite: meilleureRivaliteCoachs(rivalite, joueursById),
+                trophees: meilleurCoach(trophees, joueursById, 'somme'),
+                victoires: meilleurCoach(victoires, joueursById, 'somme'),
+                victoiresConsecutives: meilleurCoach(streak, joueursById, 'max'),
+                totalMatchs: meilleurCoach(totalMatchs, joueursById, 'somme'),
+                ratioVictoire: meilleurCoach(ratio, joueursById, 'max'),
+                breakSauveesMatch: meilleurCoach(breakMatch, joueursById, 'max'),
+                breakSauveesTournoi: meilleurCoach(breakTournoi, joueursById, 'max')
+            };
+            if (!surfaceValide) {
+                resultats.dureeNum1 = meilleurCoach(donneesNum1Total(), joueursById, 'somme');
+                resultats.dureeNum1Consecutive = meilleurCoach(donneesNum1Consecutif(), joueursById, 'max');
+                resultats.pointsRace = meilleurCoach(donneesPointsRace(), joueursById, 'somme');
+            }
+        } else {
+            resultats = {
+                rivalite: meilleureRivaliteCircuit(rivalite, joueursById, type),
+                trophees: meilleurJoueurCircuit(trophees, joueursById, type),
+                victoires: meilleurJoueurCircuit(victoires, joueursById, type),
+                victoiresConsecutives: meilleurJoueurCircuit(streak, joueursById, type),
+                totalMatchs: meilleurJoueurCircuit(totalMatchs, joueursById, type),
+                ratioVictoire: meilleurJoueurCircuit(ratio, joueursById, type),
+                breakSauveesMatch: meilleurJoueurCircuit(breakMatch, joueursById, type),
+                breakSauveesTournoi: meilleurJoueurCircuit(breakTournoi, joueursById, type)
+            };
+            if (!surfaceValide) {
+                resultats.dureeNum1 = meilleurJoueurCircuit(donneesNum1Total(), joueursById, type);
+                resultats.dureeNum1Consecutive = meilleurJoueurCircuit(donneesNum1Consecutif(), joueursById, type);
+                resultats.pointsRace = meilleurJoueurCircuit(donneesPointsRace(), joueursById, type);
+            }
+        }
+
+        res.json({ success: true, resultats });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// ---------- Presse ----------
+
+// Enrichit une ligne brute articles_presse (+ jointures tournoi/joueur) avec les
+// libelles/liens prets a afficher - partage entre la liste et le detail.
+function formaterArticle(a) {
+    return {
+        id: a.id,
+        titre: a.titre,
+        contenu: a.contenu,
+        imagePath: a.image_path,
+        dateCreation: a.date_creation,
+        auteur: nomCoach(a.user_id),
+        auteurUserId: a.user_id,
+        lienTournoi: a.lien_tournoi_id ? {
+            id: a.lien_tournoi_id, nom: a.tournoi_nom, calendrierId: a.tournoi_calendrier_id, semaine: a.tournoi_semaine
+        } : null,
+        lienJoueur: a.lien_player_id ? {
+            id: a.lien_player_id, prenom: a.joueur_prenom, nom: a.joueur_nom, type: a.joueur_type, drapeau: drapeau(a.joueur_nationalite)
+        } : null
+    };
+}
+
+const SELECT_ARTICLE = `
+    SELECT ap.*, t.nom AS tournoi_nom, t.calendrier_id AS tournoi_calendrier_id, t.semaine AS tournoi_semaine,
+           p.prenom AS joueur_prenom, p.nom AS joueur_nom, p.type AS joueur_type, p.nationalite AS joueur_nationalite
+    FROM articles_presse ap
+    LEFT JOIN tournois t ON t.id = ap.lien_tournoi_id
+    LEFT JOIN players p ON p.id = ap.lien_player_id
+`;
+
+// Options pour le formulaire de creation d'article (lien optionnel vers un
+// tournoi termine ou un joueur reel valide) - limite a 100 tournois (les plus
+// recents) pour garder un menu deroulant raisonnable meme apres plusieurs saisons.
+app.get('/api/presse/options-liens', (req, res) => {
+    try {
+        const joueurs = db.prepare("SELECT id, prenom, nom, type FROM players WHERE statut = 'valide' ORDER BY prenom").all();
+        const tournois = db.prepare("SELECT id, nom, semaine, circuit FROM tournois WHERE statut = 'termine' ORDER BY semaine DESC LIMIT 100").all();
+        tournois.forEach(function (t) { t.positionSemaine = positionSemaineAffichee(t.semaine); });
+        res.json({ success: true, joueurs, tournois });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/presse', (req, res) => {
+    try {
+        const articles = db.prepare(SELECT_ARTICLE + ' ORDER BY ap.id DESC').all();
+        res.json({ success: true, articles: articles.map(formaterArticle) });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/presse/:id', (req, res) => {
+    try {
+        const article = db.prepare(SELECT_ARTICLE + ' WHERE ap.id = ?').get(req.params.id);
+        if (!article) {
+            return res.status(404).json({ error: 'Article introuvable.' });
+        }
+        res.json({ success: true, article: formaterArticle(article) });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/presse', function (req, res) {
+    uploadPresse.single('image')(req, res, function (erreurUpload) {
+        if (erreurUpload) {
+            return res.status(400).json({ error: erreurUpload.code === 'LIMIT_FILE_SIZE' ? 'Image trop volumineuse (5 Mo maximum).' : erreurUpload.message });
+        }
+
+        try {
+            const { userId, titre, contenu, lienTournoiId, lienPlayerId } = req.body;
+
+            const user = db.prepare('SELECT est_redacteur FROM users WHERE id = ?').get(userId);
+            if (!user || !user.est_redacteur) {
+                if (req.file) fs.unlink(req.file.path, function () {});
+                return res.status(403).json({ error: 'Seuls les rédacteurs autorisés par l\'administrateur peuvent publier un article.' });
+            }
+            if (!titre || !titre.trim() || !contenu || !contenu.trim()) {
+                if (req.file) fs.unlink(req.file.path, function () {});
+                return res.status(400).json({ error: 'Titre et contenu sont obligatoires.' });
+            }
+            if (lienTournoiId && lienPlayerId) {
+                if (req.file) fs.unlink(req.file.path, function () {});
+                return res.status(400).json({ error: 'Un article ne peut être lié qu\'à un seul élément (tournoi OU joueur).' });
+            }
+
+            const imagePath = req.file ? '/uploads/presse/' + req.file.filename : null;
+
+            const insertion = db.prepare(`
+                INSERT INTO articles_presse (user_id, titre, contenu, image_path, lien_tournoi_id, lien_player_id, date_creation)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            `).run(userId, titre.trim(), contenu.trim(), imagePath, lienTournoiId || null, lienPlayerId || null, new Date().toISOString());
+
+            res.json({ success: true, articleId: insertion.lastInsertRowid });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: 'ERREUR : ' + err.message });
+        }
+    });
+});
+
+// Modification d'un article existant - meme regle d'autorisation que la
+// suppression (auteur ou admin). Le champ `supprimerImage` ('true') retire la
+// photo sans en mettre une nouvelle ; sinon, un nouveau fichier envoye remplace
+// l'ancien (ancien fichier supprime) ; sinon la photo actuelle est conservee.
+app.put('/api/presse/:id', function (req, res) {
+    uploadPresse.single('image')(req, res, function (erreurUpload) {
+        if (erreurUpload) {
+            return res.status(400).json({ error: erreurUpload.code === 'LIMIT_FILE_SIZE' ? 'Image trop volumineuse (5 Mo maximum).' : erreurUpload.message });
+        }
+
+        try {
+            const { userId, titre, contenu, lienTournoiId, lienPlayerId, supprimerImage } = req.body;
+
+            const article = db.prepare('SELECT * FROM articles_presse WHERE id = ?').get(req.params.id);
+            if (!article) {
+                if (req.file) fs.unlink(req.file.path, function () {});
+                return res.status(404).json({ error: 'Article introuvable.' });
+            }
+            if (Number(article.user_id) !== Number(userId) && !estAdmin(userId)) {
+                if (req.file) fs.unlink(req.file.path, function () {});
+                return res.status(403).json({ error: 'Tu ne peux modifier que tes propres articles.' });
+            }
+            if (!titre || !titre.trim() || !contenu || !contenu.trim()) {
+                if (req.file) fs.unlink(req.file.path, function () {});
+                return res.status(400).json({ error: 'Titre et contenu sont obligatoires.' });
+            }
+            if (lienTournoiId && lienPlayerId) {
+                if (req.file) fs.unlink(req.file.path, function () {});
+                return res.status(400).json({ error: 'Un article ne peut être lié qu\'à un seul élément (tournoi OU joueur).' });
+            }
+
+            let imagePath = article.image_path;
+            if (req.file) {
+                if (article.image_path) fs.unlink(path.join(__dirname, article.image_path), function () {});
+                imagePath = '/uploads/presse/' + req.file.filename;
+            } else if (supprimerImage === 'true') {
+                if (article.image_path) fs.unlink(path.join(__dirname, article.image_path), function () {});
+                imagePath = null;
+            }
+
+            db.prepare(`
+                UPDATE articles_presse SET titre = ?, contenu = ?, image_path = ?, lien_tournoi_id = ?, lien_player_id = ?
+                WHERE id = ?
+            `).run(titre.trim(), contenu.trim(), imagePath, lienTournoiId || null, lienPlayerId || null, req.params.id);
+
+            res.json({ success: true });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: 'ERREUR : ' + err.message });
+        }
+    });
+});
+
+app.delete('/api/presse/:id', (req, res) => {
+    try {
+        const { userId } = req.body;
+        const article = db.prepare('SELECT * FROM articles_presse WHERE id = ?').get(req.params.id);
+        if (!article) {
+            return res.status(404).json({ error: 'Article introuvable.' });
+        }
+        if (Number(article.user_id) !== Number(userId) && !estAdmin(userId)) {
+            return res.status(403).json({ error: 'Tu ne peux supprimer que tes propres articles.' });
+        }
+
+        if (article.image_path) {
+            fs.unlink(path.join(__dirname, article.image_path), function () {});
+        }
+        db.prepare('DELETE FROM articles_presse WHERE id = ?').run(req.params.id);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Annonce unique de l'administrateur (pas une liste, une seule ligne toujours
+// ecrasee) - affichee en bas de la page Presse pour tous les coachs.
+app.get('/api/annonce', (req, res) => {
+    try {
+        const annonce = db.prepare('SELECT contenu, date_modification FROM annonce_admin WHERE id = 1').get();
+        res.json({ success: true, contenu: annonce.contenu, dateModification: annonce.date_modification });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/annonce', (req, res) => {
+    try {
+        const { adminId, contenu } = req.body;
+        if (!estAdmin(adminId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+
+        db.prepare('UPDATE annonce_admin SET contenu = ?, date_modification = ? WHERE id = 1').run((contenu || '').trim(), new Date().toISOString());
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// ---------- Coupe Davis / Billie Jean King Cup (ex-Fed Cup) ----------
+// Ancien format (2026-07-28) : 16 nations par circuit, tableau a elimination
+// directe (1er tour/Quarts/Demies/Finale), chaque manche = 5 rencontres (2
+// simples/1 double/2 simples retour). Capitaine designe une fois par saison
+// (candidature Pre-saison+S0, vote S1), puis pour CHAQUE manche : surface (S-3),
+// composition/ordre (S-2), styles (S-1), matchs (S0) - cf. memoire
+// project_discord_et_pistes_futures pour l'historique complet de la conception.
+
+const MANCHES_COUPE = ['1er_tour', 'quarts', 'demies', 'finale'];
+const LABELS_MANCHE = { '1er_tour': '1er tour', quarts: 'Quarts de finale', demies: 'Demi-finales', finale: 'Finale' };
+
+// Libelle d'une rencontre (numero 1-5) - partage entre l'ecriture des lignes matchs
+// (simulerMancheCoupe) et leur relecture sur la page Matchs (matchs.numero_tour).
+function libelleRubber(numero) {
+    if (numero === 3) return 'Coupe - Double';
+    return 'Coupe - Simple ' + (numero <= 2 ? numero : numero - 1) + (numero > 2 ? ' (retour)' : '');
+}
+
+// Tous les joueurs eligibles pour representer une nation sur un circuit donne :
+// vrais joueurs valides de cette nationalite + rivaux persistants du roster. Un
+// rival n'a qu'un niveau plat (pas de detail par surface), coherent avec le
+// traitement deja applique ailleurs (resoudreMatchAdversaire, lambda-vs-lambda).
+// Identite (nom complet + nationalite) d'un vrai joueur ou d'un rival, utilisee pour
+// afficher l'adversaire d'un match de Coupe Davis/Fed Cup sur la page Matchs (pas de
+// tournoi_matchs ici, l'identite se retrouve via coupe_rubbers).
+function identiteJoueurOuRival(estReel, id) {
+    if (!id) return null;
+    if (estReel) {
+        const p = db.prepare('SELECT prenom, nom, nationalite FROM players WHERE id = ?').get(id);
+        return p ? { nom: p.prenom + ' ' + p.nom.toUpperCase(), nationalite: p.nationalite } : null;
+    }
+    const r = db.prepare('SELECT nom, nationalite FROM classement_joueurs WHERE id = ?').get(id);
+    return r ? { nom: r.nom, nationalite: r.nationalite } : null;
+}
+
+function joueursEligiblesNation(circuit, nation) {
+    const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
+    const reels = db.prepare("SELECT id, user_id, prenom, nom FROM players WHERE statut = 'valide' AND type = ? AND nationalite = ?").all(type, nation)
+        .map(function (p) { return { estReel: true, id: p.id, userId: p.user_id, nom: p.prenom + ' ' + p.nom.toUpperCase() }; });
+    const rivaux = db.prepare('SELECT id, nom, niveau FROM classement_joueurs WHERE circuit = ? AND nationalite = ?').all(circuit, nation)
+        .map(function (r) { return { estReel: false, id: r.id, userId: null, nom: r.nom, niveau: r.niveau }; });
+    return reels.concat(rivaux);
+}
+
+// Meilleur joueur (reel ou rival) de chaque nation sur le classement Live courant
+// - sert a la fois a selectionner les 16 nations retenues et a les departager/seeder.
+function meilleurJoueurParNation(circuit) {
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const classement = calculerClassementGlobal(circuit, etat.semaine_actuelle - LONGUEUR_SAISON, etat.semaine_actuelle);
+    const parNation = new Map();
+    classement.forEach(function (c) {
+        if (!c.nationalite || parNation.has(c.nationalite)) return;
+        parNation.set(c.nationalite, c);
+    });
+    return parNation;
+}
+
+// Les nations dont le meilleur joueur (reel ou rival) a le plus de points Live
+// sont retenues par tranches de 16 (Division 1 = les 16 meilleures, Division 2 =
+// les 16 suivantes, etc., seulement si au moins 32/48/... nations existent) ;
+// chaque division est appariee independamment par seeding classique (1 vs 16,
+// 2 vs 15, etc.), la nation la mieux classee de la paire recoit l'avantage du
+// terrain au 1er tour. Nations en surplus au-dela du dernier multiple de 16
+// entier : pas d'equipe cette saison-la (retentent leur chance la saison suivante).
+function genererTableauNations(circuit) {
+    const parNation = meilleurJoueurParNation(circuit);
+    const nations = Array.from(parNation.keys())
+        .sort(function (a, b) { return parNation.get(b).points - parNation.get(a).points; });
+
+    const nbDivisions = Math.max(1, Math.floor(nations.length / 16));
+    const divisions = [];
+    for (let d = 0; d < nbDivisions; d++) {
+        const nationsDivision = nations.slice(d * 16, d * 16 + 16);
+        const paires = [];
+        for (let i = 0; i < 8; i++) {
+            paires.push({ domicile: nationsDivision[i], exterieur: nationsDivision[15 - i] });
+        }
+        divisions.push({ division: d + 1, paires: paires });
+    }
+    return divisions;
+}
+
+function nombreSaisonAffichee() {
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    return phaseAffichee(etat.semaine_actuelle).numeroSaison;
+}
+
+// Cree le tableau des 16 nations + les 8 ties du 1er tour pour une saison/circuit
+// donnes, si ce n'est pas deja fait (idempotent). Appelee au debut de la Pre-saison.
+// Pas de Coupe Davis/Fed Cup en Saison 1 (choix explicite de l'utilisateur) : les
+// rangs de meilleur joueur par nation ne seraient sinon composes que de rivaux
+// fictifs faute d'assez de vrais coachs inscrits en tout debut de partie - on laisse
+// le temps a de vrais joueurs de rejoindre avant la 1ere edition, en Saison 2.
+function assurerTableauCoupe(circuit) {
+    const saison = nombreSaisonAffichee();
+    if (saison <= 1) return;
+    const existe = db.prepare('SELECT COUNT(*) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ?').get(saison, circuit).n;
+    if (existe > 0) return;
+
+    const divisions = genererTableauNations(circuit);
+    // Appelee EXACTEMENT au debut de la Pre-saison (position 1 du cycle de 54) :
+    // semaine_actuelle EST donc la semaine de Pre-saison elle-meme. La Semaine 5
+    // (position 7 : 1=presaison, 2=S0, 3=S1...7=S5) tombe 6 semaines plus tard.
+    const etatCourant = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const semaineDuMatch = etatCourant.semaine_actuelle + 6;
+
+    divisions.forEach(function (dv) {
+        dv.paires.forEach(function (p, i) {
+            db.prepare(`
+                INSERT INTO coupe_equipes (saison, circuit, manche, semaine, nation_domicile, nation_exterieur, statut, position, division)
+                VALUES (?, ?, '1er_tour', ?, ?, ?, 'a_venir', ?, ?)
+            `).run(saison, circuit, semaineDuMatch, p.domicile, p.exterieur, i, dv.division);
+        });
+    });
+}
+
+// Semaine de match de chaque manche (position dans le cycle de saison, cf.
+// SEMAINES_COUPES_EQUIPE), reindexee sur les cles internes de MANCHES_COUPE.
+const SEMAINE_PAR_MANCHE = {
+    '1er_tour': SEMAINES_COUPES_EQUIPE[0].semaine,
+    quarts: SEMAINES_COUPES_EQUIPE[1].semaine,
+    demies: SEMAINES_COUPES_EQUIPE[2].semaine,
+    finale: SEMAINES_COUPES_EQUIPE[3].semaine
+};
+
+// Une fois TOUTES les ties d'une manche terminees, genere la manche suivante en
+// appariant les vainqueurs par position consecutive (0&1 -> 0, 2&3 -> 1, etc.) -
+// pas de protection de tete de serie façon "S-curve" au-dela du 1er tour, simplification
+// assumee (cf. memoire project_discord_et_pistes_futures). Chaque division (s'il y en
+// a plusieurs) est traitee independamment : une division peut generer sa manche
+// suivante sans attendre qu'une autre division ait fini la sienne.
+function genererMancheSuivante(saison, circuit, mancheActuelle) {
+    const indexManche = MANCHES_COUPE.indexOf(mancheActuelle);
+    if (indexManche === -1 || indexManche === MANCHES_COUPE.length - 1) return; // pas de manche apres la finale
+
+    const mancheSuivante = MANCHES_COUPE[indexManche + 1];
+    const divisions = db.prepare('SELECT DISTINCT division FROM coupe_equipes WHERE saison = ? AND circuit = ? AND manche = ?').all(saison, circuit, mancheActuelle).map(function (r) { return r.division; });
+
+    divisions.forEach(function (division) {
+        const ties = db.prepare('SELECT * FROM coupe_equipes WHERE saison = ? AND circuit = ? AND manche = ? AND division = ? ORDER BY position ASC').all(saison, circuit, mancheActuelle, division);
+        if (ties.length === 0 || ties.some(function (t) { return t.statut !== 'termine'; })) return;
+
+        const dejaGeneree = db.prepare('SELECT COUNT(*) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ? AND manche = ? AND division = ?').get(saison, circuit, mancheSuivante, division).n;
+        if (dejaGeneree > 0) return;
+
+        // ties[].semaine est une semaine ABSOLUE ; SEMAINE_PAR_MANCHE ne donne qu'une
+        // POSITION dans le cycle de saison - on applique l'ecart de position a la
+        // semaine absolue deja connue de la manche qui vient de se terminer.
+        const semaineDuMatch = ties[0].semaine + (SEMAINE_PAR_MANCHE[mancheSuivante] - SEMAINE_PAR_MANCHE[mancheActuelle]);
+
+        for (let i = 0; i < ties.length; i += 2) {
+            const tieA = ties[i], tieB = ties[i + 1];
+            if (!tieB) break; // nombre impair (ne devrait pas arriver avec 16/8/4/2)
+            db.prepare(`
+                INSERT INTO coupe_equipes (saison, circuit, manche, semaine, nation_domicile, nation_exterieur, statut, position, division)
+                VALUES (?, ?, ?, ?, ?, ?, 'a_venir', ?, ?)
+            `).run(saison, circuit, mancheSuivante, semaineDuMatch, tieA.nation_vainqueur, tieB.nation_vainqueur, i / 2, division);
+        }
+    });
+}
+
+// Resout le capitaine (vote ou repli) de toutes les nations du tableau d'une saison,
+// pour les 2 circuits - appelee une seule fois, a la bascule S1->S2.
+function resoudreCapitainesSaison(saison) {
+    ['ATP', 'WTA'].forEach(function (circuit) {
+        const nations = new Set();
+        db.prepare('SELECT nation_domicile, nation_exterieur FROM coupe_equipes WHERE saison = ? AND circuit = ? AND manche = ?').all(saison, circuit, '1er_tour')
+            .forEach(function (t) { nations.add(t.nation_domicile); nations.add(t.nation_exterieur); });
+        nations.forEach(function (nation) { resoudreCapitaine(saison, circuit, nation); });
+    });
+}
+
+// ---------- Capitaine : candidature + vote ----------
+
+app.get('/api/coupe/statut-capitaine/:playerId', (req, res) => {
+    try {
+        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.params.playerId);
+        if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+
+        const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
+        const saison = nombreSaisonAffichee();
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const phase = phaseDeSemaine(etat.semaine_actuelle);
+
+        const fenetreCandidature = phase.type === 'presaison' || phase.type === 's0';
+        const fenetreVote = phase.type === 'tournoi' && phase.positionSemaine === 1;
+
+        const dansLeTableau = !!db.prepare(`
+            SELECT 1 FROM coupe_equipes WHERE saison = ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?)
+        `).get(saison, circuit, player.nationalite, player.nationalite);
+
+        const capitaine = db.prepare('SELECT player_id FROM coupe_capitaines WHERE saison = ? AND circuit = ? AND nation = ?').get(saison, circuit, player.nationalite);
+        const candidatures = db.prepare(`
+            SELECT c.player_id, p.prenom, p.nom FROM coupe_candidatures c JOIN players p ON p.id = c.player_id
+            WHERE c.saison = ? AND c.circuit = ? AND c.nation = ?
+        `).all(saison, circuit, player.nationalite);
+        const monVote = db.prepare('SELECT candidat_player_id FROM coupe_votes WHERE saison = ? AND circuit = ? AND nation = ? AND votant_player_id = ?').get(saison, circuit, player.nationalite, player.id);
+        const maCandidature = candidatures.some(function (c) { return c.player_id === player.id; });
+
+        res.json({
+            success: true, dansLeTableau, fenetreCandidature, fenetreVote,
+            capitaine: capitaine ? capitaine.player_id : null,
+            candidatures, maCandidature,
+            monVote: monVote ? monVote.candidat_player_id : null
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/coupe/mes-rencontres/:playerId', (req, res) => {
+    try {
+        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.params.playerId);
+        if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+        const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
+        const saison = nombreSaisonAffichee();
+
+        const ties = db.prepare(`
+            SELECT * FROM coupe_equipes WHERE saison = ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?)
+            ORDER BY semaine ASC
+        `).all(saison, circuit, player.nationalite, player.nationalite);
+        const nbDivisions = db.prepare('SELECT MAX(division) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ?').get(saison, circuit).n || 1;
+
+        res.json({ success: true, nbDivisions, ties: ties.map(function (t) { return Object.assign({}, t, { manche: LABELS_MANCHE[t.manche] || t.manche }); }) });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/coupe/candidature', (req, res) => {
+    try {
+        const { playerId } = req.body;
+        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
+        if (!player || player.statut !== 'valide') return res.status(404).json({ error: 'Joueur introuvable.' });
+
+        const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
+        const saison = nombreSaisonAffichee();
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const phase = phaseDeSemaine(etat.semaine_actuelle);
+
+        if (phase.type !== 'presaison' && phase.type !== 's0') {
+            return res.status(400).json({ error: 'La candidature au poste de capitaine n\'est ouverte qu\'en Pré-saison et Semaine 0.' });
+        }
+
+        const dansLeTableau = !!db.prepare(`
+            SELECT 1 FROM coupe_equipes WHERE saison = ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?)
+        `).get(saison, circuit, player.nationalite, player.nationalite);
+        if (!dansLeTableau) {
+            return res.status(400).json({ error: 'Ta nation ne fait pas partie du tableau cette saison.' });
+        }
+
+        db.prepare('INSERT OR IGNORE INTO coupe_candidatures (saison, circuit, nation, player_id) VALUES (?, ?, ?, ?)')
+            .run(saison, circuit, player.nationalite, player.id);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/coupe/vote', (req, res) => {
+    try {
+        const { votantPlayerId, candidatPlayerId } = req.body;
+        const votant = db.prepare('SELECT * FROM players WHERE id = ?').get(votantPlayerId);
+        if (!votant || votant.statut !== 'valide') return res.status(404).json({ error: 'Joueur introuvable.' });
+
+        const circuit = votant.type === 'joueur' ? 'ATP' : 'WTA';
+        const saison = nombreSaisonAffichee();
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const phase = phaseDeSemaine(etat.semaine_actuelle);
+
+        if (!(phase.type === 'tournoi' && phase.positionSemaine === 1)) {
+            return res.status(400).json({ error: 'Le vote pour le capitaine n\'est ouvert qu\'en Semaine 1.' });
+        }
+
+        const estCandidat = db.prepare('SELECT 1 FROM coupe_candidatures WHERE saison = ? AND circuit = ? AND nation = ? AND player_id = ?')
+            .get(saison, circuit, votant.nationalite, candidatPlayerId);
+        if (!estCandidat) {
+            return res.status(400).json({ error: 'Ce joueur ne fait pas partie des candidats de ta nation.' });
+        }
+
+        db.prepare(`
+            INSERT INTO coupe_votes (saison, circuit, nation, votant_player_id, candidat_player_id) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(saison, circuit, nation, votant_player_id) DO UPDATE SET candidat_player_id = excluded.candidat_player_id
+        `).run(saison, circuit, votant.nationalite, votant.id, candidatPlayerId);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Depouille le vote et designe le capitaine - a appeler au moment ou la Semaine 1
+// se termine (integration au scheduler a faire). Si personne n'a candidate ou
+// vote, retombe sur le joueur reel le mieux classe de la nation (Live courant).
+function resoudreCapitaine(saison, circuit, nation) {
+    const dejaDesigne = db.prepare('SELECT 1 FROM coupe_capitaines WHERE saison = ? AND circuit = ? AND nation = ?').get(saison, circuit, nation);
+    if (dejaDesigne) return;
+
+    const votes = db.prepare('SELECT candidat_player_id, COUNT(*) AS n FROM coupe_votes WHERE saison = ? AND circuit = ? AND nation = ? GROUP BY candidat_player_id ORDER BY n DESC').all(saison, circuit, nation);
+
+    let capitaineId = votes.length > 0 ? votes[0].candidat_player_id : null;
+
+    if (!capitaineId) {
+        const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const classement = calculerClassementGlobal(circuit, etat.semaine_actuelle - LONGUEUR_SAISON, etat.semaine_actuelle);
+        const meilleur = classement.find(function (c) { return c.playerId !== null && c.nationalite === nation; });
+        capitaineId = meilleur ? meilleur.playerId : null;
+    }
+
+    if (capitaineId) {
+        db.prepare('INSERT INTO coupe_capitaines (saison, circuit, nation, player_id) VALUES (?, ?, ?, ?)').run(saison, circuit, nation, capitaineId);
+    }
+}
+
+// ---------- Surface / composition / styles avant chaque manche ----------
+// Cascade a 3 semaines glissantes avant la semaine de match (tie.semaine) :
+// tie.semaine-3 = surface, -2 = composition/ordre, -1 = styles, 0 = matchs.
+function etapeCoupe(tie) {
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const diff = tie.semaine - etat.semaine_actuelle;
+    if (diff === 3) return 'surface';
+    if (diff === 2) return 'composition';
+    if (diff === 1) return 'styles';
+    if (diff === 0) return 'matchs';
+    return null;
+}
+
+function capitaineDe(saison, circuit, nation) {
+    const row = db.prepare('SELECT player_id FROM coupe_capitaines WHERE saison = ? AND circuit = ? AND nation = ?').get(saison, circuit, nation);
+    return row ? row.player_id : null;
+}
+
+app.get('/api/coupe/tie/:tieId', (req, res) => {
+    try {
+        const tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(req.params.tieId);
+        if (!tie) return res.status(404).json({ error: 'Rencontre introuvable.' });
+
+        const composition = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ?').all(tie.id);
+        const rubbers = db.prepare('SELECT * FROM coupe_rubbers WHERE coupe_equipe_id = ? ORDER BY numero').all(tie.id);
+        const capitaineDomicile = capitaineDe(tie.saison, tie.circuit, tie.nation_domicile);
+        const capitaineExterieur = capitaineDe(tie.saison, tie.circuit, tie.nation_exterieur);
+        const nbDivisions = db.prepare('SELECT MAX(division) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ?').get(tie.saison, tie.circuit).n || 1;
+
+        res.json({
+            success: true, nbDivisions, tie: Object.assign({}, tie, { manche: LABELS_MANCHE[tie.manche] || tie.manche }),
+            composition, rubbers, capitaineDomicile, capitaineExterieur,
+            etape: etapeCoupe(tie),
+            joueursDomicile: joueursEligiblesNation(tie.circuit, tie.nation_domicile),
+            joueursExterieur: joueursEligiblesNation(tie.circuit, tie.nation_exterieur)
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/coupe/surface', (req, res) => {
+    try {
+        const { tieId, capitainePlayerId, surface } = req.body;
+        if (!['dur', 'terre', 'herbe'].includes(surface)) return res.status(400).json({ error: 'Surface invalide.' });
+
+        const tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tieId);
+        if (!tie) return res.status(404).json({ error: 'Rencontre introuvable.' });
+
+        const capitaine = capitaineDe(tie.saison, tie.circuit, tie.nation_domicile);
+        if (!capitaine || Number(capitaine) !== Number(capitainePlayerId)) {
+            return res.status(403).json({ error: 'Seul le capitaine de la nation à domicile choisit la surface.' });
+        }
+        if (etapeCoupe(tie) !== 'surface') {
+            return res.status(400).json({ error: 'Le choix de la surface n\'est pas ouvert cette semaine.' });
+        }
+
+        db.prepare('UPDATE coupe_equipes SET surface = ? WHERE id = ?').run(surface, tieId);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/coupe/composition', (req, res) => {
+    try {
+        const { tieId, capitainePlayerId, nation, joueurA, joueurB, doubleJ1, doubleJ2 } = req.body;
+        const tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tieId);
+        if (!tie) return res.status(404).json({ error: 'Rencontre introuvable.' });
+        if (nation !== tie.nation_domicile && nation !== tie.nation_exterieur) {
+            return res.status(400).json({ error: 'Cette nation ne participe pas à cette rencontre.' });
+        }
+
+        const capitaine = capitaineDe(tie.saison, tie.circuit, nation);
+        if (!capitaine || Number(capitaine) !== Number(capitainePlayerId)) {
+            return res.status(403).json({ error: 'Seul le capitaine de ta nation soumet la composition.' });
+        }
+        if (etapeCoupe(tie) !== 'composition') {
+            return res.status(400).json({ error: 'La composition d\'équipe n\'est pas ouverte cette semaine.' });
+        }
+
+        const eligibles = joueursEligiblesNation(tie.circuit, nation);
+        const estEligible = function (e) { return e && eligibles.some(function (j) { return j.estReel === !!e.estReel && j.id === Number(e.id); }); };
+        if (![joueurA, joueurB, doubleJ1, doubleJ2].every(estEligible)) {
+            return res.status(400).json({ error: 'Un ou plusieurs joueurs choisis ne font pas partie de l\'équipe éligible.' });
+        }
+
+        const memeJoueur = function (a, b) { return !!a.estReel === !!b.estReel && Number(a.id) === Number(b.id); };
+        if (memeJoueur(joueurA, joueurB)) {
+            return res.status(400).json({ error: 'Le simple 1 et le simple 2 doivent être joués par 2 joueurs différents.' });
+        }
+        if (memeJoueur(doubleJ1, doubleJ2)) {
+            return res.status(400).json({ error: 'La paire de double doit être composée de 2 joueurs différents.' });
+        }
+
+        db.prepare('DELETE FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').run(tie.id, nation);
+        db.prepare(`
+            INSERT INTO coupe_composition (coupe_equipe_id, nation, joueur_a_est_reel, joueur_a_id, joueur_b_est_reel, joueur_b_id, double_j1_est_reel, double_j1_id, double_j2_est_reel, double_j2_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(tie.id, nation, joueurA.estReel ? 1 : 0, joueurA.id, joueurB.estReel ? 1 : 0, joueurB.id, doubleJ1.estReel ? 1 : 0, doubleJ1.id, doubleJ2.estReel ? 1 : 0, doubleJ2.id);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/coupe/style', (req, res) => {
+    try {
+        const { tieId, playerId, style } = req.body;
+        if (!STYLES_JEU.includes(style)) return res.status(400).json({ error: 'Style invalide.' });
+
+        const tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tieId);
+        if (!tie) return res.status(404).json({ error: 'Rencontre introuvable.' });
+        if (etapeCoupe(tie) !== 'styles') {
+            return res.status(400).json({ error: 'Le choix des styles n\'est pas ouvert cette semaine.' });
+        }
+
+        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
+        if (!player || (player.nationalite !== tie.nation_domicile && player.nationalite !== tie.nation_exterieur)) {
+            return res.status(400).json({ error: 'Ce joueur ne participe pas à cette rencontre.' });
+        }
+
+        db.prepare(`
+            INSERT INTO coupe_styles (coupe_equipe_id, player_id, style) VALUES (?, ?, ?)
+            ON CONFLICT(coupe_equipe_id, player_id) DO UPDATE SET style = excluded.style
+        `).run(tie.id, player.id, style);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// ---------- Simulation de la manche (5 rencontres) ----------
+
+const BAREME_XP_COUPE = {
+    victoirePersoEtEquipe: 11,
+    victoirePersoSeule: 10,
+    defaitePersoMaisEquipeGagne: 10,
+    defaitePersoEtEquipe: 9
+};
+
+function styleJoueur(tieId, playerId) {
+    const row = db.prepare('SELECT style FROM coupe_styles WHERE coupe_equipe_id = ? AND player_id = ?').get(tieId, playerId);
+    return row ? row.style : null;
+}
+
+// Simule UNE rencontre (simple ou double) et ecrit les lignes matchs necessaires
+// (une par cote reel, aucune si les 2 cotes sont des rivaux) + la ligne coupe_rubbers.
+// Simple uniquement - le double a sa propre fonction (simulerRubberDouble), les 2
+// cotes y representent une PAIRE et non un joueur seul, ce qui change trop la forme
+// des donnees pour partager le meme code sans le rendre confus.
+function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libelleRubber) {
+    const surface = tie.surface;
+    const styleDomicile = domicileEntree.estReel ? styleJoueur(tie.id, domicileEntree.id) : null;
+    const styleExterieur = exterieurEntree.estReel ? styleJoueur(tie.id, exterieurEntree.id) : null;
+
+    function valeurs(entree) {
+        if (entree.estReel) {
+            const player = db.prepare('SELECT * FROM players WHERE id = ?').get(entree.id);
+            const normal = niveauNormal(player, surface);
+            const mental = normal + player.mental_courant;
+            return { normal, mental, mentalCourant: player.mental_courant, joueur: player };
+        }
+        const rival = db.prepare('SELECT * FROM classement_joueurs WHERE id = ?').get(entree.id);
+        return { normal: rival.niveau, mental: rival.niveau + 100, mentalCourant: 100, joueur: null };
+    }
+
+    const vDomicile = valeurs(domicileEntree);
+    const vExterieur = valeurs(exterieurEntree);
+    const resultat = simulerMatch(vDomicile.normal, vDomicile.mental, vExterieur.normal, vExterieur.mental, styleDomicile, vDomicile.mentalCourant, styleExterieur, vExterieur.mentalCourant);
+
+    const nationVainqueur = resultat.vainqueur === 'A' ? tie.nation_domicile : tie.nation_exterieur;
+
+    // Ecriture des lignes matchs pour chaque cote reel (independant l'un de l'autre,
+    // pas de lien tournoi_matchs ici puisque ce n'est pas un tournoi individuel).
+    let matchIdDomicile = null, matchIdExterieur = null;
+    if (vDomicile.joueur) {
+        matchIdDomicile = db.prepare(`
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id)
+            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            vDomicile.joueur.user_id, vDomicile.joueur.id, surface, tie.semaine,
+            resultat.vainqueur === 'A' ? 'joueur' : 'adversaire', resultat.score,
+            Math.round(vDomicile.normal), Math.round(vExterieur.normal),
+            JSON.stringify(resultat.evenements || []), libelleRubber, resultat.ballesBreakSauveesA || 0, tie.id
+        ).lastInsertRowid;
+    }
+    if (vExterieur.joueur) {
+        matchIdExterieur = db.prepare(`
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id)
+            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            vExterieur.joueur.user_id, vExterieur.joueur.id, surface, tie.semaine,
+            resultat.vainqueur === 'B' ? 'joueur' : 'adversaire', miroirScore(resultat.score),
+            Math.round(vExterieur.normal), Math.round(vDomicile.normal),
+            JSON.stringify(miroirEvenements(resultat.evenements || [])), libelleRubber, resultat.ballesBreakSauveesB || 0, tie.id
+        ).lastInsertRowid;
+    }
+
+    db.prepare(`
+        INSERT INTO coupe_rubbers (coupe_equipe_id, numero, type, domicile_est_reel, domicile_id, domicile_style, exterieur_est_reel, exterieur_id, exterieur_style, nation_vainqueur, score, match_id, match_id_j2)
+        VALUES (?, ?, 'simple', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(tie.id, numero, domicileEntree.estReel ? 1 : 0, domicileEntree.id, styleDomicile, exterieurEntree.estReel ? 1 : 0, exterieurEntree.id, styleExterieur, nationVainqueur, resultat.score, matchIdDomicile, matchIdExterieur);
+
+    return { nationVainqueur, domicileGagne: resultat.vainqueur === 'A' };
+}
+
+// Simule les 5 rencontres d'une manche (idempotent : ne fait rien si deja terminee),
+// applique le bareme XP, met a jour le score de la manche.
+// Repli automatique quand personne n'a agi a temps - soit parce que la nation n'a
+// aucun vrai joueur (100% pilotee par le jeu, jamais de capitaine humain), soit
+// qu'un capitaine humain a simplement oublie. Sans ca, une manche impliquant une
+// nation sans capitaine ne se simulerait JAMAIS (composition/surface jamais soumises).
+function assurerSurfaceAuto(tie) {
+    if (tie.surface) return tie.surface;
+    const surfaces = ['dur', 'terre', 'herbe'];
+    const choix = surfaces[Math.floor(Math.random() * surfaces.length)];
+    db.prepare('UPDATE coupe_equipes SET surface = ? WHERE id = ?').run(choix, tie.id);
+    return choix;
+}
+
+function assurerCompositionAuto(tie, nation) {
+    const existe = db.prepare('SELECT 1 FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, nation);
+    if (existe) return;
+
+    const surface = tie.surface || 'dur';
+    const eligibles = joueursEligiblesNation(tie.circuit, nation).map(function (j) {
+        if (j.estReel) {
+            const player = db.prepare('SELECT * FROM players WHERE id = ?').get(j.id);
+            return Object.assign({}, j, { niveauApprox: niveauNormal(player, surface) });
+        }
+        return Object.assign({}, j, { niveauApprox: j.niveau });
+    }).sort(function (a, b) { return b.niveauApprox - a.niveauApprox; });
+    if (eligibles.length === 0) return; // ne devrait jamais arriver (roster de rivaux toujours peuple)
+
+    const a = eligibles[0];
+    const b = eligibles[1] || eligibles[0];
+    db.prepare(`
+        INSERT INTO coupe_composition (coupe_equipe_id, nation, joueur_a_est_reel, joueur_a_id, joueur_b_est_reel, joueur_b_id, double_j1_est_reel, double_j1_id, double_j2_est_reel, double_j2_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(tie.id, nation, a.estReel ? 1 : 0, a.id, b.estReel ? 1 : 0, b.id, a.estReel ? 1 : 0, a.id, b.estReel ? 1 : 0, b.id);
+}
+
+// Ordre standard d'une manche (2 simples/1 double/2 simples retour), commun a
+// simulerUnRubberCoupe et finaliserMancheCoupe. Les entrees simple referencent
+// directement A/B ; le double n'a pas besoin d'entrees ici (gere a part par
+// simulerRubberDouble, qui lit compoDomicile/compoExterieur directement).
+function ordreRubbersCoupe(compoDomicile, compoExterieur) {
+    const A_d = { estReel: !!compoDomicile.joueur_a_est_reel, id: compoDomicile.joueur_a_id };
+    const B_d = { estReel: !!compoDomicile.joueur_b_est_reel, id: compoDomicile.joueur_b_id };
+    const A_e = { estReel: !!compoExterieur.joueur_a_est_reel, id: compoExterieur.joueur_a_id };
+    const B_e = { estReel: !!compoExterieur.joueur_b_est_reel, id: compoExterieur.joueur_b_id };
+    return [
+        { numero: 1, type: 'simple', domicile: A_d, exterieur: A_e },
+        { numero: 2, type: 'simple', domicile: B_d, exterieur: B_e },
+        { numero: 3, type: 'double' },
+        { numero: 4, type: 'simple', domicile: A_d, exterieur: B_e },
+        { numero: 5, type: 'simple', domicile: B_d, exterieur: A_e }
+    ];
+}
+
+// Simule LA PROCHAINE rencontre due (coupe_equipes.rubber_actuel, 0-based) d'une
+// manche, comme un tour de tournoi classique (cf. simulerUnTour) - jamais les 5
+// d'un coup. Repli automatique (surface/composition) applique une seule fois, avant
+// la toute premiere rencontre (idempotent, ne fait rien si deja soumis). Une fois
+// la 5e rencontre jouee, finalise la manche (score, XP, manche suivante).
+function simulerUnRubberCoupe(tieId) {
+    let tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tieId);
+    if (!tie || tie.statut === 'termine') return;
+    if (tie.rubber_actuel >= 5) return;
+
+    assurerSurfaceAuto(tie);
+    tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tieId);
+    assurerCompositionAuto(tie, tie.nation_domicile);
+    assurerCompositionAuto(tie, tie.nation_exterieur);
+
+    const compoDomicile = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, tie.nation_domicile);
+    const compoExterieur = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, tie.nation_exterieur);
+    if (!compoDomicile || !compoExterieur) return; // ne devrait plus arriver, garde-fou
+
+    const ordre = ordreRubbersCoupe(compoDomicile, compoExterieur);
+    const r = ordre[tie.rubber_actuel];
+
+    if (r.type === 'double') {
+        simulerRubberDouble(tie, compoDomicile, compoExterieur);
+    } else {
+        simulerRubberCoupe(tie, r.numero, r.domicile, r.exterieur, libelleRubber(r.numero));
+    }
+
+    const nouveauRubberActuel = tie.rubber_actuel + 1;
+    db.prepare('UPDATE coupe_equipes SET rubber_actuel = ? WHERE id = ?').run(nouveauRubberActuel, tie.id);
+
+    if (nouveauRubberActuel >= 5) {
+        finaliserMancheCoupe(tie.id);
+    }
+}
+
+// Cloture une manche une fois ses 5 coupe_rubbers joues : score final, bareme XP
+// (grille 2x2 validee), puis genere la manche suivante si c'etait la derniere
+// rencontre en attente de cette manche/saison/circuit.
+function finaliserMancheCoupe(tieId) {
+    const tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tieId);
+    const rubbers = db.prepare('SELECT * FROM coupe_rubbers WHERE coupe_equipe_id = ?').all(tieId);
+
+    let victoiresDomicile = 0, victoiresExterieur = 0;
+    const victoiresParJoueur = new Map(); // playerId (reel uniquement) -> nb victoires perso
+    function comptabiliseVictoire(estReel, id) {
+        if (estReel && id) victoiresParJoueur.set(id, (victoiresParJoueur.get(id) || 0) + 1);
+    }
+
+    rubbers.forEach(function (r) {
+        const domicileGagne = r.nation_vainqueur === tie.nation_domicile;
+        if (domicileGagne) victoiresDomicile++; else victoiresExterieur++;
+
+        if (r.type === 'double') {
+            const cote = domicileGagne
+                ? { estReel: r.domicile_est_reel, id1: r.domicile_id, id2: r.domicile_id2 }
+                : { estReel: r.exterieur_est_reel, id1: r.exterieur_id, id2: r.exterieur_id2 };
+            comptabiliseVictoire(!!cote.estReel, cote.id1);
+            comptabiliseVictoire(!!cote.estReel, cote.id2);
+        } else {
+            const cote = domicileGagne
+                ? { estReel: r.domicile_est_reel, id: r.domicile_id }
+                : { estReel: r.exterieur_est_reel, id: r.exterieur_id };
+            comptabiliseVictoire(!!cote.estReel, cote.id);
+        }
+    });
+
+    const nationVainqueur = victoiresDomicile > victoiresExterieur ? tie.nation_domicile : tie.nation_exterieur;
+    db.prepare('UPDATE coupe_equipes SET statut = ?, victoires_domicile = ?, victoires_exterieur = ?, nation_vainqueur = ? WHERE id = ?')
+        .run('termine', victoiresDomicile, victoiresExterieur, nationVainqueur, tieId);
+
+    // Bareme XP (grille 2x2 validee) - uniquement les VRAIS joueurs impliques,
+    // retrouves via les 2 compositions (pas les rubbers, plus simple et complet
+    // meme pour un joueur qui aurait perdu tous ses matchs).
+    const compoDomicile = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tieId, tie.nation_domicile);
+    const compoExterieur = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tieId, tie.nation_exterieur);
+    const joueursImpliques = new Set();
+    [compoDomicile, compoExterieur].forEach(function (c) {
+        if (!c) return;
+        [[c.joueur_a_est_reel, c.joueur_a_id], [c.joueur_b_est_reel, c.joueur_b_id],
+         [c.double_j1_est_reel, c.double_j1_id], [c.double_j2_est_reel, c.double_j2_id]]
+            .forEach(function (pair) { if (pair[0] && pair[1]) joueursImpliques.add(pair[1]); });
+    });
+
+    joueursImpliques.forEach(function (playerId) {
+        const player = db.prepare('SELECT nationalite FROM players WHERE id = ?').get(playerId);
+        if (!player) return;
+        const sonEquipeGagne = player.nationalite === nationVainqueur;
+        const aGagneAuMoinsUnMatch = (victoiresParJoueur.get(playerId) || 0) > 0;
+        let xp;
+        if (aGagneAuMoinsUnMatch && sonEquipeGagne) xp = BAREME_XP_COUPE.victoirePersoEtEquipe;
+        else if (aGagneAuMoinsUnMatch && !sonEquipeGagne) xp = BAREME_XP_COUPE.victoirePersoSeule;
+        else if (!aGagneAuMoinsUnMatch && sonEquipeGagne) xp = BAREME_XP_COUPE.defaitePersoMaisEquipeGagne;
+        else xp = BAREME_XP_COUPE.defaitePersoEtEquipe;
+        db.prepare('UPDATE players SET points_experience = points_experience + ? WHERE id = ?').run(xp, playerId);
+    });
+
+    genererMancheSuivante(tie.saison, tie.circuit, tie.manche);
+}
+
+// Le double est simule a part (2 joueurs par cote au lieu d'1) : niveau d'equipe =
+// moyenne des 2 partenaires, chacun ayant applique son propre style au prealable
+// (ajustement "plat" set 1, pas la dynamique par set - simplification assumee,
+// cf. memoire project_discord_et_pistes_futures).
+function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
+    const surface = tie.surface;
+
+    function valeurJoueur(estReel, id) {
+        if (estReel) {
+            const player = db.prepare('SELECT * FROM players WHERE id = ?').get(id);
+            const normal = niveauDouble(player, surface);
+            const mental = normal + player.mental_courant;
+            const style = styleJoueur(tie.id, id);
+            return ajusterNiveauxStyle(normal, mental, style, player.mental_courant, 1);
+        }
+        const rival = db.prepare('SELECT * FROM classement_joueurs WHERE id = ?').get(id);
+        return { normal: rival.niveau, mental: rival.niveau + 100 };
+    }
+
+    const d1 = valeurJoueur(!!compoDomicile.double_j1_est_reel, compoDomicile.double_j1_id);
+    const d2 = valeurJoueur(!!compoDomicile.double_j2_est_reel, compoDomicile.double_j2_id);
+    const e1 = valeurJoueur(!!compoExterieur.double_j1_est_reel, compoExterieur.double_j1_id);
+    const e2 = valeurJoueur(!!compoExterieur.double_j2_est_reel, compoExterieur.double_j2_id);
+
+    const niveauEquipeDomicileNormal = (d1.normal + d2.normal) / 2;
+    const niveauEquipeDomicileMental = (d1.mental + d2.mental) / 2;
+    const niveauEquipeExterieurNormal = (e1.normal + e2.normal) / 2;
+    const niveauEquipeExterieurMental = (e1.mental + e2.mental) / 2;
+
+    const resultat = simulerMatch(niveauEquipeDomicileNormal, niveauEquipeDomicileMental, niveauEquipeExterieurNormal, niveauEquipeExterieurMental);
+    const nationVainqueur = resultat.vainqueur === 'A' ? tie.nation_domicile : tie.nation_exterieur;
+    const domicileGagne = resultat.vainqueur === 'A';
+
+    function ecrireMatch(estReel, id, userId, monNiveau, adversaireNiveau, jaiGagne, score, evenements) {
+        if (!estReel) return null;
+        return db.prepare(`
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id)
+            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, 'Coupe - Double', ?, ?)
+        `).run(userId, id, surface, tie.semaine, jaiGagne ? 'joueur' : 'adversaire', score, Math.round(monNiveau), Math.round(adversaireNiveau), JSON.stringify(evenements), jaiGagne ? resultat.ballesBreakSauveesA || 0 : resultat.ballesBreakSauveesB || 0, tie.id).lastInsertRowid;
+    }
+
+    let matchIdDomicileJ1 = null, matchIdDomicileJ2 = null, matchIdExterieurJ1 = null, matchIdExterieurJ2 = null;
+    if (compoDomicile.double_j1_est_reel) {
+        const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(compoDomicile.double_j1_id);
+        matchIdDomicileJ1 = ecrireMatch(true, compoDomicile.double_j1_id, player.user_id, niveauEquipeDomicileNormal, niveauEquipeExterieurNormal, domicileGagne, resultat.score, resultat.evenements);
+    }
+    if (compoDomicile.double_j2_est_reel) {
+        const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(compoDomicile.double_j2_id);
+        matchIdDomicileJ2 = ecrireMatch(true, compoDomicile.double_j2_id, player.user_id, niveauEquipeDomicileNormal, niveauEquipeExterieurNormal, domicileGagne, resultat.score, resultat.evenements);
+    }
+    if (compoExterieur.double_j1_est_reel) {
+        const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(compoExterieur.double_j1_id);
+        matchIdExterieurJ1 = ecrireMatch(true, compoExterieur.double_j1_id, player.user_id, niveauEquipeExterieurNormal, niveauEquipeDomicileNormal, !domicileGagne, miroirScore(resultat.score), miroirEvenements(resultat.evenements));
+    }
+    if (compoExterieur.double_j2_est_reel) {
+        const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(compoExterieur.double_j2_id);
+        matchIdExterieurJ2 = ecrireMatch(true, compoExterieur.double_j2_id, player.user_id, niveauEquipeExterieurNormal, niveauEquipeDomicileNormal, !domicileGagne, miroirScore(resultat.score), miroirEvenements(resultat.evenements));
+    }
+
+    // domicile_id/domicile_id2 et exterieur_id/exterieur_id2 identifient TOUJOURS les
+    // 4 joueurs de la paire (reel ou rival), independamment de savoir si une ligne
+    // matchs existe pour chacun - sert a retrouver "la paire adverse" sur la page Matchs.
+    db.prepare(`
+        INSERT INTO coupe_rubbers (
+            coupe_equipe_id, numero, type,
+            domicile_est_reel, domicile_id, domicile_id2,
+            exterieur_est_reel, exterieur_id, exterieur_id2,
+            nation_vainqueur, score, match_id, match_id_j2
+        )
+        VALUES (?, 3, 'double', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        tie.id,
+        compoDomicile.double_j1_est_reel, compoDomicile.double_j1_id, compoDomicile.double_j2_id,
+        compoExterieur.double_j1_est_reel, compoExterieur.double_j1_id, compoExterieur.double_j2_id,
+        nationVainqueur, resultat.score,
+        matchIdDomicileJ1 || matchIdDomicileJ2, matchIdExterieurJ1 || matchIdExterieurJ2
+    );
+
+    return { nationVainqueur, domicileGagne };
+}
+
+app.listen(PORT, () => {
+    console.log('Serveur lance sur http://localhost:' + PORT);
+});
+
+verifierAvancementAuto();
+setInterval(verifierAvancementAuto, 15 * 60 * 1000);
+
+verifierAvancementTourAuto();
+setInterval(verifierAvancementTourAuto, 15 * 60 * 1000);
+
+verifierAvancementTourCoupeAuto();
+setInterval(verifierAvancementTourCoupeAuto, 15 * 60 * 1000);

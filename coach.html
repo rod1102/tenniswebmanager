@@ -1,0 +1,300 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Coach — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title" id="coach-titre">Coach</h1>
+
+            <div class="tabs-nav" id="tabs-nav">
+                <button class="tab-btn active" data-tab="infos">Infos</button>
+                <button class="tab-btn" data-tab="personnages">Personnages</button>
+                <button class="tab-btn" data-tab="palmares">Palmarès</button>
+                <button class="tab-btn" data-tab="pronostics">Pronostics</button>
+                <button class="tab-btn" data-tab="badges">Badges</button>
+            </div>
+
+            <div class="tab-panel" id="tab-infos"></div>
+            <div class="tab-panel" id="tab-personnages" style="display:none;"></div>
+            <div class="tab-panel" id="tab-palmares" style="display:none;"></div>
+            <div class="tab-panel" id="tab-pronostics" style="display:none;"></div>
+            <div class="tab-panel" id="tab-badges" style="display:none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const coachId = params.get('id');
+        if (!coachId) {
+            window.location.href = 'index.html';
+        }
+
+        const estMoi = Number(coachId) === Number(userId);
+
+        const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        function traduireStatut(statut) {
+            if (statut === 'refuse') return 'Refusé';
+            return 'En attente de validation';
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                document.querySelectorAll('.tab-panel').forEach(function (p) { p.style.display = 'none'; });
+                bouton.classList.add('active');
+                document.getElementById('tab-' + bouton.dataset.tab).style.display = 'block';
+            });
+        });
+
+        function afficherInfos(data) {
+            const container = document.getElementById('tab-infos');
+
+            const discordTxt = data.discord
+                ? `<div class="stat-row"><span class="stat-label">Discord</span><span class="stat-value">${data.discord}</span></div>`
+                : (estMoi ? '<div class="stat-row"><span class="stat-label">Discord</span><span class="stat-value">Non renseigné</span></div>' : '');
+
+            const boutonModifier = estMoi ? '<button class="cta cta-secondary" id="modifier-profil-btn" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Modifier</button>' : '';
+
+            container.innerHTML = `
+                <div class="stat-row"><span class="stat-label">Pseudo</span><span class="stat-value">${data.pseudo}${estMoi ? ' (Toi)' : ''}</span></div>
+                ${discordTxt}
+                ${boutonModifier}
+                <div id="edition-profil-container"></div>
+            `;
+
+            if (estMoi) {
+                document.getElementById('modifier-profil-btn').addEventListener('click', function () {
+                    afficherEditionProfil(data);
+                });
+            }
+        }
+
+        function afficherEditionProfil(data) {
+            const container = document.getElementById('edition-profil-container');
+            container.innerHTML = `
+                <div class="form-group" style="margin-top:12px;">
+                    <label>Pseudo de coach</label>
+                    <input type="text" id="edit-pseudo" value="${data.pseudo}">
+                </div>
+                <div class="form-group">
+                    <label>Lien ou pseudo Discord</label>
+                    <input type="text" id="edit-discord" value="${data.discord || ''}" placeholder="ex : discord.gg/... ou Pseudo#1234">
+                </div>
+                <button class="cta cta-primary" id="sauvegarder-profil-btn" style="padding:8px 16px; font-size:0.75rem;">Enregistrer</button>
+                <button class="cta cta-secondary" id="annuler-profil-btn" style="padding:8px 16px; font-size:0.75rem;">Annuler</button>
+            `;
+
+            document.getElementById('annuler-profil-btn').addEventListener('click', function () {
+                container.innerHTML = '';
+            });
+
+            document.getElementById('sauvegarder-profil-btn').addEventListener('click', async function () {
+                const pseudo = document.getElementById('edit-pseudo').value;
+                const discord = document.getElementById('edit-discord').value;
+
+                const response = await fetch('/api/coach/profil', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId, pseudo, discord })
+                });
+                const resData = await response.json();
+
+                if (!response.ok) {
+                    alert(resData.error || 'Impossible d\'enregistrer.');
+                    return;
+                }
+
+                chargerFiche();
+            });
+        }
+
+        function carteJoueurLien(type, player) {
+            const label = type === 'joueur' ? 'Joueur ATP' : 'Joueuse WTA';
+            const icone = type === 'joueur' ? 'icone-joueur.png' : 'icone-joueuse.png';
+
+            if (!player) {
+                return `
+                    <div class="player-summary" style="text-align:center;">
+                        <div class="player-avatar" style="margin:0 auto 14px;"><img src="${icone}" alt=""></div>
+                        <div class="player-summary-type">${label}</div>
+                        <p class="match-hint" style="margin:12px 0;">Pas de personnage sur ce circuit.</p>
+                    </div>
+                `;
+            }
+
+            const statutTxt = player.statut !== 'valide'
+                ? `<p class="match-hint" style="margin:8px 0 0;">${traduireStatut(player.statut)}</p>`
+                : '';
+
+            return `
+                <div class="player-summary" style="text-align:center;">
+                    <div class="player-avatar" style="margin:0 auto 14px;"><img src="${icone}" alt=""></div>
+                    <div class="player-summary-type">${label}</div>
+                    <div class="player-summary-name">${formaterNom(player.prenom, player.nom)}</div>
+                    <p class="match-hint" style="margin:8px 0 0;">${flagImg(player.drapeau)} ${player.nationalite}</p>
+                    ${statutTxt}
+                    <a href="adversaire.html?type=reel&id=${player.id}" class="cta cta-primary" style="padding:10px 20px; font-size:0.8rem; margin-top:12px;">Voir la fiche</a>
+                </div>
+            `;
+        }
+
+        function afficherPersonnages(data) {
+            document.getElementById('tab-personnages').innerHTML =
+                `<div class="creation-grid">${carteJoueurLien('joueur', data.joueur) + carteJoueurLien('joueuse', data.joueuse)}</div>`;
+        }
+
+        function afficherPalmares(data) {
+            const panneau = document.getElementById('tab-palmares');
+            if (data.palmares.length === 0) {
+                panneau.innerHTML = '<div class="match-hint">Aucun titre remporté pour l\'instant.</div>';
+                return;
+            }
+            panneau.innerHTML = `
+                <div class="tournoi-list">
+                    ${data.palmares.map(function (p) {
+                        const nomPersonnage = formaterNom(p.joueurPrenom, p.joueurNom);
+                        return `<div class="tournoi-card"><div class="tournoi-card-name">${p.nom}</div>
+                            <div class="tournoi-card-meta">${nomPersonnage} · Semaine ${p.positionSemaine} · ${p.categorie} · ${LABELS_SURFACE[p.surface] || p.surface}</div></div>`;
+                    }).join('')}
+                </div>
+            `;
+        }
+
+        function tablePronos(titre, lignes) {
+            if (lignes.length === 0) {
+                return `<div class="stats-header">${titre}</div><div class="match-hint">Aucun pronostic noté pour l'instant.</div>`;
+            }
+            const corps = lignes.map(function (l) {
+                return `
+                    <tr class="${l.enCours ? 'classement-moi' : ''}">
+                        <td>Saison ${l.saison}${l.enCours ? ' (en cours)' : ''}</td>
+                        <td>${l.rang}</td>
+                        <td>${l.points}</td>
+                    </tr>
+                `;
+            }).join('');
+            return `
+                <div class="stats-header">${titre}</div>
+                <table class="classement-table">
+                    <thead><tr><th>Saison</th><th>Rang</th><th>Points</th></tr></thead>
+                    <tbody>${corps}</tbody>
+                </table>
+            `;
+        }
+
+        function afficherPronos(data) {
+            const container = document.getElementById('tab-pronostics');
+            container.innerHTML =
+                tablePronos('ATP', data.pronosHistorique.atp) +
+                tablePronos('WTA', data.pronosHistorique.wta) +
+                tablePronos('Combiné', data.pronosHistorique.combine);
+        }
+
+        function carteBadge(b) {
+            return `
+                <div class="badge-card palier-${b.palier}">
+                    <div class="badge-card-nom">${b.nom}</div>
+                    <div class="badge-card-palier">${b.palierNom}</div>
+                    <div class="badge-card-description">${b.description}</div>
+                    <div class="badge-card-progression">${b.valeur}${b.prochainSeuil ? ' / ' + b.prochainSeuil : ''}</div>
+                </div>
+            `;
+        }
+
+        function afficherBadges(data) {
+            document.getElementById('tab-badges').innerHTML =
+                '<div class="badge-grid">' + data.badges.map(carteBadge).join('') + '</div>';
+        }
+
+        async function chargerFiche() {
+            const response = await fetch('/api/coach/' + coachId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                document.getElementById('tab-infos').innerHTML = '<div class="match-hint">' + (data.error || 'Coach introuvable.') + '</div>';
+                return;
+            }
+
+            document.getElementById('coach-titre').textContent = data.pseudo;
+            document.title = data.pseudo + ' — Tennis Web Manager';
+
+            afficherInfos(data);
+            afficherPersonnages(data);
+            afficherPalmares(data);
+            afficherPronos(data);
+            afficherBadges(data);
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin();
+        chargerFiche();
+    </script>
+</body>
+</html>

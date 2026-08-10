@@ -1,0 +1,346 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pronostics — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Pronostics</h1>
+            <div style="text-align:center;">
+                <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
+            </div>
+            <p class="match-hint">
+                Pronostique le vainqueur des tournois dont le tableau vient d'être tiré — tu peux modifier ton
+                pronostic jusqu'au coup d'envoi du tournoi, ensuite il est verrouillé. Pour les Masters 1000 et les
+                Grands Chelems, le pari se joue en cascade : choisis d'abord tes 16 joueurs en huitièmes, puis
+                enchaîne jusqu'au vainqueur.
+            </p>
+
+            <div class="tabs-nav" id="tabs-nav"></div>
+            <div id="tab-panels"></div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const LABELS_CATEGORIE = { '250': '250', '500': '500', '1000': 'Masters 1000', slam: 'Grand Chelem', finals: 'Masters (fin de saison)' };
+        const detailsCache = {};
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        function formaterNomComplet(nomComplet) {
+            if (!nomComplet) return nomComplet;
+            const i = nomComplet.lastIndexOf(' ');
+            if (i === -1) return nomComplet;
+            return nomComplet.slice(0, i) + ' ' + nomComplet.slice(i + 1).toUpperCase();
+        }
+
+        function libellePhase(phase) {
+            if (phase.type === 'presaison') return 'Pré-saison (Saison ' + phase.numeroSaison + ')';
+            if (phase.type === 's0') return 'Semaine 0 (Saison ' + phase.numeroSaison + ')';
+            return 'Semaine ' + phase.positionSemaine + ' (Saison ' + phase.numeroSaison + ')';
+        }
+
+        async function chargerSemaine() {
+            const response = await fetch('/api/semaine');
+            const data = await response.json();
+            if (response.ok) {
+                document.getElementById('semaine-badge').textContent = 'Semaine actuelle : ' + libellePhase(data.phase);
+            }
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        async function obtenirDetail(tournoiId) {
+            if (detailsCache[tournoiId]) return detailsCache[tournoiId];
+            const response = await fetch('/api/pronostics/tournoi/' + tournoiId + '?userId=' + userId);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Impossible de charger ce tournoi.');
+            detailsCache[tournoiId] = data;
+            return data;
+        }
+
+        function construireSimpleUI(panneau, data, tournoiId) {
+            const verrouille = data.tournoi.statut !== 'a_venir';
+            const existant = data.pronosticActuel && data.pronosticActuel.predictions ? data.pronosticActuel.predictions.vainqueur : null;
+
+            const options = data.entrants.map(function (e) {
+                return `<option value="${e.id}" ${existant === e.id ? 'selected' : ''}>${formaterNomComplet(e.nom)}${e.nationalite ? ' (' + e.nationalite + ')' : ''}</option>`;
+            }).join('');
+
+            panneau.innerHTML = `
+                <div class="match-hint">Pronostic simple : le vainqueur du tournoi, 3 points si tu trouves juste.</div>
+                <div class="style-tour-grid">
+                    <div class="style-tour-card">
+                        <label>Vainqueur</label>
+                        <select class="prono-simple-select" ${verrouille ? 'disabled' : ''}>
+                            <option value="">— Choisir —</option>
+                            ${options}
+                        </select>
+                    </div>
+                </div>
+                <button class="cta cta-primary prono-valider-btn" style="margin-top:16px;" ${verrouille ? 'disabled' : ''}>Valider mon pronostic</button>
+            `;
+
+            panneau.querySelector('.prono-valider-btn').addEventListener('click', async function () {
+                const select = panneau.querySelector('.prono-simple-select');
+                if (!select.value) { alert('Choisis un vainqueur avant de valider.'); return; }
+                const response = await fetch('/api/pronostics', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ userId, tournoiId, predictions: { vainqueur: parseInt(select.value, 10) } })
+                });
+                const d = await response.json();
+                if (!response.ok) { alert(d.error); return; }
+                delete detailsCache[tournoiId];
+                alert('Pronostic enregistré !');
+            });
+        }
+
+        function construireCascadeUI(panneau, data, tournoiId) {
+            const verrouille = data.tournoi.statut !== 'a_venir';
+            const existant = data.pronosticActuel && data.pronosticActuel.predictions ? data.pronosticActuel.predictions : null;
+
+            const entrantParId = {};
+            data.tranchesHuitiemes.forEach(function (tranche) {
+                tranche.forEach(function (e) { entrantParId[e.id] = e; });
+            });
+
+            const etat = {
+                huitiemes: existant ? existant.huitiemes.slice() : new Array(16).fill(null),
+                quarts: existant ? existant.quarts.slice() : new Array(8).fill(null),
+                demies: existant ? existant.demies.slice() : new Array(4).fill(null),
+                finale: existant ? existant.finale.slice() : new Array(2).fill(null),
+                vainqueur: existant ? existant.vainqueur : null
+            };
+
+            function carteSelect(titre, round, index, valeurActuelle, candidats) {
+                const options = candidats.map(function (e) {
+                    return `<option value="${e.id}" ${valeurActuelle === e.id ? 'selected' : ''}>${formaterNomComplet(e.nom)}</option>`;
+                }).join('');
+                return `
+                    <div class="style-tour-card">
+                        <label>${titre}</label>
+                        <select class="prono-select" data-round="${round}" data-index="${index}" ${verrouille ? 'disabled' : ''}>
+                            <option value="">—</option>
+                            ${options}
+                        </select>
+                    </div>
+                `;
+            }
+
+            function rendre() {
+                let html = '<div class="match-hint">1 pt par bon huitième, 2 en quart, 3 en demie, 4 en finale, 5 pour le vainqueur.</div>';
+
+                html += '<div class="stats-header">Huitièmes de finale</div><div class="style-tour-grid">';
+                for (let i = 0; i < 16; i++) {
+                    html += carteSelect('Tranche ' + (i + 1), 'huitiemes', i, etat.huitiemes[i], data.tranchesHuitiemes[i]);
+                }
+                html += '</div>';
+
+                const huitiemesComplets = etat.huitiemes.every(function (v) { return v !== null; });
+                if (huitiemesComplets) {
+                    html += '<div class="stats-header">Quarts de finale</div><div class="style-tour-grid">';
+                    for (let i = 0; i < 8; i++) {
+                        const candidats = [entrantParId[etat.huitiemes[2 * i]], entrantParId[etat.huitiemes[2 * i + 1]]];
+                        html += carteSelect('Quart ' + (i + 1), 'quarts', i, etat.quarts[i], candidats);
+                    }
+                    html += '</div>';
+                }
+
+                const quartsComplets = huitiemesComplets && etat.quarts.every(function (v) { return v !== null; });
+                if (quartsComplets) {
+                    html += '<div class="stats-header">Demi-finales</div><div class="style-tour-grid">';
+                    for (let i = 0; i < 4; i++) {
+                        const candidats = [entrantParId[etat.quarts[2 * i]], entrantParId[etat.quarts[2 * i + 1]]];
+                        html += carteSelect('Demie ' + (i + 1), 'demies', i, etat.demies[i], candidats);
+                    }
+                    html += '</div>';
+                }
+
+                const demiesComplets = quartsComplets && etat.demies.every(function (v) { return v !== null; });
+                if (demiesComplets) {
+                    html += '<div class="stats-header">Finale</div><div class="style-tour-grid">';
+                    for (let i = 0; i < 2; i++) {
+                        const candidats = [entrantParId[etat.demies[2 * i]], entrantParId[etat.demies[2 * i + 1]]];
+                        html += carteSelect('Finaliste ' + (i + 1), 'finale', i, etat.finale[i], candidats);
+                    }
+                    html += '</div>';
+                }
+
+                const finaleComplete = demiesComplets && etat.finale.every(function (v) { return v !== null; });
+                if (finaleComplete) {
+                    html += '<div class="stats-header">Vainqueur</div><div class="style-tour-grid">';
+                    const candidats = [entrantParId[etat.finale[0]], entrantParId[etat.finale[1]]];
+                    html += carteSelect('Vainqueur du tournoi', 'vainqueur-select', 0, etat.vainqueur, candidats);
+                    html += '</div>';
+                }
+
+                if (finaleComplete && etat.vainqueur !== null) {
+                    html += `<button class="cta cta-primary prono-valider-btn" style="margin-top:16px;" ${verrouille ? 'disabled' : ''}>Valider mon pronostic</button>`;
+                }
+
+                panneau.innerHTML = html;
+
+                panneau.querySelectorAll('.prono-select').forEach(function (sel) {
+                    sel.addEventListener('change', function () {
+                        const round = sel.dataset.round;
+                        const val = sel.value ? parseInt(sel.value, 10) : null;
+
+                        if (round === 'vainqueur-select') {
+                            etat.vainqueur = val;
+                        } else {
+                            const idx = parseInt(sel.dataset.index, 10);
+                            etat[round][idx] = val;
+                            if (round === 'huitiemes') { etat.quarts.fill(null); etat.demies.fill(null); etat.finale.fill(null); etat.vainqueur = null; }
+                            if (round === 'quarts') { etat.demies.fill(null); etat.finale.fill(null); etat.vainqueur = null; }
+                            if (round === 'demies') { etat.finale.fill(null); etat.vainqueur = null; }
+                        }
+                        rendre();
+                    });
+                });
+
+                const boutonValider = panneau.querySelector('.prono-valider-btn');
+                if (boutonValider) {
+                    boutonValider.addEventListener('click', async function () {
+                        const response = await fetch('/api/pronostics', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ userId, tournoiId, predictions: etat })
+                        });
+                        const d = await response.json();
+                        if (!response.ok) { alert(d.error); return; }
+                        delete detailsCache[tournoiId];
+                        alert('Pronostic enregistré !');
+                    });
+                }
+            }
+
+            rendre();
+        }
+
+        async function activerOnglet(tournoiId, bouton) {
+            document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+            document.querySelectorAll('.tab-panel').forEach(function (p) { p.style.display = 'none'; });
+            bouton.classList.add('active');
+
+            const panneau = document.getElementById('tab-' + tournoiId);
+            panneau.style.display = 'block';
+            if (panneau.dataset.charge) return;
+            panneau.dataset.charge = '1';
+
+            panneau.innerHTML = '<div class="match-hint">Chargement...</div>';
+            try {
+                const data = await obtenirDetail(tournoiId);
+                if (data.type === 'simple') {
+                    construireSimpleUI(panneau, data, tournoiId);
+                } else {
+                    construireCascadeUI(panneau, data, tournoiId);
+                }
+            } catch (err) {
+                panneau.innerHTML = '<div class="match-hint">' + err.message + '</div>';
+            }
+        }
+
+        async function chargerTournois() {
+            const response = await fetch('/api/pronostics/disponibles/' + userId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                document.getElementById('tab-panels').innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger les tournois.') + '</div>';
+                return;
+            }
+
+            if (data.tournois.length === 0) {
+                document.getElementById('tab-panels').innerHTML = '<div class="match-hint">Aucun tournoi ouvert aux pronostics pour le moment — reviens une fois qu\'un tableau aura été tiré au sort.</div>';
+                return;
+            }
+
+            const nav = document.getElementById('tabs-nav');
+            const panneauxWrap = document.getElementById('tab-panels');
+
+            data.tournois.forEach(function (t, i) {
+                const bouton = document.createElement('button');
+                bouton.className = 'tab-btn' + (i === 0 ? ' active' : '');
+                bouton.textContent = t.nom + (t.dejaPronostique ? ' ✓' : '');
+                bouton.title = LABELS_CATEGORIE[t.categorie] || t.categorie;
+                nav.appendChild(bouton);
+
+                const panneau = document.createElement('div');
+                panneau.className = 'tab-panel';
+                panneau.id = 'tab-' + t.id;
+                panneau.style.display = i === 0 ? 'block' : 'none';
+                panneauxWrap.appendChild(panneau);
+
+                bouton.addEventListener('click', function () { activerOnglet(t.id, bouton); });
+            });
+
+            activerOnglet(data.tournois[0].id, nav.querySelector('.tab-btn'));
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        (async function init() {
+            await chargerSemaine();
+            verifierAdmin();
+            chargerTournois();
+        })();
+    </script>
+</body>
+</html>

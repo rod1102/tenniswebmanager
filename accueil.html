@@ -1,0 +1,424 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accueil — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Accueil</h1>
+            <div style="text-align:center;">
+                <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
+            </div>
+            <div id="prochain-auto-badge" style="text-align:center; margin-bottom:16px; color:#8B98A5; font-size:0.75rem;"></div>
+
+            <div id="annonce-container"></div>
+
+            <div id="badge-attente-container"></div>
+
+            <div id="cartes-container" class="creation-grid"></div>
+
+            <div class="stats-header">Tournois en cours</div>
+            <div id="tournois-en-cours-container"></div>
+
+            <div class="stats-header">Classement</div>
+            <div class="swipe-container">
+                <div id="classement-track"></div>
+                <div class="swipe-nav">
+                    <button id="swipe-prev" type="button">‹</button>
+                    <div class="swipe-dots" id="swipe-dots"></div>
+                    <button id="swipe-next" type="button">›</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        function formaterNomComplet(nomComplet) {
+            if (!nomComplet) return nomComplet;
+            const i = nomComplet.lastIndexOf(' ');
+            if (i === -1) return nomComplet;
+            return nomComplet.slice(0, i) + ' ' + nomComplet.slice(i + 1).toUpperCase();
+        }
+
+        function labelCategorie(circuit, categorie) {
+            if (categorie === 'slam') return 'Grand Chelem';
+            if (categorie === 'finals') return 'Masters (fin de saison)';
+            return circuit + ' ' + categorie;
+        }
+
+        function libellePhase(phase) {
+            if (phase.type === 'presaison') return 'Pré-saison (Saison ' + phase.numeroSaison + ')';
+            if (phase.type === 's0') return 'Semaine 0 (Saison ' + phase.numeroSaison + ')';
+            return 'Semaine ' + phase.positionSemaine + ' (Saison ' + phase.numeroSaison + ')';
+        }
+
+        function formaterDate(iso) {
+            const d = new Date(iso);
+            return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+        }
+
+        // Titre/contenu sont du texte libre redige par l'admin - jamais fait
+        // confiance a l'affichage direct (innerHTML).
+        function echapperHtml(str) {
+            return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        let estAdminCourant = false;
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+                estAdminCourant = true;
+            }
+        }
+
+        function afficherFormulaireAnnonce(contenuActuel) {
+            const container = document.getElementById('annonce-container');
+            container.innerHTML = `
+                <div class="stats-header">Annonce de l'administrateur</div>
+                <form id="annonce-form">
+                    <div class="form-group">
+                        <textarea id="annonce-contenu" rows="4" placeholder="Écrire une annonce visible par tous les coachs...">${echapperHtml(contenuActuel)}</textarea>
+                    </div>
+                    <button type="submit" class="cta cta-primary" style="padding:10px 20px; font-size:0.8rem;">Enregistrer</button>
+                </form>
+            `;
+            document.getElementById('annonce-form').addEventListener('submit', async function (e) {
+                e.preventDefault();
+                const contenu = document.getElementById('annonce-contenu').value;
+                const response = await fetch('/api/annonce', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ adminId: userId, contenu })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.error);
+                    return;
+                }
+                chargerAnnonce();
+            });
+        }
+
+        async function chargerAnnonce() {
+            const response = await fetch('/api/annonce');
+            const data = await response.json();
+            const container = document.getElementById('annonce-container');
+            if (!response.ok) return;
+
+            if (estAdminCourant) {
+                afficherFormulaireAnnonce(data.contenu);
+                return;
+            }
+
+            if (!data.contenu) {
+                container.innerHTML = '';
+                return;
+            }
+            container.innerHTML = `
+                <div class="stats-header">Annonce de l'administrateur</div>
+                <div class="tournoi-card" style="margin-bottom:16px;">
+                    <div class="article-detail-contenu">${data.contenu.split('\n').map(function (p) { return '<p>' + echapperHtml(p) + '</p>'; }).join('')}</div>
+                    <p class="match-hint" style="text-align:left; padding:8px 0 0;">Mise à jour le ${formaterDate(data.dateModification)}</p>
+                </div>
+            `;
+        }
+
+        async function chargerSemaine() {
+            const response = await fetch('/api/semaine');
+            const data = await response.json();
+            if (response.ok) {
+                document.getElementById('semaine-badge').textContent = 'Semaine actuelle : ' + libellePhase(data.phase);
+                const prochain = new Date(data.prochainAvancementAuto);
+                document.getElementById('prochain-auto-badge').textContent =
+                    'Prochain avancement automatique : ' + prochain.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+            }
+        }
+
+        function carteJoueur(type, player, semaineInfo) {
+            const label = type === 'joueur' ? 'Ton joueur' : 'Ta joueuse';
+            const icone = type === 'joueur' ? 'icone-joueur.png' : 'icone-joueuse.png';
+
+            if (!player) {
+                return `
+                    <div class="player-summary" style="text-align:center;">
+                        <div class="player-avatar" style="margin:0 auto 14px;"><img src="${icone}" alt=""></div>
+                        <div class="player-summary-type">${label}</div>
+                        <p class="match-hint" style="margin:12px 0 16px;">Pas encore de personnage sur ce circuit.</p>
+                        <a href="creation-joueurs.html" class="cta cta-primary" style="padding:10px 20px; font-size:0.8rem;">Créer mes personnages</a>
+                    </div>
+                `;
+            }
+
+            const enAttente = player.statut !== 'valide'
+                ? '<p class="match-hint" style="margin:12px 0 0;">En attente de validation par un administrateur.</p>'
+                : '';
+
+            const semaineTxt = semaineInfo
+                ? `<p class="match-hint" style="margin:8px 0 0;">Semaine en cours : ${semaineInfo.semaineActuelle.libelle}<br>Semaine prochaine : ${semaineInfo.semaineProchaine.libelle}</p>`
+                : '';
+
+            return `
+                <div class="player-summary" style="text-align:center;">
+                    <div class="player-avatar" style="margin:0 auto 14px;"><img src="${icone}" alt=""></div>
+                    <div class="player-summary-type">${label}</div>
+                    <div class="player-summary-name">${formaterNom(player.prenom, player.nom)}</div>
+                    <p class="match-hint" style="margin:8px 0 16px;">${flagImg(player.drapeau)} ${player.nationalite}</p>
+                    ${enAttente}
+                    ${semaineTxt}
+                    <a href="joueur.html?type=${type}" class="cta cta-primary" style="padding:10px 20px; font-size:0.8rem; margin-top:12px;">Voir la fiche</a>
+                </div>
+            `;
+        }
+
+        function afficherBadgeAttente(players) {
+            const alertes = [];
+            players.forEach(function (player) {
+                const label = player.type === 'joueur' ? 'Ton joueur' : 'Ta joueuse';
+                if (player.points_experience > 0) alertes.push(label + ' a ' + player.points_experience + ' point(s) d\'XP à répartir avant le prochain changement de semaine.');
+                if (player.points_dispositions_a_gagner > 0) alertes.push(label + ' a ' + player.points_dispositions_a_gagner + ' point(s) de disposition à répartir.');
+                if (player.points_dispositions_a_retirer > 0) alertes.push(label + ' doit retirer ' + player.points_dispositions_a_retirer + ' point(s) de disposition avant de pouvoir continuer.');
+                if (player.points_dispositions_a_deplacer > 0) alertes.push(label + ' peut déplacer ' + player.points_dispositions_a_deplacer + ' point(s) de disposition d\'une catégorie à une autre.');
+            });
+
+            const container = document.getElementById('badge-attente-container');
+            if (alertes.length === 0) {
+                container.innerHTML = '';
+                return;
+            }
+            container.innerHTML = `
+                <div class="xp-pool-panel">
+                    ${alertes.map(function (a) { return '<div class="planning-alerte-texte" style="color:#D4F000;">' + a + '</div>'; }).join('')}
+                </div>
+            `;
+        }
+
+        async function chargerTournoisEnCours() {
+            const container = document.getElementById('tournois-en-cours-container');
+            const [reponseTournois, reponseJoueurs] = await Promise.all([
+                fetch('/api/accueil/tournois-en-cours/' + userId),
+                fetch('/api/joueurs/' + userId)
+            ]);
+            const data = await reponseTournois.json();
+            const dataJoueurs = await reponseJoueurs.json();
+
+            if (!reponseTournois.ok) {
+                container.innerHTML = '<p class="match-hint">Impossible de charger les tournois en cours.</p>';
+                return;
+            }
+            if (data.tournois.length === 0) {
+                container.innerHTML = '<p class="match-hint">Aucun tournoi en cours pour le moment.</p>';
+                return;
+            }
+
+            const joueur = dataJoueurs.success ? dataJoueurs.players.find(function (p) { return p.type === 'joueur'; }) : null;
+            const joueuse = dataJoueurs.success ? dataJoueurs.players.find(function (p) { return p.type === 'joueuse'; }) : null;
+
+            function carteTournoi(t) {
+                const player = t.circuit === 'ATP' ? joueur : joueuse;
+                const nomClasse = t.circuit === 'ATP' ? 'tournoi-name-atp' : 'tournoi-name-wta';
+                const meta = `${labelCategorie(t.circuit, t.categorie)} · ${t.etat}`;
+                if (!player) {
+                    return `<div class="tournoi-card">
+                        <div class="tournoi-card-name ${nomClasse}">${t.nom}${t.estMoi ? ' (Toi)' : ''}</div>
+                        <div class="tournoi-card-meta">${meta}</div>
+                    </div>`;
+                }
+                const lien = 'tournoi-detail.html?calendrierId=' + t.calendrierId + '&semaine=' + t.semaine + '&playerId=' + player.id;
+                return `<div class="tournoi-card">
+                    <a class="tournoi-card-name ${nomClasse}" href="${lien}">${t.nom}${t.estMoi ? ' (Toi)' : ''}</a>
+                    <div class="tournoi-card-meta">${meta}</div>
+                </div>`;
+            }
+
+            function blocCircuit(circuit, liste) {
+                if (liste.length === 0) return '';
+                return `
+                    <div class="tournoi-semaine-header">${circuit}</div>
+                    <div class="tournoi-list">${liste.map(carteTournoi).join('')}</div>
+                `;
+            }
+
+            const tournoisATP = data.tournois.filter(function (t) { return t.circuit === 'ATP'; });
+            const tournoisWTA = data.tournois.filter(function (t) { return t.circuit === 'WTA'; });
+
+            container.innerHTML = blocCircuit('ATP', tournoisATP) + blocCircuit('WTA', tournoisWTA);
+        }
+
+        let pagesClassement = [];
+        let pageActuelle = 0;
+
+        function panneauClassementHtml(titre, liste) {
+            if (liste.length === 0) {
+                return `<div class="classement-panneau"><div class="stats-header" style="margin-bottom:8px;">${titre}</div><p class="match-hint">Pas de personnage classé sur ce circuit.</p></div>`;
+            }
+            const lignes = liste.map(function (j) {
+                return `<tr class="${j.estMoi ? 'classement-moi' : ''}"><td class="rang">${j.rang}</td><td>${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}</td><td class="pts">${j.points}</td></tr>`;
+            }).join('');
+            return `
+                <div class="classement-panneau">
+                    <div class="stats-header" style="margin-bottom:8px;">${titre}</div>
+                    <table class="classement-table"><tbody>${lignes}</tbody></table>
+                </div>
+            `;
+        }
+
+        function construirePanneaux(circuit, liste) {
+            const avecRang = liste.map(function (j, i) { return Object.assign({}, j, { rang: i + 1 }); });
+            const top5 = avecRang.slice(0, 5);
+            const idxMoi = avecRang.findIndex(function (j) { return j.estMoi; });
+            const voisinage = idxMoi === -1 ? [] : avecRang.slice(Math.max(0, idxMoi - 2), Math.min(avecRang.length, idxMoi + 3));
+
+            return [
+                panneauClassementHtml(circuit + ' — Top 5 Live', top5),
+                panneauClassementHtml(circuit + ' — Autour de toi', voisinage)
+            ];
+        }
+
+        function afficherPageClassement() {
+            document.getElementById('classement-track').innerHTML = pagesClassement[pageActuelle] || '';
+            document.getElementById('swipe-dots').innerHTML = pagesClassement.map(function (_, i) {
+                return `<span class="swipe-dot${i === pageActuelle ? ' active' : ''}" data-index="${i}"></span>`;
+            }).join('');
+            document.querySelectorAll('.swipe-dot').forEach(function (dot) {
+                dot.addEventListener('click', function () {
+                    pageActuelle = Number(dot.dataset.index);
+                    afficherPageClassement();
+                });
+            });
+        }
+
+        async function chargerClassement() {
+            const response = await fetch('/api/classement/' + userId);
+            const data = await response.json();
+            if (!response.ok) return;
+
+            pagesClassement = construirePanneaux('ATP', data.atp.live).concat(construirePanneaux('WTA', data.wta.live));
+            pageActuelle = 0;
+            afficherPageClassement();
+        }
+
+        document.getElementById('swipe-prev').addEventListener('click', function () {
+            pageActuelle = (pageActuelle - 1 + pagesClassement.length) % pagesClassement.length;
+            afficherPageClassement();
+        });
+        document.getElementById('swipe-next').addEventListener('click', function () {
+            pageActuelle = (pageActuelle + 1) % pagesClassement.length;
+            afficherPageClassement();
+        });
+
+        let toucheDepartX = null;
+        const pisteClassement = document.getElementById('classement-track');
+        pisteClassement.addEventListener('touchstart', function (e) { toucheDepartX = e.touches[0].clientX; });
+        pisteClassement.addEventListener('touchend', function (e) {
+            if (toucheDepartX === null) return;
+            const delta = e.changedTouches[0].clientX - toucheDepartX;
+            if (delta > 40) { pageActuelle = (pageActuelle - 1 + pagesClassement.length) % pagesClassement.length; afficherPageClassement(); }
+            else if (delta < -40) { pageActuelle = (pageActuelle + 1) % pagesClassement.length; afficherPageClassement(); }
+            toucheDepartX = null;
+        });
+
+        async function chargerSemaineInfoJoueur(playerId) {
+            const response = await fetch('/api/joueur/semaine-info/' + playerId + '?userId=' + userId);
+            if (!response.ok) return null;
+            return response.json();
+        }
+
+        async function chargerAccueil() {
+            const response = await fetch('/api/joueurs/' + userId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.error || 'Impossible de charger tes personnages.');
+                return;
+            }
+
+            if (data.players.length === 0) {
+                window.location.href = 'creation-joueurs.html';
+                return;
+            }
+
+            const joueur = data.players.find(function (p) { return p.type === 'joueur'; });
+            const joueuse = data.players.find(function (p) { return p.type === 'joueuse'; });
+
+            const semaineInfoJoueur = joueur ? await chargerSemaineInfoJoueur(joueur.id) : null;
+            const semaineInfoJoueuse = joueuse ? await chargerSemaineInfoJoueur(joueuse.id) : null;
+
+            document.getElementById('cartes-container').innerHTML =
+                carteJoueur('joueur', joueur, semaineInfoJoueur) + carteJoueur('joueuse', joueuse, semaineInfoJoueuse);
+
+            afficherBadgeAttente(data.players);
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        (async function () {
+            await verifierAdmin();
+            chargerAnnonce();
+        })();
+        chargerSemaine();
+        chargerAccueil();
+        chargerTournoisEnCours();
+        chargerClassement();
+    </script>
+</body>
+</html>

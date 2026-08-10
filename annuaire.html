@@ -1,0 +1,193 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Annuaire — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Annuaire</h1>
+
+            <div class="tabs-nav" id="tabs-nav">
+                <button class="tab-btn active" data-tab="atp">Joueur ATP</button>
+                <button class="tab-btn" data-tab="wta">Joueuse WTA</button>
+                <button class="tab-btn" data-tab="coachs">Coach</button>
+            </div>
+
+            <div class="tab-panel">
+                <table class="classement-table">
+                    <thead id="annuaire-thead">
+                        <tr><th>Joueur</th><th>Coach</th></tr>
+                    </thead>
+                    <tbody id="annuaire-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        let joueursData = { atp: null, wta: null };
+        let coachsData = null;
+        let ongletCourant = 'atp';
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        function afficherJoueurs(circuit) {
+            const corps = document.getElementById('annuaire-body');
+            document.getElementById('annuaire-thead').innerHTML = '<tr><th>Joueur</th><th>Coach</th></tr>';
+
+            const liste = joueursData[circuit];
+            if (!liste || liste.length === 0) {
+                corps.innerHTML = '<tr><td colspan="2" class="match-hint">Aucun joueur pour le moment.</td></tr>';
+                return;
+            }
+
+            let html = '';
+            let nationCourante = null;
+            liste.forEach(function (j) {
+                if (j.nationalite !== nationCourante) {
+                    nationCourante = j.nationalite;
+                    html += `<tr class="classement-separateur"><td colspan="2">${flagImg(j.drapeau)} ${j.nationalite}</td></tr>`;
+                }
+                html += `
+                    <tr>
+                        <td>${formaterNom(j.prenom, j.nom)}</td>
+                        <td><a class="lien-adversaire" href="coach.html?id=${j.coachUserId}">${j.coachNom}</a></td>
+                    </tr>
+                `;
+            });
+            corps.innerHTML = html;
+        }
+
+        function afficherCoachs() {
+            const corps = document.getElementById('annuaire-body');
+            document.getElementById('annuaire-thead').innerHTML = '<tr><th>Coach</th><th>Joueur ATP</th><th>Joueuse WTA</th></tr>';
+
+            if (!coachsData || coachsData.length === 0) {
+                corps.innerHTML = '<tr><td colspan="3" class="match-hint">Aucun coach pour le moment.</td></tr>';
+                return;
+            }
+
+            corps.innerHTML = coachsData.map(function (c) {
+                const nomJoueur = c.joueur ? `${flagImg(c.joueur.drapeau)} ${formaterNom(c.joueur.prenom, c.joueur.nom)}` : '—';
+                const nomJoueuse = c.joueuse ? `${flagImg(c.joueuse.drapeau)} ${formaterNom(c.joueuse.prenom, c.joueuse.nom)}` : '—';
+                return `
+                    <tr>
+                        <td><a class="lien-adversaire" href="coach.html?id=${c.userId}">${c.nomTri || '—'}</a></td>
+                        <td>${nomJoueur}</td>
+                        <td>${nomJoueuse}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        function afficherOnglet() {
+            if (ongletCourant === 'coachs') {
+                afficherCoachs();
+            } else {
+                afficherJoueurs(ongletCourant);
+            }
+        }
+
+        async function chargerJoueurs(circuit) {
+            const response = await fetch('/api/annuaire/joueurs/' + circuit.toUpperCase());
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error || 'Impossible de charger l\'annuaire.');
+                return;
+            }
+            joueursData[circuit] = data.joueurs;
+            afficherOnglet();
+        }
+
+        async function chargerCoachs() {
+            const response = await fetch('/api/annuaire/coachs');
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error || 'Impossible de charger l\'annuaire.');
+                return;
+            }
+            coachsData = data.coachs;
+            afficherOnglet();
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                bouton.classList.add('active');
+                ongletCourant = bouton.dataset.tab;
+                afficherOnglet();
+            });
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin();
+        chargerJoueurs('atp');
+        chargerJoueurs('wta');
+        chargerCoachs();
+    </script>
+</body>
+</html>

@@ -1,0 +1,242 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Presse — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Presse</h1>
+
+            <div id="nouvel-article-zone" style="display:none; margin-bottom:32px;">
+                <button class="cta cta-primary" id="nouvel-article-btn">Nouvel article</button>
+                <div id="formulaire-article-container" style="display:none;"></div>
+            </div>
+
+            <div id="articles-container"><p class="match-hint">Chargement...</p></div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        let optionsLiens = null;
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        function formaterDate(iso) {
+            const d = new Date(iso);
+            return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+            if (response.ok && data.user.est_redacteur) {
+                document.getElementById('nouvel-article-zone').style.display = 'block';
+            }
+        }
+
+        // Titre/contenu sont du texte libre redige par un coach - jamais fait
+        // confiance a l'affichage direct (innerHTML), meme pour un role autorise.
+        function echapperHtml(str) {
+            return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        function lienArticleExtra(a) {
+            if (a.lienTournoi) {
+                return `<a class="lien-adversaire" href="tournoi-detail.html?calendrierId=${a.lienTournoi.calendrierId}&semaine=${a.lienTournoi.semaine}">${a.lienTournoi.nom}</a>`;
+            }
+            if (a.lienJoueur) {
+                return `<a class="lien-adversaire" href="adversaire.html?type=reel&id=${a.lienJoueur.id}">${flagImg(a.lienJoueur.drapeau)} ${formaterNom(a.lienJoueur.prenom, a.lienJoueur.nom)}</a>`;
+            }
+            return '';
+        }
+
+        function carteArticle(a) {
+            const image = a.imagePath ? `<img class="article-card-image" src="${a.imagePath}" alt="">` : '';
+            const extraitBrut = a.contenu.length > 220 ? a.contenu.slice(0, 220) + '…' : a.contenu;
+            const lienExtra = lienArticleExtra(a);
+            return `
+                <a class="article-card" href="presse-detail.html?id=${a.id}">
+                    ${image}
+                    <div class="article-card-body">
+                        <div class="article-card-titre">${echapperHtml(a.titre)}</div>
+                        <div class="article-card-meta">${echapperHtml(a.auteur)} · ${formaterDate(a.dateCreation)}${lienExtra ? ' · ' + lienExtra : ''}</div>
+                        <p class="article-card-extrait">${echapperHtml(extraitBrut)}</p>
+                    </div>
+                </a>
+            `;
+        }
+
+        async function chargerArticles() {
+            const response = await fetch('/api/presse');
+            const data = await response.json();
+            const container = document.getElementById('articles-container');
+
+            if (!response.ok) {
+                container.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger les articles.') + '</div>';
+                return;
+            }
+            if (data.articles.length === 0) {
+                container.innerHTML = '<div class="match-hint">Aucun article pour le moment.</div>';
+                return;
+            }
+
+            container.innerHTML = '<div class="article-list">' + data.articles.map(carteArticle).join('') + '</div>';
+        }
+
+        async function chargerOptionsLiens() {
+            const response = await fetch('/api/presse/options-liens');
+            const data = await response.json();
+            if (response.ok) optionsLiens = data;
+        }
+
+        function afficherFormulaire() {
+            const container = document.getElementById('formulaire-article-container');
+            const optionsJoueurs = (optionsLiens ? optionsLiens.joueurs : []).map(function (j) {
+                return `<option value="${j.id}">${formaterNom(j.prenom, j.nom)} (${j.type === 'joueur' ? 'ATP' : 'WTA'})</option>`;
+            }).join('');
+            const optionsTournois = (optionsLiens ? optionsLiens.tournois : []).map(function (t) {
+                return `<option value="${t.id}">${t.nom} — Semaine ${t.positionSemaine} (${t.circuit})</option>`;
+            }).join('');
+
+            container.innerHTML = `
+                <form id="article-form" style="margin-top:16px;">
+                    <div class="form-group">
+                        <label for="article-titre">Titre</label>
+                        <input type="text" id="article-titre" required maxlength="140">
+                    </div>
+                    <div class="form-group">
+                        <label for="article-contenu">Contenu</label>
+                        <textarea id="article-contenu" rows="8" required></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label for="article-image">Photo (optionnelle)</label>
+                        <input type="file" id="article-image" accept="image/jpeg,image/png,image/webp,image/gif">
+                    </div>
+                    <div class="form-group">
+                        <label for="article-lien-tournoi">Lier à un tournoi (optionnel)</label>
+                        <select id="article-lien-tournoi">
+                            <option value="">— Aucun —</option>
+                            ${optionsTournois}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="article-lien-joueur">Ou lier à un joueur (optionnel)</label>
+                        <select id="article-lien-joueur">
+                            <option value="">— Aucun —</option>
+                            ${optionsJoueurs}
+                        </select>
+                    </div>
+                    <button type="submit" class="cta cta-primary">Publier</button>
+                </form>
+            `;
+            container.style.display = 'block';
+
+            document.getElementById('article-lien-tournoi').addEventListener('change', function () {
+                if (this.value) document.getElementById('article-lien-joueur').value = '';
+            });
+            document.getElementById('article-lien-joueur').addEventListener('change', function () {
+                if (this.value) document.getElementById('article-lien-tournoi').value = '';
+            });
+
+            document.getElementById('article-form').addEventListener('submit', async function (e) {
+                e.preventDefault();
+
+                const formData = new FormData();
+                formData.append('userId', userId);
+                formData.append('titre', document.getElementById('article-titre').value);
+                formData.append('contenu', document.getElementById('article-contenu').value);
+                const lienTournoiId = document.getElementById('article-lien-tournoi').value;
+                const lienJoueurId = document.getElementById('article-lien-joueur').value;
+                if (lienTournoiId) formData.append('lienTournoiId', lienTournoiId);
+                if (lienJoueurId) formData.append('lienPlayerId', lienJoueurId);
+                const fichier = document.getElementById('article-image').files[0];
+                if (fichier) formData.append('image', fichier);
+
+                const response = await fetch('/api/presse', { method: 'POST', body: formData });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    alert(data.error || 'Impossible de publier l\'article.');
+                    return;
+                }
+
+                container.style.display = 'none';
+                document.getElementById('article-form').reset();
+                await chargerArticles();
+            });
+        }
+
+        document.getElementById('nouvel-article-btn').addEventListener('click', function () {
+            const container = document.getElementById('formulaire-article-container');
+            if (container.style.display === 'block') {
+                container.style.display = 'none';
+                return;
+            }
+            afficherFormulaire();
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin();
+        chargerArticles();
+        chargerOptionsLiens();
+    </script>
+</body>
+</html>

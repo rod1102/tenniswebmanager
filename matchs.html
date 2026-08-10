@@ -1,0 +1,412 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Matchs — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Matchs</h1>
+            <div style="text-align:center;">
+                <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
+            </div>
+
+            <div class="match-list" id="match-list"></div>
+
+            <div class="stats-header">Autres matchs de la semaine</div>
+            <div class="match-list" id="autres-matchs-list"></div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const matchIdCible = params.get('id');
+
+        const detailsCache = {};
+        const liveEnCours = {};
+
+        const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+        const LABELS_DIFFICULTE = { faible: 'Adversaire faible', equilibre: 'Adversaire équilibré', fort: 'Adversaire fort' };
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        function formaterNomComplet(nomComplet) {
+            if (!nomComplet) return nomComplet;
+            const i = nomComplet.lastIndexOf(' ');
+            if (i === -1) return nomComplet;
+            return nomComplet.slice(0, i) + ' ' + nomComplet.slice(i + 1).toUpperCase();
+        }
+
+        function libellePhase(phase) {
+            if (phase.type === 'presaison') return 'Pré-saison (Saison ' + phase.numeroSaison + ')';
+            if (phase.type === 's0') return 'Semaine 0 (Saison ' + phase.numeroSaison + ')';
+            return 'Semaine ' + phase.positionSemaine + ' (Saison ' + phase.numeroSaison + ')';
+        }
+
+        async function chargerSemaine() {
+            const response = await fetch('/api/semaine');
+            const data = await response.json();
+            if (response.ok) {
+                document.getElementById('semaine-badge').textContent = 'Semaine actuelle : ' + libellePhase(data.phase);
+            }
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        async function obtenirDetail(matchId) {
+            if (detailsCache[matchId]) {
+                return detailsCache[matchId];
+            }
+            const response = await fetch('/api/matchs/detail/' + matchId + '?userId=' + userId);
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || 'Impossible de charger ce match.');
+            }
+            detailsCache[matchId] = data.match;
+            return data.match;
+        }
+
+        function arreterLive(matchId) {
+            if (liveEnCours[matchId]) {
+                clearInterval(liveEnCours[matchId]);
+                delete liveEnCours[matchId];
+            }
+        }
+
+        function libelleScore(evt) {
+            if (evt.type === 'tie_break_point' || evt.type === 'tie_break_debut') {
+                return 'Set ' + evt.numeroSet + ' : Tie-break ' + (evt.ptsA || 0) + '-' + (evt.ptsB || 0) + '  ·  Sets ' + evt.setsA + '-' + evt.setsB;
+            }
+            if (evt.jeuxA !== undefined && evt.jeuxB !== undefined) {
+                return 'Set ' + evt.numeroSet + ' : ' + evt.jeuxA + '-' + evt.jeuxB + '  ·  Sets ' + evt.setsA + '-' + evt.setsB;
+            }
+            return null;
+        }
+
+        function afficherResultat(viewer, match) {
+            const vainqueur = match.vainqueur === 'joueur';
+            viewer.innerHTML = `
+                <div class="match-result ${vainqueur ? 'victoire' : 'defaite'}" style="display:block;">
+                    ${vainqueur ? 'Victoire' : 'Défaite'} ${match.score} (niveau ${match.niveau_joueur} vs ${match.niveau_adversaire})
+                </div>
+            `;
+        }
+
+        function afficherTeletexte(viewer, match) {
+            const texte = match.evenements.map(function (evt) { return evt.texte; }).join('\n');
+            viewer.innerHTML = `<div class="match-journal" style="display:block;">${texte}</div>`;
+        }
+
+        function afficherLive(viewer, match, matchId) {
+            if (!match.estSemaineActuelle) {
+                viewer.innerHTML = `<div class="match-hint">Le direct n'est plus disponible pour ce match (semaine passée). Utilise Résultat direct ou Téletexte.</div>`;
+                return;
+            }
+
+            arreterLive(matchId);
+
+            viewer.innerHTML = `
+                <div class="live-score" id="live-score-${matchId}">C'est parti...</div>
+                <div class="live-log" id="live-log-${matchId}"></div>
+                <button class="cta cta-secondary live-skip-btn" id="live-skip-${matchId}" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
+            `;
+
+            const scoreDiv = document.getElementById('live-score-' + matchId);
+            const logDiv = document.getElementById('live-log-' + matchId);
+            const skipBtn = document.getElementById('live-skip-' + matchId);
+
+            let index = 0;
+
+            function jouerEvenement(evt) {
+                const ligne = document.createElement('div');
+                ligne.className = 'live-log-ligne live-log-' + evt.type;
+                ligne.textContent = evt.texte;
+                logDiv.appendChild(ligne);
+                logDiv.scrollTop = logDiv.scrollHeight;
+
+                const score = libelleScore(evt);
+                if (score) {
+                    scoreDiv.textContent = score;
+                }
+                if (evt.type === 'match_fin') {
+                    scoreDiv.textContent = evt.texte;
+                    arreterLive(matchId);
+                    skipBtn.style.display = 'none';
+                }
+            }
+
+            function avancer() {
+                if (index >= match.evenements.length) {
+                    arreterLive(matchId);
+                    return;
+                }
+                jouerEvenement(match.evenements[index]);
+                index++;
+            }
+
+            avancer();
+            liveEnCours[matchId] = setInterval(avancer, 3000);
+
+            skipBtn.addEventListener('click', function () {
+                arreterLive(matchId);
+                while (index < match.evenements.length) {
+                    jouerEvenement(match.evenements[index]);
+                    index++;
+                }
+            });
+        }
+
+        async function activerMode(matchId, mode, boutonClique) {
+            const carte = document.querySelector('.match-card[data-match-id="' + matchId + '"]');
+            const viewer = carte.querySelector('.match-viewer');
+
+            carte.querySelectorAll('.match-mode-btn').forEach(function (b) { b.classList.remove('active'); });
+            boutonClique.classList.add('active');
+
+            arreterLive(matchId);
+            viewer.style.display = 'block';
+            viewer.innerHTML = '<div class="match-viewer-loading">Chargement...</div>';
+
+            try {
+                const match = await obtenirDetail(matchId);
+                if (mode === 'resultat') afficherResultat(viewer, match);
+                else if (mode === 'teletexte') afficherTeletexte(viewer, match);
+                else if (mode === 'live') afficherLive(viewer, match, matchId);
+            } catch (err) {
+                viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
+            }
+        }
+
+        function grouperMatchs(matchs) {
+            const groupes = [];
+            matchs.forEach(function (m) {
+                const dernier = groupes[groupes.length - 1];
+                if (m.tournoi_id && dernier && dernier.tournoi_id === m.tournoi_id) {
+                    dernier.matchs.push(m);
+                } else if (m.coupe_equipe_id && dernier && dernier.coupe_equipe_id === m.coupe_equipe_id) {
+                    dernier.matchs.push(m);
+                } else {
+                    groupes.push({
+                        tournoi_id: m.tournoi_id,
+                        tournoi_nom: m.tournoi_nom,
+                        tournoi_calendrier_id: m.tournoi_calendrier_id,
+                        coupe_equipe_id: m.coupe_equipe_id,
+                        coupe_manche: m.coupe_manche,
+                        coupe_division: m.coupe_division,
+                        coupe_nation_domicile: m.coupe_nation_domicile,
+                        coupe_nation_exterieur: m.coupe_nation_exterieur,
+                        semaine: m.semaine,
+                        positionSemaine: m.positionSemaine,
+                        surface: m.surface,
+                        matchs: [m]
+                    });
+                }
+            });
+            groupes.forEach(function (g) {
+                if (g.tournoi_id || g.coupe_equipe_id) g.matchs.reverse();
+            });
+            return groupes;
+        }
+
+        function creerCarteMatch(match) {
+            const carte = document.createElement('div');
+            carte.className = 'match-card';
+            carte.dataset.matchId = match.id;
+
+            const liveDisabled = match.estSemaineActuelle ? '' : 'disabled title="Disponible uniquement pour les matchs de la semaine en cours"';
+
+            const estGroupe = match.tournoi_id || match.difficulte === 'coupe';
+            const nomAffiche = estGroupe
+                ? `${flagImg(match.joueur_drapeau)} ${formaterNom(match.prenom, match.nom)} - ${formaterNomComplet(match.adversaire_nom || 'Adversaire')} ${flagImg(match.adversaire_drapeau)}`
+                : formaterNom(match.prenom, match.nom);
+            const metaAffiche = estGroupe
+                ? match.numero_tour
+                : match.semaineLabel + ' · ' + LABELS_SURFACE[match.surface] + ' · ' + LABELS_DIFFICULTE[match.difficulte];
+
+            carte.innerHTML = `
+                <div class="match-card-head">
+                    <div class="player-avatar match-card-avatar">
+                        <img src="${match.type === 'joueur' ? 'icone-joueur.png' : 'icone-joueuse.png'}" alt="">
+                    </div>
+                    <div class="match-card-info">
+                        <div class="match-card-name">${nomAffiche}</div>
+                        <div class="match-card-meta">${metaAffiche}</div>
+                    </div>
+                </div>
+                <div class="match-card-actions">
+                    <button class="match-mode-btn" data-mode="live" ${liveDisabled}>Live</button>
+                    <button class="match-mode-btn" data-mode="resultat">Résultat direct</button>
+                    <button class="match-mode-btn" data-mode="teletexte">Téletexte</button>
+                </div>
+                <div class="match-viewer"></div>
+            `;
+
+            carte.querySelectorAll('.match-mode-btn').forEach(function (bouton) {
+                if (bouton.disabled) return;
+                bouton.addEventListener('click', function () {
+                    activerMode(match.id, bouton.dataset.mode, bouton);
+                });
+            });
+
+            return carte;
+        }
+
+        async function chargerMatchs() {
+            const response = await fetch('/api/matchs/' + userId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.error || 'Impossible de charger les matchs.');
+                return;
+            }
+
+            const liste = document.getElementById('match-list');
+            liste.innerHTML = '';
+
+            if (data.matchs.length === 0) {
+                liste.innerHTML = '<div class="match-hint">Aucun match joué pour le moment.</div>';
+                return;
+            }
+
+            grouperMatchs(data.matchs).forEach(function (groupe) {
+                if (!groupe.tournoi_id && !groupe.coupe_equipe_id) {
+                    liste.appendChild(creerCarteMatch(groupe.matchs[0]));
+                    return;
+                }
+
+                const bloc = document.createElement('div');
+                bloc.className = 'match-tournoi-group match-tournoi-group-' + groupe.surface;
+                const enTete = groupe.tournoi_id
+                    ? `<a href="tournoi-detail.html?calendrierId=${groupe.tournoi_calendrier_id}&semaine=${groupe.semaine}&playerId=${groupe.matchs[0].player_id}">${groupe.tournoi_nom}</a>
+                       <span class="match-tournoi-header-meta">Semaine ${groupe.positionSemaine} · ${LABELS_SURFACE[groupe.surface]}</span>`
+                    : `<a href="coupe.html?playerId=${groupe.matchs[0].player_id}&tieId=${groupe.coupe_equipe_id}">${groupe.coupe_nation_domicile} vs ${groupe.coupe_nation_exterieur}</a>
+                       <span class="match-tournoi-header-meta">${groupe.coupe_manche}${groupe.coupe_division ? ' · Division ' + groupe.coupe_division : ''} · ${LABELS_SURFACE[groupe.surface]}</span>`;
+                bloc.innerHTML = `
+                    <div class="match-tournoi-header">${enTete}</div>
+                    <div class="match-tournoi-matchs"></div>
+                `;
+                const conteneurMatchs = bloc.querySelector('.match-tournoi-matchs');
+                groupe.matchs.forEach(function (match) {
+                    conteneurMatchs.appendChild(creerCarteMatch(match));
+                });
+                liste.appendChild(bloc);
+            });
+
+            if (matchIdCible) {
+                const carteCible = document.querySelector('.match-card[data-match-id="' + matchIdCible + '"]');
+                if (carteCible) {
+                    carteCible.classList.add('match-card-highlight');
+                    carteCible.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    const boutonResultat = carteCible.querySelector('.match-mode-btn[data-mode="resultat"]');
+                    boutonResultat.click();
+                }
+            }
+        }
+
+        async function chargerAutresMatchs() {
+            const response = await fetch('/api/matchs/semaine/' + userId);
+            const data = await response.json();
+
+            const liste = document.getElementById('autres-matchs-list');
+            liste.innerHTML = '';
+
+            if (!response.ok || data.tournois.length === 0) {
+                liste.innerHTML = '<div class="match-hint">Aucun autre tournoi joué cette semaine.</div>';
+                return;
+            }
+
+            data.tournois.forEach(function (tournoi) {
+                const bloc = document.createElement('div');
+                bloc.className = 'match-tournoi-group match-tournoi-group-' + tournoi.surface;
+                bloc.innerHTML = `
+                    <div class="match-tournoi-header">
+                        <a href="tournoi-detail.html?calendrierId=${tournoi.calendrierId}&semaine=${tournoi.semaine}&playerId=${tournoi.playerId}">${tournoi.nom}</a>
+                        <span class="match-tournoi-header-meta">Semaine ${tournoi.positionSemaine} · ${LABELS_SURFACE[tournoi.surface]}</span>
+                    </div>
+                    <div class="tournoi-list"></div>
+                `;
+                const conteneur = bloc.querySelector('.tournoi-list');
+                tournoi.matchs.forEach(function (m) {
+                    const nomJ1 = flagImg(m.joueur1_drapeau) + ' ' + formaterNomComplet(m.joueur1_nom);
+                    const nomJ2 = flagImg(m.joueur2_drapeau) + ' ' + formaterNomComplet(m.joueur2_nom);
+                    const carte = document.createElement('div');
+                    carte.className = 'tournoi-card';
+                    carte.innerHTML = `
+                        <div class="tournoi-card-name">${nomJ1} vs ${nomJ2}</div>
+                        <div class="match-card-meta">${m.numero_tour}${m.score ? ' · ' + m.score : ''}</div>
+                    `;
+                    conteneur.appendChild(carte);
+                });
+                liste.appendChild(bloc);
+            });
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        chargerSemaine();
+        verifierAdmin();
+        chargerMatchs();
+        chargerAutresMatchs();
+    </script>
+</body>
+</html>

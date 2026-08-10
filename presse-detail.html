@@ -1,0 +1,269 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Article — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <p><a class="lien-adversaire" href="presse.html">� Retour à la Presse</a></p>
+
+            <div id="article-container"><p class="match-hint">Chargement...</p></div>
+            <div id="formulaire-edition-container" style="display:none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const articleId = params.get('id');
+        if (!articleId) {
+            window.location.href = 'presse.html';
+        }
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        function formaterDate(iso) {
+            const d = new Date(iso);
+            return d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+        }
+
+        // Titre/contenu sont du texte libre redige par un coach - jamais fait
+        // confiance a l'affichage direct (innerHTML), meme pour un role autorise.
+        function echapperHtml(str) {
+            return (str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        let optionsLiens = null;
+        let articleCourant = null;
+
+        async function chargerOptionsLiens() {
+            const response = await fetch('/api/presse/options-liens');
+            const data = await response.json();
+            if (response.ok) optionsLiens = data;
+        }
+
+        function afficherFormulaireEdition() {
+            const a = articleCourant;
+            const conteneurArticle = document.getElementById('article-container');
+            const conteneurFormulaire = document.getElementById('formulaire-edition-container');
+
+            const optionsJoueurs = (optionsLiens ? optionsLiens.joueurs : []).map(function (j) {
+                return `<option value="${j.id}"${a.lienJoueur && a.lienJoueur.id === j.id ? ' selected' : ''}>${formaterNom(j.prenom, j.nom)} (${j.type === 'joueur' ? 'ATP' : 'WTA'})</option>`;
+            }).join('');
+            const optionsTournois = (optionsLiens ? optionsLiens.tournois : []).map(function (t) {
+                return `<option value="${t.id}"${a.lienTournoi && a.lienTournoi.id === t.id ? ' selected' : ''}>${t.nom} — Semaine ${t.positionSemaine} (${t.circuit})</option>`;
+            }).join('');
+
+            const imageActuelle = a.imagePath
+                ? `<div class="form-group"><label>Photo actuelle</label><img src="${a.imagePath}" style="max-width:200px; border-radius:10px; display:block; margin-bottom:8px;">
+                    <label style="font-size:0.75rem;"><input type="checkbox" id="edit-supprimer-image"> Retirer la photo</label></div>`
+                : '';
+
+            conteneurFormulaire.innerHTML = `
+                <form id="edit-article-form" style="margin-top:24px;">
+                    <div class="stats-header">Modifier l'article</div>
+                    <div class="form-group">
+                        <label for="edit-titre">Titre</label>
+                        <input type="text" id="edit-titre" required maxlength="140" value="${echapperHtml(a.titre)}">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-contenu">Contenu</label>
+                        <textarea id="edit-contenu" rows="8" required>${echapperHtml(a.contenu)}</textarea>
+                    </div>
+                    ${imageActuelle}
+                    <div class="form-group">
+                        <label for="edit-image">${a.imagePath ? 'Remplacer la photo' : 'Ajouter une photo'} (optionnel)</label>
+                        <input type="file" id="edit-image" accept="image/jpeg,image/png,image/webp,image/gif">
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-lien-tournoi">Lier à un tournoi (optionnel)</label>
+                        <select id="edit-lien-tournoi">
+                            <option value="">— Aucun —</option>
+                            ${optionsTournois}
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="edit-lien-joueur">Ou lier à un joueur (optionnel)</label>
+                        <select id="edit-lien-joueur">
+                            <option value="">— Aucun —</option>
+                            ${optionsJoueurs}
+                        </select>
+                    </div>
+                    <button type="submit" class="cta cta-primary">Enregistrer</button>
+                    <button type="button" class="cta cta-secondary" id="annuler-edition-btn">Annuler</button>
+                </form>
+            `;
+
+            conteneurArticle.style.display = 'none';
+            conteneurFormulaire.style.display = 'block';
+
+            document.getElementById('edit-lien-tournoi').addEventListener('change', function () {
+                if (this.value) document.getElementById('edit-lien-joueur').value = '';
+            });
+            document.getElementById('edit-lien-joueur').addEventListener('change', function () {
+                if (this.value) document.getElementById('edit-lien-tournoi').value = '';
+            });
+            document.getElementById('annuler-edition-btn').addEventListener('click', function () {
+                conteneurFormulaire.style.display = 'none';
+                conteneurArticle.style.display = 'block';
+            });
+
+            document.getElementById('edit-article-form').addEventListener('submit', async function (e) {
+                e.preventDefault();
+
+                const formData = new FormData();
+                formData.append('userId', userId);
+                formData.append('titre', document.getElementById('edit-titre').value);
+                formData.append('contenu', document.getElementById('edit-contenu').value);
+                const lienTournoiId = document.getElementById('edit-lien-tournoi').value;
+                const lienJoueurId = document.getElementById('edit-lien-joueur').value;
+                if (lienTournoiId) formData.append('lienTournoiId', lienTournoiId);
+                if (lienJoueurId) formData.append('lienPlayerId', lienJoueurId);
+                const fichier = document.getElementById('edit-image').files[0];
+                if (fichier) formData.append('image', fichier);
+                const caseSupprimer = document.getElementById('edit-supprimer-image');
+                if (caseSupprimer && caseSupprimer.checked) formData.append('supprimerImage', 'true');
+
+                const response = await fetch('/api/presse/' + articleId, { method: 'PUT', body: formData });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    alert(data.error || 'Impossible d\'enregistrer les modifications.');
+                    return;
+                }
+
+                conteneurFormulaire.style.display = 'none';
+                conteneurArticle.style.display = 'block';
+                await chargerArticle();
+            });
+        }
+
+        async function supprimerArticle() {
+            if (!confirm('Supprimer définitivement cet article ?')) return;
+            const response = await fetch('/api/presse/' + articleId, {
+                method: 'DELETE',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error);
+                return;
+            }
+            window.location.href = 'presse.html';
+        }
+
+        async function chargerArticle() {
+            const response = await fetch('/api/presse/' + articleId);
+            const data = await response.json();
+            const container = document.getElementById('article-container');
+
+            if (!response.ok) {
+                container.innerHTML = '<div class="match-hint">' + (data.error || 'Article introuvable.') + '</div>';
+                return;
+            }
+
+            const a = data.article;
+            articleCourant = a;
+            document.title = a.titre + ' — Tennis Web Manager';
+
+            const image = a.imagePath ? `<img class="article-detail-image" src="${a.imagePath}" alt="">` : '';
+
+            let lienExtra = '';
+            if (a.lienTournoi) {
+                lienExtra = `<p class="match-hint"><a class="lien-adversaire" href="tournoi-detail.html?calendrierId=${a.lienTournoi.calendrierId}&semaine=${a.lienTournoi.semaine}">Voir la fiche du tournoi : ${a.lienTournoi.nom}</a></p>`;
+            } else if (a.lienJoueur) {
+                lienExtra = `<p class="match-hint"><a class="lien-adversaire" href="adversaire.html?type=reel&id=${a.lienJoueur.id}">Voir la fiche de ${flagImg(a.lienJoueur.drapeau)} ${formaterNom(a.lienJoueur.prenom, a.lienJoueur.nom)}</a></p>`;
+            }
+
+            const boutonsAuteur = (Number(a.auteurUserId) === Number(userId))
+                ? `<div style="display:flex; gap:10px; margin-top:20px;">
+                    <button class="cta cta-primary" id="modifier-article-btn">Modifier cet article</button>
+                    <button class="cta cta-secondary" id="supprimer-article-btn">Supprimer cet article</button>
+                   </div>`
+                : '';
+
+            container.innerHTML = `
+                <h1 class="dashboard-title" style="text-align:left; margin-bottom:6px;">${echapperHtml(a.titre)}</h1>
+                <p class="match-hint" style="text-align:left; padding:0 0 16px;">${echapperHtml(a.auteur)} · ${formaterDate(a.dateCreation)}</p>
+                ${image}
+                <div class="article-detail-contenu">${a.contenu.split('\n').map(function (p) { return '<p>' + echapperHtml(p) + '</p>'; }).join('')}</div>
+                ${lienExtra}
+                ${boutonsAuteur}
+            `;
+
+            if (boutonsAuteur) {
+                document.getElementById('supprimer-article-btn').addEventListener('click', supprimerArticle);
+                document.getElementById('modifier-article-btn').addEventListener('click', afficherFormulaireEdition);
+            }
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin();
+        chargerArticle();
+        chargerOptionsLiens();
+    </script>
+</body>
+</html>

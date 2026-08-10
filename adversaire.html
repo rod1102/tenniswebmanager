@@ -1,0 +1,496 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Adversaire — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title" id="adversaire-titre">Adversaire</h1>
+            <div style="text-align:center;">
+                <span class="week-badge" id="semaine-badge">Semaine ...</span>
+            </div>
+
+            <div class="tabs-nav" id="tabs-nav">
+                <button class="tab-btn active" data-tab="infos">Infos</button>
+                <button class="tab-btn" data-tab="palmares">Palmarès</button>
+                <button class="tab-btn" data-tab="matchs">Derniers matchs</button>
+                <button class="tab-btn" data-tab="stats">Statistiques</button>
+                <button class="tab-btn" data-tab="faceaface">Face-à-face</button>
+                <button class="tab-btn" data-tab="badges">Badges</button>
+            </div>
+
+            <div class="tab-panel" id="tab-infos"></div>
+            <div class="tab-panel" id="tab-palmares" style="display:none;"></div>
+            <div class="tab-panel" id="tab-matchs" style="display:none;"></div>
+            <div class="tab-panel" id="tab-stats" style="display:none;"></div>
+            <div class="tab-panel" id="tab-faceaface" style="display:none;"></div>
+            <div class="tab-panel" id="tab-badges" style="display:none;"></div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const typeAdversaire = params.get('type');
+        const adversaireId = params.get('id');
+
+        if (typeAdversaire !== 'reel' && typeAdversaire !== 'rival') {
+            window.location.href = 'index.html';
+        }
+        if (!adversaireId) {
+            window.location.href = 'index.html';
+        }
+
+        const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+        let saisonSelectionnee = null;
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        // Icone generique (dessin original, pas d'image de vrai trophee - question de
+        // droits) : une seule silhouette de coupe, seule la couleur change selon le
+        // Grand Chelem concerne (categorie 'slam') pour donner "leur" identite visuelle
+        // sans reproduire un trophee reel.
+        const TROPHY_SVG = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M6 3h12v2h2.5A1.5 1.5 0 0122 6.5V8c0 2.35-1.8 4.28-4.1 4.48A5.5 5.5 0 0113.5 16v2H16a1 1 0 011 1v1H7v-1a1 1 0 011-1h2.5v-2a5.5 5.5 0 01-4.4-3.52C3.8 12.28 2 10.35 2 8V6.5A1.5 1.5 0 013.5 5H6V3zm0 4H4v1c0 1.24.8 2.3 2 2.7V7zm12 0v3.7c1.2-.4 2-1.46 2-2.7V7h-2z"/></svg>';
+        const COULEURS_SLAM = { 'Open d\'Australie': 'trophee-ao', 'Roland-Garros': 'trophee-rg', 'Wimbledon': 'trophee-wimbledon', 'US Open': 'trophee-usopen' };
+
+        function iconeTrophee(nomTournoi, categorie) {
+            const classe = categorie === 'slam' ? (COULEURS_SLAM[nomTournoi] || 'trophee-slam') : 'trophee-generique';
+            return `<span class="trophee ${classe}" title="${nomTournoi}">${TROPHY_SVG}</span>`;
+        }
+
+        function traduireMain(main) {
+            return main === 'droitier' ? 'Droitier' : 'Gaucher';
+        }
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        function formaterNomComplet(nomComplet) {
+            if (!nomComplet) return nomComplet;
+            const i = nomComplet.lastIndexOf(' ');
+            if (i === -1) return nomComplet;
+            return nomComplet.slice(0, i) + ' ' + nomComplet.slice(i + 1).toUpperCase();
+        }
+
+        function labelVD(o) {
+            return (o.victoires || 0) + 'V - ' + (o.defaites || 0) + 'D';
+        }
+
+        function libellePhase(phase) {
+            if (phase.type === 'presaison') return 'Pré-saison (Saison ' + phase.numeroSaison + ')';
+            if (phase.type === 's0') return 'Semaine 0 (Saison ' + phase.numeroSaison + ')';
+            return 'Semaine ' + phase.positionSemaine + ' (Saison ' + phase.numeroSaison + ')';
+        }
+
+        async function chargerSemaine() {
+            const response = await fetch('/api/semaine');
+            const data = await response.json();
+            if (response.ok) {
+                document.getElementById('semaine-badge').textContent = 'Semaine actuelle : ' + libellePhase(data.phase);
+            }
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                document.querySelectorAll('.tab-panel').forEach(function (p) { p.style.display = 'none'; });
+                bouton.classList.add('active');
+                document.getElementById('tab-' + bouton.dataset.tab).style.display = 'block';
+            });
+        });
+
+        function ligneClassement(info) {
+            const classementTxt = info.classement ? info.classement : 'Non classé';
+            const meilleurTxt = info.meilleurClassement
+                ? info.meilleurClassement.rang + ' (' + info.meilleurClassement.semaines + (info.meilleurClassement.semaines > 1 ? ' semaines' : ' semaine') + ')'
+                : 'Pas encore de données';
+            return `
+                <div class="stat-row"><span class="stat-label">Classement</span><span class="stat-value">${classementTxt}</span></div>
+                <div class="stat-row"><span class="stat-label">Meilleur classement</span><span class="stat-value">${meilleurTxt}</span></div>
+            `;
+        }
+
+        function afficherInfos(data) {
+            const panneau = document.getElementById('tab-infos');
+            const info = data.infos;
+
+            if (typeAdversaire === 'reel') {
+                panneau.innerHTML = `
+                    <div class="stat-row"><span class="stat-label">Prénom</span><span class="stat-value">${info.prenom}</span></div>
+                    <div class="stat-row"><span class="stat-label">Nom</span><span class="stat-value">${(info.nom || '').toUpperCase()}</span></div>
+                    <div class="stat-row"><span class="stat-label">Âge</span><span class="stat-value">${info.age} ans</span></div>
+                    <div class="stat-row"><span class="stat-label">Taille</span><span class="stat-value">${info.taille} cm</span></div>
+                    <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value">${flagImg(info.drapeau)} ${info.nationalite}</span></div>
+                    <div class="stat-row"><span class="stat-label">Main forte</span><span class="stat-value">${traduireMain(info.main_forte)}</span></div>
+                    <div class="stat-row"><span class="stat-label">Circuit</span><span class="stat-value">${info.circuit}</span></div>
+                    <div class="stat-row"><span class="stat-label">Coach</span><span class="stat-value"><a class="lien-adversaire" href="coach.html?id=${info.coachUserId}">${info.coachNom}</a></span></div>
+                    ${ligneClassement(info)}
+                `;
+            } else {
+                panneau.innerHTML = `
+                    <div class="stat-row"><span class="stat-label">Nom</span><span class="stat-value">${formaterNomComplet(info.nom)}</span></div>
+                    <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value">${flagImg(info.drapeau)} ${info.nationalite}</span></div>
+                    <div class="stat-row"><span class="stat-label">Circuit</span><span class="stat-value">${info.circuit}</span></div>
+                    ${ligneClassement(info)}
+                    <div class="match-hint">Rival persistant du circuit — infos personnelles (taille, main) non disponibles.</div>
+                `;
+            }
+        }
+
+        function afficherPalmares(data) {
+            const panneau = document.getElementById('tab-palmares');
+            if (data.palmares.length === 0) {
+                panneau.innerHTML = '<div class="match-hint">Aucun titre remporté pour l\'instant.</div>';
+                return;
+            }
+            panneau.innerHTML = `
+                <div class="tournoi-list">
+                    ${data.palmares.map(function (p) {
+                        return `<div class="tournoi-card"><div class="tournoi-card-name">${iconeTrophee(p.nom, p.categorie)} ${p.nom}</div>
+                            <div class="tournoi-card-meta">Semaine ${p.positionSemaine} · ${p.categorie} · ${LABELS_SURFACE[p.surface] || p.surface}</div></div>`;
+                    }).join('')}
+                </div>
+            `;
+        }
+
+        // ---------- Derniers matchs ----------
+        // Le resultat (Victoire/Defaite + score) est deja affiche directement dans le
+        // titre de chaque carte : seul le Teletexte (journal complet du match) apporte
+        // une info supplementaire, d'ou un unique bouton (pas de mode Live/Resultat
+        // comme sur matchs.html/tournoi-detail.html).
+
+        const detailsCache = {};
+
+        async function obtenirDetail(matchId) {
+            if (detailsCache[matchId]) return detailsCache[matchId];
+            const response = await fetch('/api/matchs/detail/' + matchId + '?userId=' + userId);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Impossible de charger ce match.');
+            detailsCache[matchId] = data.match;
+            return data.match;
+        }
+
+        async function activerModeMatch(matchId, mode, boutonClique) {
+            const carte = document.querySelector('.match-card[data-match-id="' + matchId + '"]');
+            const viewer = carte.querySelector('.match-viewer');
+
+            boutonClique.classList.add('active');
+            viewer.style.display = 'block';
+            viewer.innerHTML = '<div class="match-viewer-loading">Chargement...</div>';
+
+            try {
+                const match = await obtenirDetail(matchId);
+                const texte = match.evenements.map(function (evt) { return evt.texte; }).join('\n');
+                viewer.innerHTML = `<div class="match-journal" style="display:block;">${texte}</div>`;
+            } catch (err) {
+                viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
+            }
+        }
+
+        function selecteurSaison(data) {
+            if (!data.saisonsDisponibles || data.saisonsDisponibles.length === 0) return '';
+            const options = data.saisonsDisponibles.map(function (s) {
+                return `<option value="${s}"${s === data.saisonAffichee ? ' selected' : ''}>Saison ${s}</option>`;
+            }).join('');
+            return `
+                <div class="form-group" style="max-width:220px; margin-bottom:16px;">
+                    <label for="saison-select">Saison</label>
+                    <select id="saison-select">${options}</select>
+                </div>
+            `;
+        }
+
+        function creerCarteMatchAdversaire(m) {
+            const carte = document.createElement('div');
+            carte.className = 'match-card';
+
+            // Le badge Kine ne reflete jamais que la propre condition du joueur/rival
+            // de cette fiche (matchs.kine_intervenu est calcule cote serveur par
+            // rapport a CE player_id precis) - jamais celle de l'adversaire du match.
+            const kineBadge = m.kineIntervenu ? '<span class="status-badge kine-badge">Kiné</span>' : '';
+
+            if (typeAdversaire === 'reel' && m.matchId && m.tournoi) {
+                carte.dataset.matchId = m.matchId;
+                const classementTxt = m.adversaireClassement ? `<span class="match-card-adversaire-classement">#${m.adversaireClassement}</span>` : '';
+                const blocAdversaire = m.adversaireNom
+                    ? `<div class="match-card-adversaire">${flagImg(m.adversaireDrapeau)}<span class="match-card-adversaire-nom">${formaterNomComplet(m.adversaireNom)}</span>${classementTxt}</div>`
+                    : '';
+                // Trophee = la finale gagnee (dernier tour du tournoi, quel que soit son
+                // format elimination/poules, s'appelle toujours "Finale").
+                const trophee = (m.numeroTour === 'Finale' && m.victoire) ? iconeTrophee(m.tournoiNom, m.categorie) : '';
+                // Le resultat (score) est deja affiche directement dans le titre : seul
+                // le Teletexte (journal complet du match) apporte une info en plus, d'ou
+                // un unique petit bouton plutot que les 3 modes Live/Resultat/Teletexte.
+                carte.innerHTML = `
+                    <div class="match-card-head">
+                        <div class="match-card-info">
+                            <div class="match-card-name">${trophee}${m.victoire ? 'Victoire' : 'Défaite'} ${m.score} ${kineBadge}</div>
+                            ${blocAdversaire}
+                            <div class="match-card-meta">Semaine ${m.positionSemaine} · ${m.numeroTour}</div>
+                        </div>
+                        <button class="match-mode-btn-mini" data-mode="teletexte">Téletexte</button>
+                    </div>
+                    <div class="match-viewer"></div>
+                `;
+                carte.querySelector('.match-mode-btn-mini').addEventListener('click', function () {
+                    activerModeMatch(m.matchId, 'teletexte', this);
+                });
+            } else {
+                const nomAdversaire = typeAdversaire === 'reel' ? m.numeroTour : (formaterNomComplet(m.adversaireNom) + ' · ' + m.numeroTour);
+                carte.innerHTML = `
+                    <div class="match-card-head">
+                        <div class="match-card-info">
+                            <div class="match-card-name">${m.victoire ? 'Victoire' : 'Défaite'} ${m.score || ''} ${kineBadge}</div>
+                            <div class="match-card-meta">Semaine ${m.positionSemaine} · ${nomAdversaire}</div>
+                        </div>
+                    </div>
+                `;
+            }
+            return carte;
+        }
+
+        // Regroupe une liste plate de matchs (triee du plus recent au plus ancien) en
+        // paquets consecutifs appartenant au meme tournoi (tournoiId) - un tournoi sur
+        // 2 semaines peut avoir des matchs non consecutifs dans le temps, mais reste
+        // group car ORDER BY garantit deja qu'ils se suivent dans le flux.
+        function grouperParTournoi(matchs) {
+            const groupes = [];
+            matchs.forEach(function (m) {
+                const dernier = groupes[groupes.length - 1];
+                if (m.tournoiId && dernier && dernier.tournoiId === m.tournoiId) {
+                    dernier.matchs.push(m);
+                } else {
+                    groupes.push({ tournoiId: m.tournoiId, tournoiNom: m.tournoiNom, tournoiCalendrierId: m.tournoiCalendrierId, surface: m.surface, positionSemaine: m.positionSemaine, matchs: [m] });
+                }
+            });
+            return groupes;
+        }
+
+        function afficherDerniersMatchs(data) {
+            const panneau = document.getElementById('tab-matchs');
+            const selecteur = selecteurSaison(data);
+
+            if (data.derniersMatchs.length === 0) {
+                panneau.innerHTML = selecteur + '<div class="match-hint">Aucun match disputé cette saison.</div>';
+            } else {
+                panneau.innerHTML = selecteur + '<div class="match-list" id="adversaire-match-list"></div>';
+                const liste = document.getElementById('adversaire-match-list');
+
+                const groupes = grouperParTournoi(data.derniersMatchs);
+                groupes.forEach(function (groupe, index) {
+                    if (!groupe.tournoiId) {
+                        groupe.matchs.forEach(function (m) { liste.appendChild(creerCarteMatchAdversaire(m)); });
+                        return;
+                    }
+
+                    if (index > 0) liste.appendChild(Object.assign(document.createElement('div'), { className: 'separateur-tournoi' }));
+
+                    const bloc = document.createElement('div');
+                    bloc.className = 'match-tournoi-group match-tournoi-group-' + groupe.surface;
+                    const lienTournoi = groupe.tournoiCalendrierId
+                        ? `<a href="tournoi-detail.html?calendrierId=${groupe.tournoiCalendrierId}&semaine=${groupe.matchs[0].semaine}">${groupe.tournoiNom}</a>`
+                        : groupe.tournoiNom;
+                    bloc.innerHTML = `
+                        <div class="match-tournoi-header">
+                            ${lienTournoi}
+                            <span class="match-tournoi-header-meta">Semaine ${groupe.positionSemaine} · ${LABELS_SURFACE[groupe.surface] || groupe.surface}</span>
+                        </div>
+                        <div class="match-tournoi-matchs"></div>
+                    `;
+                    const conteneur = bloc.querySelector('.match-tournoi-matchs');
+                    groupe.matchs.forEach(function (m) { conteneur.appendChild(creerCarteMatchAdversaire(m)); });
+                    liste.appendChild(bloc);
+                });
+            }
+
+            if (document.getElementById('saison-select')) {
+                document.getElementById('saison-select').addEventListener('change', function () {
+                    saisonSelectionnee = Number(this.value);
+                    chargerFiche();
+                });
+            }
+        }
+
+        function tableVD(lignes, libelleColonne) {
+            if (Object.keys(lignes).length === 0) {
+                return '<div class="match-hint">Aucune donnée pour l\'instant.</div>';
+            }
+            return `
+                <table class="classement-table">
+                    <thead><tr><th>${libelleColonne}</th><th>Victoires</th><th>Défaites</th></tr></thead>
+                    <tbody>
+                        ${Object.keys(lignes).sort().map(function (cle) {
+                            const o = lignes[cle];
+                            return `<tr><td>${cle}</td><td>${o.victoires || 0}</td><td>${o.defaites || 0}</td></tr>`;
+                        }).join('')}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function afficherStats(data) {
+            const panneau = document.getElementById('tab-stats');
+            const s = data.stats;
+            const parSurfaceLabels = {};
+            Object.keys(s.parSurface).forEach(function (cle) { parSurfaceLabels[LABELS_SURFACE[cle] || cle] = s.parSurface[cle]; });
+            const parSaisonLabels = {};
+            Object.keys(s.parSaison).forEach(function (cle) { parSaisonLabels['Saison ' + cle] = s.parSaison[cle]; });
+
+            const f = data.faceAFace;
+            let blocFaceAFace = '';
+            if (f && f.nbConfrontations > 0) {
+                const parSurfaceFaceLabels = {};
+                Object.keys(f.parSurface).forEach(function (cle) { parSurfaceFaceLabels[LABELS_SURFACE[cle] || cle] = f.parSurface[cle]; });
+                const parSaisonFaceLabels = {};
+                Object.keys(f.parSaison).forEach(function (cle) { parSaisonFaceLabels['Saison ' + cle] = f.parSaison[cle]; });
+
+                blocFaceAFace = `
+                    <div class="stats-header">Contre toi (${f.nbConfrontations} confrontation${f.nbConfrontations > 1 ? 's' : ''})</div>
+                    <div class="stat-row"><span class="stat-label">Bilan</span><span class="stat-value">${labelVD(f)}</span></div>
+                    <div class="stats-header">Contre toi — Par surface</div>
+                    ${tableVD(parSurfaceFaceLabels, 'Surface')}
+                    <div class="stats-header">Contre toi — Par saison</div>
+                    ${tableVD(parSaisonFaceLabels, 'Saison')}
+                `;
+            }
+
+            panneau.innerHTML = `
+                <div class="stats-header">Global</div>
+                <div class="stat-row"><span class="stat-label">Bilan</span><span class="stat-value">${labelVD(s.global)}</span></div>
+                <div class="stats-header">Par surface</div>
+                ${tableVD(parSurfaceLabels, 'Surface')}
+                <div class="stats-header">Par saison</div>
+                ${tableVD(parSaisonLabels, 'Saison')}
+                ${blocFaceAFace}
+            `;
+        }
+
+        function afficherFaceAFace(data) {
+            const panneau = document.getElementById('tab-faceaface');
+            const f = data.faceAFace;
+
+            if (f.nbConfrontations === 0) {
+                panneau.innerHTML = '<div class="match-hint">Aucune confrontation pour l\'instant.</div>';
+                return;
+            }
+
+            const parSurfaceLabels = {};
+            Object.keys(f.parSurface).forEach(function (cle) { parSurfaceLabels[LABELS_SURFACE[cle] || cle] = f.parSurface[cle]; });
+
+            panneau.innerHTML = `
+                <div class="stat-row"><span class="stat-label">Confrontations</span><span class="stat-value">${f.nbConfrontations}</span></div>
+                <div class="stat-row"><span class="stat-label">Bilan</span><span class="stat-value">${labelVD(f)}</span></div>
+                <div class="stats-header">Par surface</div>
+                ${tableVD(parSurfaceLabels, 'Surface')}
+            `;
+        }
+
+        function carteBadge(b) {
+            return `
+                <div class="badge-card palier-${b.palier}">
+                    <div class="badge-card-nom">${b.nom}</div>
+                    <div class="badge-card-palier">${b.palierNom}</div>
+                    <div class="badge-card-description">${b.description}</div>
+                    <div class="badge-card-progression">${b.valeur}${b.prochainSeuil ? ' / ' + b.prochainSeuil : ''}</div>
+                </div>
+            `;
+        }
+
+        function afficherBadges(data) {
+            const panneau = document.getElementById('tab-badges');
+            panneau.innerHTML = '<div class="badge-grid">' + data.badges.map(carteBadge).join('') + '</div>';
+        }
+
+        async function chargerFiche() {
+            const suffixeSaison = saisonSelectionnee ? '&saison=' + saisonSelectionnee : '';
+            const response = await fetch('/api/adversaire/' + typeAdversaire + '/' + adversaireId + '?monUserId=' + userId + suffixeSaison);
+            const data = await response.json();
+
+            if (!response.ok) {
+                document.getElementById('tab-infos').innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger cet adversaire.') + '</div>';
+                return;
+            }
+
+            saisonSelectionnee = data.saisonAffichee;
+
+            const nomAffiche = typeAdversaire === 'reel' ? formaterNom(data.infos.prenom, data.infos.nom) : formaterNomComplet(data.infos.nom);
+            document.getElementById('adversaire-titre').textContent = nomAffiche;
+            document.title = nomAffiche + ' — Tennis Web Manager';
+
+            afficherInfos(data);
+            afficherPalmares(data);
+            afficherDerniersMatchs(data);
+            afficherStats(data);
+            afficherFaceAFace(data);
+            afficherBadges(data);
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        (async function init() {
+            await chargerSemaine();
+            verifierAdmin();
+            chargerFiche();
+        })();
+    </script>
+</body>
+</html>

@@ -1,0 +1,293 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Administration — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Administration</h1>
+
+            <div style="text-align:center; margin-bottom:32px;">
+                <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
+                <div class="planning-alerte-texte" id="prochain-auto-badge" style="margin-top:8px;"></div>
+                <div id="saison-pause-badge" style="display:none; margin-top:12px;">
+                    <div class="planning-alerte-texte" style="color:#D4F000;">Saison en pause — l'avancement automatique ne fera rien tant que la saison n'est pas lancée.</div>
+                    <button id="lancer-saison-btn" class="cta cta-primary" style="margin-top:10px;">Lancer la saison</button>
+                </div>
+                <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
+                    <button id="avancer-btn" class="cta cta-primary" style="margin-top:12px;">Faire avancer la semaine</button>
+                    <button id="avancer-tour-btn" class="cta cta-secondary" style="margin-top:12px;">Avancer un tour</button>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title" style="font-size:1.8rem;">Inscriptions en attente</h1>
+
+            <div class="players-grid" id="admin-grid"></div>
+            <p id="empty-message" style="text-align:center; color:#8B98A5; display:none;">Aucune inscription en attente pour le moment.</p>
+
+            <h1 class="dashboard-title" style="font-size:1.8rem; margin-top:40px;">Rédacteurs (Presse)</h1>
+            <p class="match-hint">Un rédacteur peut publier des articles sur la page Presse.</p>
+            <div class="table-wrap">
+                <table class="classement-table">
+                    <thead><tr><th>Coach</th><th>E-mail</th><th>Rédacteur</th><th></th></tr></thead>
+                    <tbody id="redacteurs-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const adminId = sessionStorage.getItem('currentUserId');
+
+        if (!adminId) {
+            window.location.href = 'connexion.html';
+        }
+
+        function traduireMain(main) {
+            return main === 'droitier' ? 'Droitier' : 'Gaucher';
+        }
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + adminId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        async function verifierAcces() {
+            const response = await fetch('/api/utilisateur/' + adminId);
+            const data = await response.json();
+            if (!response.ok || data.user.role !== 'admin') {
+                alert('Accès réservé à l\'administrateur.');
+                window.location.href = 'accueil.html';
+                return false;
+            }
+            return true;
+        }
+
+        function libellePhase(phase) {
+            if (phase.type === 'presaison') return 'Pré-saison (Saison ' + phase.numeroSaison + ')';
+            if (phase.type === 's0') return 'Semaine 0 (Saison ' + phase.numeroSaison + ')';
+            return 'Semaine ' + phase.positionSemaine + ' (Saison ' + phase.numeroSaison + ')';
+        }
+
+        async function chargerSemaine() {
+            const response = await fetch('/api/semaine');
+            const data = await response.json();
+            if (response.ok) {
+                document.getElementById('semaine-badge').textContent = 'Semaine actuelle : ' + libellePhase(data.phase);
+                const prochain = new Date(data.prochainAvancementAuto);
+                document.getElementById('prochain-auto-badge').textContent =
+                    'Prochain avancement automatique : ' + prochain.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
+                document.getElementById('saison-pause-badge').style.display = data.saisonLancee ? 'none' : 'block';
+            }
+        }
+
+        async function chargerEnAttente() {
+            const response = await fetch('/api/admin/en-attente?adminId=' + adminId);
+            const data = await response.json();
+
+            if (!response.ok) {
+                alert(data.error || 'Impossible de charger les inscriptions.');
+                return;
+            }
+
+            const grid = document.getElementById('admin-grid');
+            const emptyMessage = document.getElementById('empty-message');
+            grid.innerHTML = '';
+
+            if (data.players.length === 0) {
+                emptyMessage.style.display = 'block';
+                return;
+            }
+            emptyMessage.style.display = 'none';
+
+            data.players.forEach(function (player) {
+                const card = document.createElement('div');
+                card.className = 'player-summary';
+                card.innerHTML = `
+                    <div class="player-summary-type">${player.type === 'joueur' ? 'Joueur' : 'Joueuse'} — coach : ${player.coach_email}</div>
+                    <div class="player-summary-name">${formaterNom(player.prenom, player.nom)}</div>
+                    <div class="stat-row"><span class="stat-label">Âge</span><span class="stat-value">${player.age} ans</span></div>
+                    <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value">${player.nationalite}</span></div>
+                    <div class="stat-row"><span class="stat-label">Main forte</span><span class="stat-value">${traduireMain(player.main_forte)}</span></div>
+                    <div style="display:flex; gap:10px; margin-top:16px;">
+                        <button class="cta cta-primary" style="flex:1; padding:12px; font-size:0.8rem;" data-id="${player.id}" data-decision="valide">Valider</button>
+                        <button class="cta cta-secondary" style="flex:1; padding:12px; font-size:0.8rem;" data-id="${player.id}" data-decision="refuse">Refuser</button>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+
+            grid.querySelectorAll('button[data-decision]').forEach(function (btn) {
+                btn.addEventListener('click', async function () {
+                    const playerId = btn.getAttribute('data-id');
+                    const decision = btn.getAttribute('data-decision');
+
+                    const response = await fetch('/api/admin/decision', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ adminId, playerId, decision })
+                    });
+
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.error);
+                        return;
+                    }
+
+                    chargerEnAttente();
+                });
+            });
+        }
+
+        async function chargerRedacteurs() {
+            const response = await fetch('/api/admin/redacteurs?adminId=' + adminId);
+            const data = await response.json();
+            if (!response.ok) return;
+
+            const corps = document.getElementById('redacteurs-body');
+            corps.innerHTML = data.coachs.map(function (c) {
+                const estRedacteur = !!c.est_redacteur;
+                return `
+                    <tr>
+                        <td>${c.pseudo || '—'}</td>
+                        <td>${c.email}</td>
+                        <td>${estRedacteur ? 'Oui' : 'Non'}</td>
+                        <td>
+                            <button class="cta ${estRedacteur ? 'cta-secondary' : 'cta-primary'}" style="padding:6px 14px; font-size:0.7rem;" data-id="${c.id}" data-nouvelle-valeur="${estRedacteur ? 0 : 1}">
+                                ${estRedacteur ? 'Retirer' : 'Accorder'}
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            }).join('');
+
+            corps.querySelectorAll('button[data-id]').forEach(function (btn) {
+                btn.addEventListener('click', async function () {
+                    const response = await fetch('/api/admin/redacteur', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ adminId, userId: btn.getAttribute('data-id'), estRedacteur: Number(btn.getAttribute('data-nouvelle-valeur')) })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.error);
+                        return;
+                    }
+                    chargerRedacteurs();
+                });
+            });
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('avancer-btn').addEventListener('click', async function () {
+            const confirmation = confirm('Faire avancer la semaine va résoudre les ordres de planification de tous les joueurs validés (entraînement, repos), appliquer l\'érosion des compétences, et avancer le compteur. Continuer ?');
+            if (!confirmation) return;
+
+            const response = await fetch('/api/admin/avancer-semaine', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error);
+                return;
+            }
+            alert('Semaine avancée. Nouvelle semaine : ' + data.nouvelleSemaine);
+            chargerSemaine();
+        });
+
+        document.getElementById('avancer-tour-btn').addEventListener('click', async function () {
+            const response = await fetch('/api/admin/avancer-tour', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error);
+                return;
+            }
+            alert(data.quelqueChoseSimule ? 'Un tour a été simulé pour chaque tournoi en cours.' : 'Rien à simuler pour le moment (aucun tournoi en cours, ou tous déjà à jour).');
+        });
+
+        document.getElementById('lancer-saison-btn').addEventListener('click', async function () {
+            const confirmation = confirm('Lancer la saison va réactiver l\'avancement automatique (lundi/jeudi 8h). Continuer ?');
+            if (!confirmation) return;
+
+            const response = await fetch('/api/admin/lancer-saison', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error);
+                return;
+            }
+            alert('Saison lancée — l\'avancement automatique reprend.');
+            chargerSemaine();
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        (async function () {
+            const ok = await verifierAcces();
+            if (ok) {
+                verifierAdmin();
+                chargerSemaine();
+                chargerEnAttente();
+                chargerRedacteurs();
+            }
+        })();
+    </script>
+</body>
+</html>

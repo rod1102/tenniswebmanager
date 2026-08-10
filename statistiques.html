@@ -1,0 +1,319 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Statistiques — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Statistiques</h1>
+
+            <div class="tabs-nav" id="tabs-nav">
+                <button class="tab-btn active" data-tab="confrontations">Confrontations</button>
+                <button class="tab-btn" data-tab="almanach">Almanach</button>
+                <button class="tab-btn" data-tab="records">Records</button>
+            </div>
+
+            <div class="tab-panel" id="tab-confrontations"><p class="match-hint">Chargement...</p></div>
+            <div class="tab-panel" id="tab-almanach" style="display:none;"><p class="match-hint">Chargement...</p></div>
+            <div class="tab-panel" id="tab-records" style="display:none;">
+                <div class="tabs-nav" id="records-vue-nav" style="margin-bottom:10px;">
+                    <button class="tab-btn active" data-vue="ATP">ATP</button>
+                    <button class="tab-btn" data-vue="WTA">WTA</button>
+                    <button class="tab-btn" data-vue="coachs">Coachs</button>
+                </div>
+                <div class="tabs-nav" id="records-surface-nav">
+                    <button class="tab-btn active" data-surface="global">Global</button>
+                    <button class="tab-btn surface-btn-dur" data-surface="dur">Dur</button>
+                    <button class="tab-btn surface-btn-terre" data-surface="terre">Terre battue</button>
+                    <button class="tab-btn surface-btn-herbe" data-surface="herbe">Gazon</button>
+                </div>
+                <div id="records-liste"><p class="match-hint">Chargement...</p></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        function formaterNom(prenom, nom) {
+            return prenom + ' ' + (nom || '').toUpperCase();
+        }
+
+        function formaterNomComplet(nomComplet) {
+            if (!nomComplet) return nomComplet;
+            const i = nomComplet.lastIndexOf(' ');
+            if (i === -1) return nomComplet;
+            return nomComplet.slice(0, i) + ' ' + nomComplet.slice(i + 1).toUpperCase();
+        }
+
+        function labelCategorie(circuit, categorie) {
+            if (categorie === 'slam') return 'Grand Chelem';
+            if (categorie === 'finals') return 'Masters (fin de saison)';
+            return circuit + ' ' + categorie;
+        }
+
+        function lienJoueur(id, type) {
+            return 'adversaire.html?type=' + type + '&id=' + id;
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        document.querySelectorAll('#tabs-nav > .tab-btn').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('#tabs-nav > .tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                document.querySelectorAll('.tab-panel').forEach(function (p) { p.style.display = 'none'; });
+                bouton.classList.add('active');
+                document.getElementById('tab-' + bouton.dataset.tab).style.display = 'block';
+            });
+        });
+
+        function carteConfrontation(c) {
+            return `
+                <div class="tournoi-card">
+                    <div class="confrontation-row">
+                        <a class="lien-adversaire confrontation-joueur" href="${lienJoueur(c.joueur1.id, c.joueur1.type)}">${flagImg(c.joueur1.drapeau)} ${formaterNom(c.joueur1.prenom, c.joueur1.nom)}</a>
+                        <span class="confrontation-score">${c.victoires1} - ${c.victoires2}</span>
+                        <a class="lien-adversaire confrontation-joueur" href="${lienJoueur(c.joueur2.id, c.joueur2.type)}">${flagImg(c.joueur2.drapeau)} ${formaterNom(c.joueur2.prenom, c.joueur2.nom)}</a>
+                    </div>
+                    <div class="tournoi-card-meta" style="text-align:center;">${c.nbMatchs} confrontation${c.nbMatchs > 1 ? 's' : ''}</div>
+                </div>
+            `;
+        }
+
+        async function chargerConfrontations() {
+            const container = document.getElementById('tab-confrontations');
+            const response = await fetch('/api/statistiques/confrontations');
+            const data = await response.json();
+
+            if (!response.ok) {
+                container.innerHTML = '<p class="match-hint">Impossible de charger les confrontations.</p>';
+                return;
+            }
+            if (data.confrontations.length === 0) {
+                container.innerHTML = '<p class="match-hint">Aucune confrontation entre vrais joueurs pour le moment — les personnages doivent d\'abord se croiser dans un même tournoi.</p>';
+                return;
+            }
+
+            container.innerHTML = '<p class="match-hint" style="margin-bottom:16px;">Uniquement les confrontations entre personnages de vrais coachs (pas les rivaux ni les adversaires jetables des tournois).</p>' +
+                data.confrontations.map(carteConfrontation).join('');
+        }
+
+        function panneauTop10(titre, liste) {
+            if (liste.length === 0) {
+                return `<div class="classement-panneau"><div class="stats-header" style="margin-bottom:8px;">${titre}</div><p class="match-hint">Pas de classement disponible.</p></div>`;
+            }
+            const lignes = liste.map(function (j) {
+                return `<tr><td class="rang">${j.rang}</td><td>${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}</td><td class="pts">${j.points}</td></tr>`;
+            }).join('');
+            return `
+                <div class="classement-panneau">
+                    <div class="stats-header" style="margin-bottom:8px;">${titre}</div>
+                    <table class="classement-table"><tbody>${lignes}</tbody></table>
+                </div>
+            `;
+        }
+
+        function carteSaison(s) {
+            const tournoisHtml = s.tournois.map(function (t) {
+                const vainqueurHtml = t.vainqueur
+                    ? `<a class="lien-adversaire" href="${lienJoueur(t.vainqueur.id, t.vainqueur.type)}">${flagImg(t.vainqueur.drapeau)} ${formaterNomComplet(t.vainqueur.nom)}</a>`
+                    : '<span class="match-hint">Vainqueur inconnu</span>';
+                return `
+                    <div class="stat-row">
+                        <span class="stat-label">${t.nom} <span class="match-hint">(${labelCategorie(t.circuit, t.categorie)})</span></span>
+                        <span class="stat-value">${vainqueurHtml}</span>
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="tournoi-card" style="margin-bottom:24px;">
+                    <div class="stats-header">Saison ${s.numeroSaison}</div>
+                    ${tournoisHtml}
+                    <div class="creation-grid" style="margin-top:16px;">
+                        ${panneauTop10('ATP — Top 10 fin de saison', s.topAtp)}
+                        ${panneauTop10('WTA — Top 10 fin de saison', s.topWta)}
+                    </div>
+                </div>
+            `;
+        }
+
+        async function chargerAlmanach() {
+            const container = document.getElementById('tab-almanach');
+            const response = await fetch('/api/statistiques/almanach');
+            const data = await response.json();
+
+            if (!response.ok) {
+                container.innerHTML = '<p class="match-hint">Impossible de charger l\'almanach.</p>';
+                return;
+            }
+            if (data.saisons.length === 0) {
+                container.innerHTML = '<p class="match-hint">Aucune saison terminée pour le moment — reviens ici une fois la saison actuelle achevée.</p>';
+                return;
+            }
+
+            container.innerHTML = data.saisons.map(carteSaison).join('');
+        }
+
+        const STATS_DEFS = [
+            { cle: 'rivalite', titre: 'Plus grande rivalité', parSurface: true, type: 'rivalite' },
+            { cle: 'trophees', titre: 'Record de trophées', parSurface: true, type: 'valeur' },
+            { cle: 'victoires', titre: 'Record de victoires', parSurface: true, type: 'valeur' },
+            { cle: 'victoiresConsecutives', titre: 'Record de victoires à la suite', parSurface: true, type: 'valeur' },
+            { cle: 'totalMatchs', titre: 'Total matchs joués', parSurface: true, type: 'valeur' },
+            { cle: 'ratioVictoire', titre: 'Ratio de victoire', parSurface: true, type: 'ratio' },
+            { cle: 'breakSauveesMatch', titre: 'Le plus de balles de break sauvées (un match)', parSurface: true, type: 'valeur' },
+            { cle: 'breakSauveesTournoi', titre: 'Tournoi gagné en sauvant le plus de balles de break', parSurface: true, type: 'valeurTournoi' },
+            { cle: 'dureeNum1', titre: 'Record de durée numéro 1 mondial', parSurface: false, type: 'valeurSemaines' },
+            { cle: 'dureeNum1Consecutive', titre: 'Record de durée numéro 1 mondial (semaines consécutives)', parSurface: false, type: 'valeurSemaines' },
+            { cle: 'pointsRace', titre: 'Points au classement Race', parSurface: false, type: 'valeur' }
+        ];
+
+        function detenteurHtml(resultat, vue) {
+            if (vue === 'coachs') {
+                return `<a class="lien-adversaire" href="coach.html?id=${resultat.coach.userId}">${resultat.coach.pseudo}</a>`;
+            }
+            const j = resultat.joueur;
+            return `<a class="lien-adversaire" href="${lienJoueur(j.id, j.type)}">${flagImg(j.drapeau)} ${formaterNom(j.prenom, j.nom)}</a>`;
+        }
+
+        function carteRecord(def, resultat, vue, surface) {
+            const classeCarte = surface === 'global' ? 'tournoi-card' : ('surface-card ' + surface);
+            if (!resultat) {
+                return `<div class="${classeCarte}" style="margin-bottom:14px; padding:16px;"><div class="stats-header" style="margin-bottom:4px;">${def.titre}</div><p class="match-hint">Aucun record pour le moment.</p></div>`;
+            }
+
+            let corps;
+            if (def.type === 'rivalite') {
+                const nomA = vue === 'coachs' ? resultat.coach1.pseudo : (flagImg(resultat.joueur1.drapeau) + ' ' + formaterNom(resultat.joueur1.prenom, resultat.joueur1.nom));
+                const nomB = vue === 'coachs' ? resultat.coach2.pseudo : (flagImg(resultat.joueur2.drapeau) + ' ' + formaterNom(resultat.joueur2.prenom, resultat.joueur2.nom));
+                const lienA = vue === 'coachs' ? ('coach.html?id=' + resultat.coach1.userId) : lienJoueur(resultat.joueur1.id, resultat.joueur1.type);
+                const lienB = vue === 'coachs' ? ('coach.html?id=' + resultat.coach2.userId) : lienJoueur(resultat.joueur2.id, resultat.joueur2.type);
+                const score = vue === 'coachs' ? String(resultat.nbMatchs) : (resultat.victoires1 + ' - ' + resultat.victoires2);
+                corps = `
+                    <div class="confrontation-row">
+                        <a class="lien-adversaire confrontation-joueur" href="${lienA}">${nomA}</a>
+                        <span class="confrontation-score">${score}</span>
+                        <a class="lien-adversaire confrontation-joueur" href="${lienB}">${nomB}</a>
+                    </div>
+                    <div class="tournoi-card-meta" style="text-align:center;">${resultat.nbMatchs} confrontation${resultat.nbMatchs > 1 ? 's' : ''}${vue === 'coachs' ? ' cumulées (ATP + WTA)' : ''}</div>
+                `;
+            } else if (def.type === 'ratio') {
+                const pct = Math.round(resultat.valeur * 1000) / 10;
+                corps = `<div class="stat-row"><span class="stat-label">${detenteurHtml(resultat, vue)}</span><span class="stat-value">${pct}% <span class="match-hint">(${resultat.extra.victoires}/${resultat.extra.total})</span></span></div>`;
+            } else if (def.type === 'valeurTournoi') {
+                const nomTournoi = resultat.extra && resultat.extra.tournoiNom ? resultat.extra.tournoiNom : '';
+                corps = `<div class="stat-row"><span class="stat-label">${detenteurHtml(resultat, vue)}</span><span class="stat-value">${resultat.valeur} <span class="match-hint">(${nomTournoi})</span></span></div>`;
+            } else if (def.type === 'valeurSemaines') {
+                corps = `<div class="stat-row"><span class="stat-label">${detenteurHtml(resultat, vue)}</span><span class="stat-value">${resultat.valeur} semaine${resultat.valeur > 1 ? 's' : ''}</span></div>`;
+            } else {
+                corps = `<div class="stat-row"><span class="stat-label">${detenteurHtml(resultat, vue)}</span><span class="stat-value">${resultat.valeur}</span></div>`;
+            }
+
+            return `<div class="${classeCarte}" style="margin-bottom:14px; padding:16px;"><div class="stats-header" style="margin-bottom:8px;">${def.titre}</div>${corps}</div>`;
+        }
+
+        let vueRecords = 'ATP';
+        let surfaceRecords = 'global';
+
+        async function chargerRecords() {
+            const container = document.getElementById('records-liste');
+            container.innerHTML = '<p class="match-hint">Chargement...</p>';
+
+            const params = new URLSearchParams({ vue: vueRecords });
+            if (surfaceRecords !== 'global') params.set('surface', surfaceRecords);
+
+            const response = await fetch('/api/statistiques/records?' + params.toString());
+            const data = await response.json();
+
+            if (!response.ok) {
+                container.innerHTML = '<p class="match-hint">Impossible de charger les records.</p>';
+                return;
+            }
+
+            const defsAffichees = STATS_DEFS.filter(function (d) { return d.parSurface || surfaceRecords === 'global'; });
+            container.innerHTML = defsAffichees.map(function (d) { return carteRecord(d, data.resultats[d.cle], vueRecords, surfaceRecords); }).join('');
+        }
+
+        document.querySelectorAll('#records-vue-nav .tab-btn').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('#records-vue-nav .tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                bouton.classList.add('active');
+                vueRecords = bouton.dataset.vue;
+                chargerRecords();
+            });
+        });
+        document.querySelectorAll('#records-surface-nav .tab-btn').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('#records-surface-nav .tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                bouton.classList.add('active');
+                surfaceRecords = bouton.dataset.surface;
+                chargerRecords();
+            });
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin();
+        chargerConfrontations();
+        chargerAlmanach();
+        chargerRecords();
+    </script>
+</body>
+</html>

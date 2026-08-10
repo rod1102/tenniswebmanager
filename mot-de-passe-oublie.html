@@ -1,0 +1,52 @@
+﻿<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mot de passe oublié — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="auth-page">
+        <div class="auth-card">
+            <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+            <h1 class="auth-title">Mot de passe oublié</h1>
+
+            <form id="oubli-form">
+                <div class="form-group">
+                    <label for="email">Adresse e-mail</label>
+                    <input type="email" id="email" name="email" placeholder="toi@exemple.com" required>
+                </div>
+                <button type="submit" class="cta cta-primary auth-submit">Envoyer le lien de réinitialisation</button>
+            </form>
+
+            <div id="confirmation" class="match-hint" style="display:none; margin-top:16px;">
+                Si un compte existe avec cette adresse, un e-mail contenant un lien de réinitialisation vient d'être envoyé.
+            </div>
+
+            <p class="auth-switch"><a href="connexion.html">Retour à la connexion</a></p>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('oubli-form').addEventListener('submit', async function (e) {
+            e.preventDefault();
+
+            const email = document.getElementById('email').value;
+            const bouton = e.target.querySelector('button');
+            bouton.disabled = true;
+
+            await fetch('/api/mot-de-passe-oublie', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ email })
+            });
+
+            document.getElementById('oubli-form').style.display = 'none';
+            document.getElementById('confirmation').style.display = 'block';
+        });
+    </script>
+</body>
+</html>
