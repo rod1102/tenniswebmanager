@@ -7,8 +7,10 @@ Jeu de gestion de tennis en navigateur, inspiré des règles du jeu "Tennis Web 
 - Backend : Node.js + Express (server.js)
 - Base de données : SQLite via better-sqlite3 (database.js)
 - Mots de passe : bcrypt
+- Authentification : vraie session serveur (2026-08-11) — cookie httpOnly signé (`session_token`) posé à la connexion/inscription, vérifié par le middleware `authentifier` (server.js) sur toutes les routes `/api/*` sauf une liste explicite de routes publiques (`estRoutePublique`). Table `sessions` (token/user_id/expiration, 30 jours). Toutes les routes lisent désormais l'identité de l'appelant depuis `req.userId` (posé par le middleware) et non plus depuis un `userId` envoyé par le client — plus aucune route ne fait confiance à un id fourni par le frontend pour l'identité de l'appelant
 - E-mails transactionnels (réinitialisation de mot de passe) : Resend, clé dans `.env` (`RESEND_API_KEY`, `SITE_URL`) via `dotenv` — voir `.env.example`. Tant que `RESEND_API_KEY` est vide, le lien de réinitialisation est juste affiché dans la console du serveur au lieu d'être envoyé (aucun crash, le reste du jeu fonctionne normalement)
-- Frontend : HTML/CSS/JS vanilla, multi-pages, pas de framework, pas de build tool
+- Frontend : HTML/CSS/JS vanilla, multi-pages, pas de framework, pas de build tool, aucun fichier JS partagé (chaque page duplique son propre `<script>`)
+- Hébergement : Railway (déployé le 2026-08-10, projet `positive-blessing`, service `tenniswebmanager`, volume persistant monté sur `/app/data`). `DATA_DIR` (variable d'environnement) fait pointer `tennis-manager.db` et `uploads/` vers ce volume en production ; en local, `DATA_DIR` est absent et tout reste à la racine du projet comme avant. Dépôt GitHub `rod1102/tenniswebmanager`, déploiement via `railway up` (CLI installé, token de projet utilisé)
 - L'utilisateur est débutant en développement — expliquer les changements simplement, donner des fichiers complets plutôt que des diffs quand le fichier est modifié en profondeur, pour éviter les erreurs de copier-coller manuel qui ont posé problème plusieurs fois en cours de route
 
 ## Structure des fichiers
@@ -60,7 +62,6 @@ Jeu de gestion de tennis en navigateur, inspiré des règles du jeu "Tennis Web 
 
 ## Pas encore fait
 
-- Vraie session serveur (`userId` circule en clair côté client, jamais vérifié côté serveur au-delà des jointures habituelles — sans conséquence tant que le jeu reste local, mais à traiter avant toute mise en ligne publique : n'importe qui pourrait agir à la place d'un autre coach en changeant l'ID dans les requêtes). Le mot de passe oublié (Resend) ne couvre que la récupération de compte, pas ce problème plus large
 - Double (aucune notion de paire/niveau combiné/classement double dans le moteur actuel — chantier de l'ampleur du système de tournois)
 - Coupe Davis / Fed Cup / Jeux Olympiques (dépendent du double ci-dessus, plus une couche "équipe par nation" qui n'existe pas du tout aujourd'hui)
 
