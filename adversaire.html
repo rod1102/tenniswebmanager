@@ -99,14 +99,16 @@
         }
 
         function formaterNom(prenom, nom) {
-            return prenom + ' ' + (nom || '').toUpperCase();
+            const p = (prenom || '').toLowerCase().replace(/(^|[\s'-])\p{L}/gu, function (c) { return c.toUpperCase(); });
+            return p + ' ' + (nom || '').toUpperCase();
         }
 
         function formaterNomComplet(nomComplet) {
             if (!nomComplet) return nomComplet;
             const i = nomComplet.lastIndexOf(' ');
             if (i === -1) return nomComplet;
-            return nomComplet.slice(0, i) + ' ' + nomComplet.slice(i + 1).toUpperCase();
+            const prenom = nomComplet.slice(0, i).toLowerCase().replace(/(^|[\s'-])\p{L}/gu, function (c) { return c.toUpperCase(); });
+            return prenom + ' ' + nomComplet.slice(i + 1).toUpperCase();
         }
 
         function labelVD(o) {

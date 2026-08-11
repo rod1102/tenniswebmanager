@@ -117,7 +117,8 @@
         }
 
         function formaterNom(prenom, nom) {
-            return prenom + ' ' + (nom || '').toUpperCase();
+            const p = (prenom || '').toLowerCase().replace(/(^|[\s'-])\p{L}/gu, function (c) { return c.toUpperCase(); });
+            return p + ' ' + (nom || '').toUpperCase();
         }
 
         function classeEnergie(points) {
