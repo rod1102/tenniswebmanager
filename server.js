@@ -458,7 +458,7 @@ app.get('/api/admin/en-attente', (req, res) => {
         }
 
         const enAttente = db.prepare(`
-            SELECT players.*, users.email AS coach_email
+            SELECT players.*, users.pseudo AS coach_pseudo
             FROM players
             JOIN users ON users.id = players.user_id
             WHERE players.statut = 'en_attente'

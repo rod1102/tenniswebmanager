@@ -139,7 +139,7 @@
                 const card = document.createElement('div');
                 card.className = 'player-summary';
                 card.innerHTML = `
-                    <div class="player-summary-type">${player.type === 'joueur' ? 'Joueur' : 'Joueuse'} — coach : ${player.coach_email}</div>
+                    <div class="player-summary-type">${player.type === 'joueur' ? 'Joueur' : 'Joueuse'} — coach : ${player.coach_pseudo}</div>
                     <div class="player-summary-name">${formaterNom(player.prenom, player.nom)}</div>
                     <div class="stat-row"><span class="stat-label">Âge</span><span class="stat-value">${player.age} ans</span></div>
                     <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value">${player.nationalite}</span></div>
