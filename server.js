@@ -48,29 +48,6 @@ app.use('/uploads', express.static(path.join(DOSSIER_DONNEES, 'uploads')));
 app.use(express.static(__dirname));
 app.use(express.json());
 
-// ---------- TEMPORAIRE : migration ponctuelle de la base locale vers le volume
-// Railway (2026-08-10). A supprimer juste apres usage, ainsi que la variable
-// d'environnement MIGRATION_SECRET sur Railway une fois la migration terminee.
-if (process.env.MIGRATION_SECRET) {
-    const uploadMigrationDb = multer({
-        storage: multer.diskStorage({
-            destination: DOSSIER_DONNEES,
-            filename: function (req, file, cb) { cb(null, 'tennis-manager.upload.db'); }
-        }),
-        limits: { fileSize: 100 * 1024 * 1024 }
-    });
-    app.post('/api/migration-temp/upload-db', uploadMigrationDb.single('db'), function (req, res) {
-        if (req.query.secret !== process.env.MIGRATION_SECRET) {
-            return res.status(403).json({ error: 'Non autorise.' });
-        }
-        if (!req.file) return res.status(400).json({ error: 'Aucun fichier recu.' });
-        const cheminFinal = path.join(DOSSIER_DONNEES, 'tennis-manager.db');
-        fs.renameSync(req.file.path, cheminFinal);
-        res.json({ success: true, message: 'Base remplacee, redemarrage du serveur...' });
-        setTimeout(function () { process.exit(0); }, 500);
-    });
-}
-
 const BUDGET_POINTS = 120;
 const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
 const DISPOSITIONS = ['adversite', 'coupeur_de_tetes', 'dernier_carre', 'premiers_tours', 'sang_froid', 'indoor', 'rivalite'];
