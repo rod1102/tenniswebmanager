@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
+const cookieParser = require('cookie-parser');
 const { Resend } = require('resend');
 const db = require('./database');
 const { BAREME_POINTS, CALENDRIER_TOURNOIS, SEMAINES_COUPES_EQUIPE, genererJoueurLambda, drapeau, phaseDeSemaine, LONGUEUR_SAISON } = require('./calendrier-tournois');
@@ -44,9 +45,78 @@ const SITE_URL = process.env.SITE_URL || 'http://localhost:3000';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Necessaire derriere le proxy/edge de Railway : sans ca, req.secure vaut toujours
+// false (le cookie de session ne passerait jamais en HTTPS-only) et req.ip renvoie
+// l'IP interne du proxy plutot que la vraie IP du visiteur (casse la regle anti-
+// doublon "1 compte par IP" a l'inscription).
+app.set('trust proxy', 1);
+
 app.use('/uploads', express.static(path.join(DOSSIER_DONNEES, 'uploads')));
 app.use(express.static(__dirname));
 app.use(express.json());
+app.use(cookieParser());
+
+const DUREE_SESSION_MS = 30 * 24 * 60 * 60 * 1000; // 30 jours
+
+function creerSession(userId) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiration = new Date(Date.now() + DUREE_SESSION_MS).toISOString();
+    db.prepare('INSERT INTO sessions (token, user_id, date_expiration) VALUES (?, ?, ?)').run(token, userId, expiration);
+    return token;
+}
+
+function poserCookieSession(req, res, token) {
+    res.cookie('session_token', token, {
+        httpOnly: true,
+        secure: req.secure,
+        sameSite: 'lax',
+        maxAge: DUREE_SESSION_MS,
+        path: '/'
+    });
+}
+
+// Routes qui doivent rester joignables sans etre connecte (connexion/inscription
+// elles-memes, mot de passe oublie, et les quelques lectures publiques deja
+// utilisees par index.html/statistiques.html/presse.html avant/sans connexion).
+function estRoutePublique(req) {
+    if (req.method === 'POST') {
+        return ['/api/inscription', '/api/connexion', '/api/deconnexion', '/api/mot-de-passe-oublie', '/api/reinitialiser-mot-de-passe'].includes(req.path);
+    }
+    if (req.method === 'GET') {
+        if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
+            '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
+            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce'].includes(req.path)) {
+            return true;
+        }
+        if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
+        if (/^\/api\/presse\/\d+$/.test(req.path)) return true;
+        return false;
+    }
+    return false;
+}
+
+// Seule source de verite pour l'identite de l'appelant desormais (req.userId) -
+// remplace le userId envoye en clair par le client a chaque appel, jamais verifie
+// avant ce chantier (2026-08-11).
+function authentifier(req, res, next) {
+    if (!req.path.startsWith('/api/')) return next();
+    if (estRoutePublique(req)) return next();
+
+    const token = req.cookies.session_token;
+    if (!token) return res.status(401).json({ error: 'Non connecte.' });
+
+    const session = db.prepare('SELECT user_id, date_expiration FROM sessions WHERE token = ?').get(token);
+    if (!session || new Date(session.date_expiration) < new Date()) {
+        if (session) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+        res.clearCookie('session_token', { path: '/' });
+        return res.status(401).json({ error: 'Session expiree, reconnecte-toi.' });
+    }
+
+    req.userId = session.user_id;
+    next();
+}
+
+app.use(authentifier);
 
 const BUDGET_POINTS = 120;
 const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
@@ -129,6 +199,7 @@ app.post('/api/inscription', (req, res) => {
         const passwordHash = bcrypt.hashSync(password, 10);
         const result = db.prepare('INSERT INTO users (email, password_hash, ip_inscription, pseudo) VALUES (?, ?, ?, ?)').run(email, passwordHash, ip, pseudoNettoye);
 
+        poserCookieSession(req, res, creerSession(result.lastInsertRowid));
         res.json({ success: true, userId: result.lastInsertRowid });
     } catch (err) {
         console.error(err);
@@ -174,11 +245,9 @@ function aDesPertesDispositionsEnAttente(playerId) {
 
 app.post('/api/joueurs', (req, res) => {
     try {
-        const { userId, joueur, joueuse } = req.body;
+        const userId = req.userId;
+        const { joueur, joueuse } = req.body;
 
-        if (!userId) {
-            return res.status(400).json({ error: 'Utilisateur non identifie.' });
-        }
         if (!joueur || !joueuse) {
             return res.status(400).json({ error: 'Il manque les infos d un des deux personnages.' });
         }
@@ -249,11 +318,19 @@ app.post('/api/connexion', (req, res) => {
             return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
         }
 
+        poserCookieSession(req, res, creerSession(user.id));
         res.json({ success: true, userId: user.id });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
     }
+});
+
+app.post('/api/deconnexion', (req, res) => {
+    const token = req.cookies.session_token;
+    if (token) db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+    res.clearCookie('session_token', { path: '/' });
+    res.json({ success: true });
 });
 
 // Duree de validite d'un jeton de reinitialisation de mot de passe.
@@ -330,7 +407,7 @@ app.post('/api/reinitialiser-mot-de-passe', (req, res) => {
 
 app.get('/api/joueurs/:userId', (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.userId;
         const players = db.prepare('SELECT * FROM players WHERE user_id = ?').all(userId);
 
         players.forEach(function (player) {
@@ -355,7 +432,7 @@ app.get('/api/joueurs/:userId', (req, res) => {
 
 app.get('/api/utilisateur/:userId', (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.userId;
         const user = db.prepare('SELECT id, email, role, est_redacteur FROM users WHERE id = ?').get(userId);
 
         if (!user) {
@@ -376,9 +453,7 @@ function estAdmin(adminId) {
 
 app.get('/api/admin/en-attente', (req, res) => {
     try {
-        const { adminId } = req.query;
-
-        if (!estAdmin(adminId)) {
+        if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
 
@@ -402,9 +477,9 @@ app.get('/api/admin/en-attente', (req, res) => {
 // creation du personnage (dispositionsValides).
 app.post('/api/repartir-dispositions-gain', (req, res) => {
     try {
-        const { userId, playerId, repartition } = req.body;
+        const { playerId, repartition } = req.body;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -452,9 +527,9 @@ app.post('/api/repartir-dispositions-gain', (req, res) => {
 // reste en attente) puisqu'elle debloque un ecran obligatoire cote frontend.
 app.post('/api/repartir-dispositions-perte', (req, res) => {
     try {
-        const { userId, playerId, repartition } = req.body;
+        const { playerId, repartition } = req.body;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -503,9 +578,9 @@ app.post('/api/repartir-dispositions-perte', (req, res) => {
 // consomme pas le pool de gain, un compteur separe (points_dispositions_a_deplacer).
 app.post('/api/deplacer-disposition', (req, res) => {
     try {
-        const { userId, playerId, depuis, vers } = req.body;
+        const { playerId, depuis, vers } = req.body;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -536,9 +611,9 @@ app.post('/api/deplacer-disposition', (req, res) => {
 
 app.post('/api/admin/decision', (req, res) => {
     try {
-        const { adminId, playerId, decision } = req.body;
+        const { playerId, decision } = req.body;
 
-        if (!estAdmin(adminId)) {
+        if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
         if (decision !== 'valide' && decision !== 'refuse') {
@@ -558,8 +633,7 @@ app.post('/api/admin/decision', (req, res) => {
 // pour l'ecran admin qui accorde/retire ce statut.
 app.get('/api/admin/redacteurs', (req, res) => {
     try {
-        const { adminId } = req.query;
-        if (!estAdmin(adminId)) {
+        if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
 
@@ -573,8 +647,8 @@ app.get('/api/admin/redacteurs', (req, res) => {
 
 app.post('/api/admin/redacteur', (req, res) => {
     try {
-        const { adminId, userId, estRedacteur } = req.body;
-        if (!estAdmin(adminId)) {
+        const { userId, estRedacteur } = req.body;
+        if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
 
@@ -629,9 +703,8 @@ app.get('/api/semaine', (req, res) => {
 app.get('/api/planification/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
-        const { userId } = req.query;
 
-        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -694,9 +767,8 @@ const LABELS_ACTION_COURTS = {
 app.get('/api/joueur/semaine-info/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
-        const { userId } = req.query;
 
-        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -741,9 +813,8 @@ app.get('/api/joueur/semaine-info/:playerId', (req, res) => {
 app.get('/api/journal/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
-        const { userId } = req.query;
 
-        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -777,9 +848,9 @@ app.get('/api/journal/:playerId', (req, res) => {
 
 app.post('/api/planification', (req, res) => {
     try {
-        const { userId, playerId, semaine, action } = req.body;
+        const { playerId, semaine, action } = req.body;
 
-        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -825,9 +896,9 @@ app.post('/api/planification', (req, res) => {
 
 app.post('/api/repartir-xp', (req, res) => {
     try {
-        const { userId, playerId, repartition } = req.body;
+        const { playerId, repartition } = req.body;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -1209,8 +1280,7 @@ function executerAvancementSemaine() {
 
 app.post('/api/admin/avancer-semaine', (req, res) => {
     try {
-        const { adminId } = req.body;
-        if (!estAdmin(adminId)) {
+        if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
         const nouvelleSemaine = executerAvancementSemaine();
@@ -1223,8 +1293,7 @@ app.post('/api/admin/avancer-semaine', (req, res) => {
 
 app.post('/api/admin/avancer-tour', (req, res) => {
     try {
-        const { adminId } = req.body;
-        if (!estAdmin(adminId)) {
+        if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
         const quelqueChoseSimule = executerAvancementTour(true);
@@ -1244,8 +1313,7 @@ app.post('/api/admin/avancer-tour', (req, res) => {
 // verrou (action deliberee de l'admin, jamais bloquee).
 app.post('/api/admin/lancer-saison', (req, res) => {
     try {
-        const { adminId } = req.body;
-        if (!estAdmin(adminId)) {
+        if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
         // Redemarre la fenetre de rattrapage a partir de maintenant : evite qu'un
@@ -2675,9 +2743,8 @@ function simulerUnTourPoules(tournoiId) {
 app.get('/api/tournois/historique/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
-        const { userId } = req.query;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -2709,9 +2776,8 @@ app.get('/api/tournois/historique/:playerId', (req, res) => {
 app.get('/api/tournois/calendrier/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
-        const { userId } = req.query;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -2771,7 +2837,7 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
 
 app.get('/api/tournois/mes/:userId', (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.userId;
         // "Mes" tournois = ceux ou l'un de mes joueurs a une inscription reelle
         // (tournoi_joueurs.player_id parmi mes joueurs, est_reel = 1) - le tournoi
         // lui-meme est un objet partage, l'appartenance vit sur l'inscription.
@@ -2798,9 +2864,8 @@ app.get('/api/tournois/mes/:userId', (req, res) => {
 app.get('/api/tournois/passes/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
-        const { userId } = req.query;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -2962,9 +3027,9 @@ function inscrireJoueurAuTournoi(userId, player, entree, semaine, energieMisee) 
 
 app.post('/api/tournois/inscription', (req, res) => {
     try {
-        const { userId, playerId, calendrierId, semaine } = req.body;
+        const { playerId, calendrierId, semaine } = req.body;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -2992,7 +3057,7 @@ app.post('/api/tournois/inscription', (req, res) => {
         // planification, juste a cote des styles de jeu, tant que le tournoi n a pas
         // commence (voir POST /api/tournois/mise-energie). L inscription demarre donc
         // toujours a 0.
-        const resultat = inscrireJoueurAuTournoi(userId, player, entree, semaine);
+        const resultat = inscrireJoueurAuTournoi(req.userId, player, entree, semaine);
         if (resultat.error) {
             return res.status(409).json({ error: resultat.error });
         }
@@ -3006,9 +3071,9 @@ app.post('/api/tournois/inscription', (req, res) => {
 
 app.post('/api/tournois/favori', (req, res) => {
     try {
-        const { userId, playerId, calendrierId, semaine } = req.body;
+        const { playerId, calendrierId, semaine } = req.body;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -3041,12 +3106,12 @@ app.post('/api/tournois/favori', (req, res) => {
 
 app.post('/api/tournois/desinscription', (req, res) => {
     try {
-        const { userId, playerId, tournoiId } = req.body;
+        const { playerId, tournoiId } = req.body;
 
         // Le tournoi lui-meme est partage (plus de user_id/player_id dessus) :
         // l'ownership passe par le joueur (players.user_id) + sa ligne d'inscription
         // reelle (tournoi_joueurs.player_id/est_reel) dans ce tournoi precis.
-        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -3105,7 +3170,7 @@ function stylesInterditsDuTournoiPrecedent(playerId, semaineTournoiActuel) {
 
 app.post('/api/tournois/style', (req, res) => {
     try {
-        const { userId, playerId, tournoiId, styles } = req.body;
+        const { playerId, tournoiId, styles } = req.body;
 
         if (!Array.isArray(styles) || styles.length === 0) {
             return res.status(400).json({ error: 'Liste de styles invalide.' });
@@ -3114,7 +3179,7 @@ app.post('/api/tournois/style', (req, res) => {
             return res.status(400).json({ error: 'Un des styles de jeu choisis est invalide.' });
         }
 
-        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -3173,9 +3238,8 @@ app.post('/api/tournois/style', (req, res) => {
 app.get('/api/tournois/style-en-attente/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
-        const { userId } = req.query;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -3231,9 +3295,9 @@ app.get('/api/tournois/style-en-attente/:playerId', (req, res) => {
 // re-choix partiel comme pour les styles des tournois 7 tours.
 app.post('/api/tournois/mise-energie', (req, res) => {
     try {
-        const { userId, playerId, tournoiId, energieMisee } = req.body;
+        const { playerId, tournoiId, energieMisee } = req.body;
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -3272,7 +3336,8 @@ app.post('/api/tournois/mise-energie', (req, res) => {
 app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
     try {
         const { calendrierId } = req.params;
-        const { userId, playerId, semaine } = req.query;
+        const { playerId, semaine } = req.query;
+        const userId = req.userId;
 
         const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === calendrierId; });
         if (!entree) {
@@ -3399,7 +3464,7 @@ function estMoiDansTournoi(tournoiId, userId) {
 
 app.get('/api/accueil/tournois-en-cours/:userId', (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.userId;
 
         const lignes = db.prepare("SELECT * FROM tournois WHERE statut = 'a_venir' ORDER BY semaine ASC, circuit ASC").all();
 
@@ -3472,7 +3537,7 @@ app.get('/api/public/classement', (req, res) => {
 
 app.get('/api/classement/:userId', (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.userId;
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         const semaineActuelle = etat.semaine_actuelle;
         // Debut de saison = fin de la Semaine 0 en cours (borne exclue : la Race ne
@@ -3553,7 +3618,7 @@ app.get('/api/annuaire/coachs', (req, res) => {
 
 app.get('/api/pronostics/disponibles/:userId', (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.userId;
         const tournois = db.prepare(`
             SELECT tournois.id, tournois.calendrier_id, tournois.nom, tournois.circuit, tournois.categorie, tournois.semaine,
                    pronostics.id AS pronostic_id
@@ -3577,7 +3642,7 @@ app.get('/api/pronostics/disponibles/:userId', (req, res) => {
 app.get('/api/pronostics/tournoi/:tournoiId', (req, res) => {
     try {
         const { tournoiId } = req.params;
-        const { userId } = req.query;
+        const userId = req.userId;
 
         const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
         if (!tournoi) {
@@ -3618,7 +3683,8 @@ app.get('/api/pronostics/tournoi/:tournoiId', (req, res) => {
 
 app.post('/api/pronostics', (req, res) => {
     try {
-        const { userId, tournoiId, predictions } = req.body;
+        const userId = req.userId;
+        const { tournoiId, predictions } = req.body;
 
         const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
         if (!tournoi) {
@@ -3696,7 +3762,7 @@ function nomCoach(userId) {
 
 app.get('/api/pronostics/classement/:userId', (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.userId;
         const atp = classementPronosParCircuit('ATP').map(function (r) {
             return { userId: r.user_id, nom: nomCoach(r.user_id), points: r.points, estMoi: Number(r.user_id) === Number(userId) };
         });
@@ -3808,17 +3874,17 @@ app.get('/api/coach/:userId', (req, res) => {
     }
 });
 
-// Edition du profil coach (pseudo + lien Discord) - pas de vraie session serveur
-// dans ce jeu (cf. CLAUDE.md), fait confiance a userId comme partout ailleurs.
+// Edition du profil coach (pseudo + lien Discord) - identite prise depuis la
+// session (req.userId), jamais depuis une valeur envoyee par le client.
 app.post('/api/coach/profil', (req, res) => {
     try {
-        const { userId, pseudo, discord } = req.body;
+        const { pseudo, discord } = req.body;
         const pseudoNettoye = (pseudo || '').trim();
         if (!pseudoNettoye) {
             return res.status(400).json({ error: 'Le pseudo de coach est obligatoire.' });
         }
         const discordNettoye = (discord || '').trim() || null;
-        db.prepare('UPDATE users SET pseudo = ?, discord = ? WHERE id = ?').run(pseudoNettoye, discordNettoye, userId);
+        db.prepare('UPDATE users SET pseudo = ?, discord = ? WHERE id = ?').run(pseudoNettoye, discordNettoye, req.userId);
         res.json({ success: true });
     } catch (err) {
         console.error(err);
@@ -4298,7 +4364,7 @@ function calculerBadgesCoach(userId) {
 
 app.get('/api/matchs/semaine/:userId', (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.userId;
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         const semaineActuelle = etat.semaine_actuelle;
 
@@ -4353,7 +4419,7 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
 
 app.get('/api/matchs/:userId', (req, res) => {
     try {
-        const { userId } = req.params;
+        const userId = req.userId;
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
 
         const matchs = db.prepare(`
@@ -4437,7 +4503,7 @@ app.get('/api/matchs/:userId', (req, res) => {
 app.get('/api/matchs/detail/:matchId', (req, res) => {
     try {
         const { matchId } = req.params;
-        const { userId } = req.query;
+        const userId = req.userId;
 
         // Un match de tournoi est public (le tableau lui-meme l'est deja, cf. fiche
         // adversaire) - seuls les matchs amicaux (tournoi_id NULL) restent prives au
@@ -4975,7 +5041,8 @@ app.post('/api/presse', function (req, res) {
         }
 
         try {
-            const { userId, titre, contenu, lienTournoiId, lienPlayerId } = req.body;
+            const userId = req.userId;
+            const { titre, contenu, lienTournoiId, lienPlayerId } = req.body;
 
             const user = db.prepare('SELECT est_redacteur FROM users WHERE id = ?').get(userId);
             if (!user || !user.est_redacteur) {
@@ -5017,14 +5084,14 @@ app.put('/api/presse/:id', function (req, res) {
         }
 
         try {
-            const { userId, titre, contenu, lienTournoiId, lienPlayerId, supprimerImage } = req.body;
+            const { titre, contenu, lienTournoiId, lienPlayerId, supprimerImage } = req.body;
 
             const article = db.prepare('SELECT * FROM articles_presse WHERE id = ?').get(req.params.id);
             if (!article) {
                 if (req.file) fs.unlink(req.file.path, function () {});
                 return res.status(404).json({ error: 'Article introuvable.' });
             }
-            if (Number(article.user_id) !== Number(userId) && !estAdmin(userId)) {
+            if (Number(article.user_id) !== Number(req.userId) && !estAdmin(req.userId)) {
                 if (req.file) fs.unlink(req.file.path, function () {});
                 return res.status(403).json({ error: 'Tu ne peux modifier que tes propres articles.' });
             }
@@ -5061,12 +5128,11 @@ app.put('/api/presse/:id', function (req, res) {
 
 app.delete('/api/presse/:id', (req, res) => {
     try {
-        const { userId } = req.body;
         const article = db.prepare('SELECT * FROM articles_presse WHERE id = ?').get(req.params.id);
         if (!article) {
             return res.status(404).json({ error: 'Article introuvable.' });
         }
-        if (Number(article.user_id) !== Number(userId) && !estAdmin(userId)) {
+        if (Number(article.user_id) !== Number(req.userId) && !estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Tu ne peux supprimer que tes propres articles.' });
         }
 
@@ -5095,8 +5161,8 @@ app.get('/api/annonce', (req, res) => {
 
 app.post('/api/annonce', (req, res) => {
     try {
-        const { adminId, contenu } = req.body;
-        if (!estAdmin(adminId)) {
+        const { contenu } = req.body;
+        if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
 
@@ -5284,7 +5350,7 @@ function resoudreCapitainesSaison(saison) {
 
 app.get('/api/coupe/statut-capitaine/:playerId', (req, res) => {
     try {
-        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.params.playerId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(req.params.playerId, req.userId);
         if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
 
         const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
@@ -5321,7 +5387,7 @@ app.get('/api/coupe/statut-capitaine/:playerId', (req, res) => {
 
 app.get('/api/coupe/mes-rencontres/:playerId', (req, res) => {
     try {
-        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.params.playerId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(req.params.playerId, req.userId);
         if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
         const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
         const saison = nombreSaisonAffichee();
@@ -5342,7 +5408,7 @@ app.get('/api/coupe/mes-rencontres/:playerId', (req, res) => {
 app.post('/api/coupe/candidature', (req, res) => {
     try {
         const { playerId } = req.body;
-        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player || player.statut !== 'valide') return res.status(404).json({ error: 'Joueur introuvable.' });
 
         const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
@@ -5374,7 +5440,7 @@ app.post('/api/coupe/candidature', (req, res) => {
 app.post('/api/coupe/vote', (req, res) => {
     try {
         const { votantPlayerId, candidatPlayerId } = req.body;
-        const votant = db.prepare('SELECT * FROM players WHERE id = ?').get(votantPlayerId);
+        const votant = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(votantPlayerId, req.userId);
         if (!votant || votant.statut !== 'valide') return res.status(404).json({ error: 'Joueur introuvable.' });
 
         const circuit = votant.type === 'joueur' ? 'ATP' : 'WTA';
@@ -5475,6 +5541,9 @@ app.post('/api/coupe/surface', (req, res) => {
         const { tieId, capitainePlayerId, surface } = req.body;
         if (!['dur', 'terre', 'herbe'].includes(surface)) return res.status(400).json({ error: 'Surface invalide.' });
 
+        const monPlayer = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(capitainePlayerId, req.userId);
+        if (!monPlayer) return res.status(403).json({ error: 'Ce personnage ne t\'appartient pas.' });
+
         const tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tieId);
         if (!tie) return res.status(404).json({ error: 'Rencontre introuvable.' });
 
@@ -5497,6 +5566,10 @@ app.post('/api/coupe/surface', (req, res) => {
 app.post('/api/coupe/composition', (req, res) => {
     try {
         const { tieId, capitainePlayerId, nation, joueurA, joueurB, doubleJ1, doubleJ2 } = req.body;
+
+        const monPlayer = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(capitainePlayerId, req.userId);
+        if (!monPlayer) return res.status(403).json({ error: 'Ce personnage ne t\'appartient pas.' });
+
         const tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tieId);
         if (!tie) return res.status(404).json({ error: 'Rencontre introuvable.' });
         if (nation !== tie.nation_domicile && nation !== tie.nation_exterieur) {
@@ -5549,7 +5622,7 @@ app.post('/api/coupe/style', (req, res) => {
             return res.status(400).json({ error: 'Le choix des styles n\'est pas ouvert cette semaine.' });
         }
 
-        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player || (player.nationalite !== tie.nation_domicile && player.nationalite !== tie.nation_exterieur)) {
             return res.status(400).json({ error: 'Ce joueur ne participe pas à cette rencontre.' });
         }

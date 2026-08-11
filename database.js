@@ -486,6 +486,18 @@ db.exec(`
 `);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_coupe_styles_unique ON coupe_styles(coupe_equipe_id, player_id)`);
 
+// Vraie session serveur (2026-08-11) : un jeton oppose = une ligne, supprime a la
+// deconnexion ou a l'expiration. Remplace le mecanisme precedent (userId envoye en
+// clair par le client a chaque appel, jamais verifie cote serveur).
+db.exec(`
+    CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL,
+        date_creation TEXT DEFAULT CURRENT_TIMESTAMP,
+        date_expiration TEXT NOT NULL
+    )
+`);
+
 const migrations = [
     "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'coach'",
     "ALTER TABLE players ADD COLUMN statut TEXT DEFAULT 'en_attente'",
