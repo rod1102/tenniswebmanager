@@ -463,6 +463,7 @@ app.get('/api/admin/en-attente', (req, res) => {
             JOIN users ON users.id = players.user_id
             WHERE players.statut = 'en_attente'
         `).all();
+        enAttente.forEach(function (p) { p.coach_pseudo = capitaliserPrenom(p.coach_pseudo); });
 
         res.json({ success: true, players: enAttente });
     } catch (err) {
@@ -638,6 +639,7 @@ app.get('/api/admin/redacteurs', (req, res) => {
         }
 
         const coachs = db.prepare("SELECT id, email, pseudo, est_redacteur FROM users WHERE role != 'admin' ORDER BY pseudo").all();
+        coachs.forEach(function (c) { c.pseudo = capitaliserPrenom(c.pseudo); });
         res.json({ success: true, coachs });
     } catch (err) {
         console.error(err);
@@ -3571,7 +3573,7 @@ app.get('/api/annuaire/joueurs/:circuit', (req, res) => {
 
         const joueurs = classement.map(function (c) {
             return {
-                prenom: c.prenom, nom: c.nomFamille,
+                playerId: c.playerId, prenom: c.prenom, nom: c.nomFamille,
                 nationalite: c.nationalite, drapeau: c.drapeau, points: c.points,
                 coachNom: nomCoach(c.userId), coachUserId: c.userId
             };
@@ -3602,8 +3604,8 @@ app.get('/api/annuaire/coachs', (req, res) => {
             return {
                 userId: userId,
                 nomTri: nomCoach(userId),
-                joueur: joueur ? { prenom: joueur.prenom, nom: joueur.nom, nationalite: joueur.nationalite, drapeau: drapeau(joueur.nationalite), statut: joueur.statut } : null,
-                joueuse: joueuse ? { prenom: joueuse.prenom, nom: joueuse.nom, nationalite: joueuse.nationalite, drapeau: drapeau(joueuse.nationalite), statut: joueuse.statut } : null
+                joueur: joueur ? { id: joueur.id, prenom: joueur.prenom, nom: joueur.nom, nationalite: joueur.nationalite, drapeau: drapeau(joueur.nationalite), statut: joueur.statut } : null,
+                joueuse: joueuse ? { id: joueuse.id, prenom: joueuse.prenom, nom: joueuse.nom, nationalite: joueuse.nationalite, drapeau: drapeau(joueuse.nationalite), statut: joueuse.statut } : null
             };
         });
 
@@ -3751,13 +3753,20 @@ function classementPronosCombine() {
     `).all();
 }
 
+// Normalise une casse "Prenom" (premiere lettre de chaque mot en majuscule, le
+// reste en minuscule) - meme regle que formaterNom() cote frontend (dupliquee la-
+// bas faute de fichier JS partage), appliquee ici aux pseudos de coach.
+function capitaliserPrenom(texte) {
+    return (texte || '').toLowerCase().replace(/(^|[\s'-])\p{L}/gu, function (c) { return c.toUpperCase(); });
+}
+
 // Identite d'un coach = son pseudo (users.pseudo, obligatoire a l'inscription) -
 // jamais le nom de l'un de ses personnages, qui n'a rien a voir avec le coach lui-
 // meme. Independant du circuit desormais (un seul pseudo par compte), le fallback
 // "Coach #id" ne sert que pour les comptes crees avant l'ajout de ce champ.
 function nomCoach(userId) {
     const user = db.prepare('SELECT pseudo FROM users WHERE id = ?').get(userId);
-    return user && user.pseudo ? user.pseudo : ('Coach #' + userId);
+    return user && user.pseudo ? capitaliserPrenom(user.pseudo) : ('Coach #' + userId);
 }
 
 app.get('/api/pronostics/classement/:userId', (req, res) => {
