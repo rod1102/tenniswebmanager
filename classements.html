@@ -38,17 +38,12 @@
                 <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
             </div>
 
-            <div class="tabs-nav" id="tabs-nav">
-                <button class="tab-btn active" data-circuit="atp" data-type="live">ATP Live</button>
-                <button class="tab-btn" data-circuit="atp" data-type="race">ATP Race</button>
-                <button class="tab-btn" data-circuit="wta" data-type="live">WTA Live</button>
-                <button class="tab-btn" data-circuit="wta" data-type="race">WTA Race</button>
-                <button class="tab-btn" data-circuit="pronos" data-type="atp">Pronos ATP</button>
-                <button class="tab-btn" data-circuit="pronos" data-type="wta">Pronos WTA</button>
-                <button class="tab-btn" data-circuit="pronos" data-type="combine">Pronos Combiné</button>
-                <button class="tab-btn" data-circuit="nation" data-type="atp">Nation ATP</button>
-                <button class="tab-btn" data-circuit="nation" data-type="wta">Nation WTA</button>
+            <div class="tabs-nav" id="tabs-nav-circuit">
+                <button class="tab-btn active" data-circuit="atp">ATP</button>
+                <button class="tab-btn" data-circuit="wta">WTA</button>
+                <button class="tab-btn" data-circuit="coach">Coach</button>
             </div>
+            <div class="tabs-nav" id="tabs-nav-type"></div>
 
             <div class="tab-panel">
                 <table class="classement-table">
@@ -73,6 +68,31 @@
         let nationData = { atp: null, wta: null };
         let circuitCourant = 'atp';
         let typeCourant = 'live';
+
+        // Options de 2e niveau proposees selon le choix de 1er niveau (ATP/WTA/Coach) -
+        // evite d'afficher les 9 combinaisons d'un coup (retour utilisateur explicite).
+        const OPTIONS_TYPE = {
+            atp: [{ cle: 'live', libelle: 'Live' }, { cle: 'race', libelle: 'Race' }, { cle: 'nation', libelle: 'Nation' }],
+            wta: [{ cle: 'live', libelle: 'Live' }, { cle: 'race', libelle: 'Race' }, { cle: 'nation', libelle: 'Nation' }],
+            coach: [{ cle: 'atp', libelle: 'Pronos ATP' }, { cle: 'wta', libelle: 'Pronos WTA' }, { cle: 'combine', libelle: 'Pronos Combiné' }]
+        };
+
+        function construireOngletsType() {
+            const nav = document.getElementById('tabs-nav-type');
+            const options = OPTIONS_TYPE[circuitCourant];
+            typeCourant = options[0].cle;
+            nav.innerHTML = options.map(function (o, i) {
+                return `<button class="tab-btn${i === 0 ? ' active' : ''}" data-type="${o.cle}">${o.libelle}</button>`;
+            }).join('');
+            nav.querySelectorAll('.tab-btn').forEach(function (bouton) {
+                bouton.addEventListener('click', function () {
+                    nav.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                    bouton.classList.add('active');
+                    typeCourant = bouton.dataset.type;
+                    afficherClassement();
+                });
+            });
+        }
 
         function flagImg(code) {
             if (!code) return '';
@@ -124,7 +144,7 @@
             // gestion) - demande explicite de l'utilisateur. Les lignes "Pronos"
             // (identite = un coach, pas un joueur/rival precis) pointent vers la fiche
             // coach via son userId plutot que via `cle`, qu'elles n'ont pas.
-            if (circuitCourant === 'pronos') {
+            if (circuitCourant === 'coach') {
                 if (j.userId) {
                     nomHtml = `<a class="lien-adversaire" href="coach.html?id=${j.userId}">${nomAffiche}</a>`;
                 }
@@ -162,13 +182,13 @@
             const corps = document.getElementById('classement-body');
             thead.innerHTML = '<tr><th>Rang</th><th>Nation</th><th>Meilleur joueur</th><th>Points</th></tr>';
 
-            const data = nationData[typeCourant];
+            const data = nationData[circuitCourant];
             if (!data || !data.classement || data.classement.length === 0) {
                 corps.innerHTML = '<tr><td colspan="4" class="match-hint">Aucun classement disponible pour le moment.</td></tr>';
                 return;
             }
 
-            const labelCoupe = typeCourant === 'atp' ? 'la Coupe Davis' : 'la Fed Cup';
+            const labelCoupe = circuitCourant === 'atp' ? 'la Coupe Davis' : 'la Fed Cup';
             const nbQualifiees = data.nbDivisions * 16;
 
             let html = nbQualifiees === 0
@@ -192,14 +212,14 @@
             const thead = document.getElementById('classement-thead');
             const corps = document.getElementById('classement-body');
 
-            if (circuitCourant === 'nation') {
+            if (typeCourant === 'nation') {
                 afficherClassementNation();
                 return;
             }
             thead.innerHTML = '<tr><th>Rang</th><th id="classement-entete-nom">Joueur</th><th>Points</th></tr>';
 
             let liste;
-            if (circuitCourant === 'pronos') {
+            if (circuitCourant === 'coach') {
                 document.getElementById('classement-entete-nom').textContent = 'Coach';
                 liste = pronosData ? pronosData[typeCourant] : [];
             } else {
@@ -262,12 +282,12 @@
             afficherClassement();
         }
 
-        document.querySelectorAll('.tab-btn').forEach(function (bouton) {
+        document.querySelectorAll('#tabs-nav-circuit .tab-btn').forEach(function (bouton) {
             bouton.addEventListener('click', function () {
-                document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                document.querySelectorAll('#tabs-nav-circuit .tab-btn').forEach(function (b) { b.classList.remove('active'); });
                 bouton.classList.add('active');
                 circuitCourant = bouton.dataset.circuit;
-                typeCourant = bouton.dataset.type;
+                construireOngletsType();
                 afficherClassement();
             });
         });
@@ -289,6 +309,7 @@
             document.getElementById('nav-dropdown').classList.remove('open');
         });
 
+        construireOngletsType();
         chargerSemaine();
         verifierAdmin();
         chargerClassement();
