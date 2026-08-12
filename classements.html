@@ -46,11 +46,13 @@
                 <button class="tab-btn" data-circuit="pronos" data-type="atp">Pronos ATP</button>
                 <button class="tab-btn" data-circuit="pronos" data-type="wta">Pronos WTA</button>
                 <button class="tab-btn" data-circuit="pronos" data-type="combine">Pronos Combiné</button>
+                <button class="tab-btn" data-circuit="nation" data-type="atp">Nation ATP</button>
+                <button class="tab-btn" data-circuit="nation" data-type="wta">Nation WTA</button>
             </div>
 
             <div class="tab-panel">
                 <table class="classement-table">
-                    <thead>
+                    <thead id="classement-thead">
                         <tr><th>Rang</th><th id="classement-entete-nom">Joueur</th><th>Points</th></tr>
                     </thead>
                     <tbody id="classement-body"></tbody>
@@ -68,6 +70,7 @@
 
         let classementData = null;
         let pronosData = null;
+        let nationData = { atp: null, wta: null };
         let circuitCourant = 'atp';
         let typeCourant = 'live';
 
@@ -142,16 +145,65 @@
             `;
         }
 
-        function afficherClassement() {
+        function ligneNationHtml(n) {
+            const qualifie = n.division !== null;
+            return `
+                <tr${qualifie ? '' : ' style="opacity:0.5;"'}>
+                    <td class="rang">${n.rang}</td>
+                    <td>${flagImg(n.drapeau)} ${n.nation}</td>
+                    <td>${formaterNomComplet(n.meilleurJoueurNom)}</td>
+                    <td class="pts">${n.points}</td>
+                </tr>
+            `;
+        }
+
+        function afficherClassementNation() {
+            const thead = document.getElementById('classement-thead');
             const corps = document.getElementById('classement-body');
-            const entete = document.getElementById('classement-entete-nom');
+            thead.innerHTML = '<tr><th>Rang</th><th>Nation</th><th>Meilleur joueur</th><th>Points</th></tr>';
+
+            const data = nationData[typeCourant];
+            if (!data || !data.classement || data.classement.length === 0) {
+                corps.innerHTML = '<tr><td colspan="4" class="match-hint">Aucun classement disponible pour le moment.</td></tr>';
+                return;
+            }
+
+            const labelCoupe = typeCourant === 'atp' ? 'la Coupe Davis' : 'la Fed Cup';
+            const nbQualifiees = data.nbDivisions * 16;
+
+            let html = nbQualifiees === 0
+                ? `<tr><td colspan="4" class="match-hint">Pas encore assez de nations (minimum 16) pour un tableau ${labelCoupe.replace('la ', '')}.</td></tr>`
+                : '';
+
+            data.classement.forEach(function (n, i) {
+                if (data.nbDivisions > 1 && n.division && i % 16 === 0) {
+                    html += `<tr class="classement-separateur"><td colspan="4">Division ${n.division}</td></tr>`;
+                }
+                if (nbQualifiees > 0 && i === nbQualifiees) {
+                    html += `<tr class="classement-separateur"><td colspan="4">Non qualifiées pour ${labelCoupe}</td></tr>`;
+                }
+                html += ligneNationHtml(n);
+            });
+
+            corps.innerHTML = html;
+        }
+
+        function afficherClassement() {
+            const thead = document.getElementById('classement-thead');
+            const corps = document.getElementById('classement-body');
+
+            if (circuitCourant === 'nation') {
+                afficherClassementNation();
+                return;
+            }
+            thead.innerHTML = '<tr><th>Rang</th><th id="classement-entete-nom">Joueur</th><th>Points</th></tr>';
 
             let liste;
             if (circuitCourant === 'pronos') {
-                entete.textContent = 'Coach';
+                document.getElementById('classement-entete-nom').textContent = 'Coach';
                 liste = pronosData ? pronosData[typeCourant] : [];
             } else {
-                entete.textContent = 'Joueur';
+                document.getElementById('classement-entete-nom').textContent = 'Joueur';
                 liste = classementData ? classementData[circuitCourant][typeCourant] : [];
             }
 
@@ -198,6 +250,18 @@
             afficherClassement();
         }
 
+        async function chargerNations(circuit) {
+            const response = await fetch('/api/classement/nations/' + circuit.toUpperCase());
+            const data = await response.json();
+
+            if (!response.ok) {
+                return;
+            }
+
+            nationData[circuit] = data;
+            afficherClassement();
+        }
+
         document.querySelectorAll('.tab-btn').forEach(function (bouton) {
             bouton.addEventListener('click', function () {
                 document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
@@ -229,6 +293,8 @@
         verifierAdmin();
         chargerClassement();
         chargerPronos();
+        chargerNations('atp');
+        chargerNations('wta');
     </script>
 </body>
 </html>

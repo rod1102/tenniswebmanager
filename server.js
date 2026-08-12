@@ -3559,6 +3559,37 @@ app.get('/api/classement/:userId', (req, res) => {
     }
 });
 
+// Classement par NATION (meilleur joueur reel ou rival de chaque nation, classement
+// Live) - reutilise exactement la logique de seeding de la Coupe Davis/Fed Cup
+// (meilleurJoueurParNation + tranches de 16, cf. genererTableauNations) pour que ce
+// classement corresponde vraiment aux qualifications, plutot qu'une logique separee
+// qui pourrait diverger.
+app.get('/api/classement/nations/:circuit', (req, res) => {
+    try {
+        const circuit = req.params.circuit === 'WTA' ? 'WTA' : 'ATP';
+        const parNation = meilleurJoueurParNation(circuit);
+        const nations = Array.from(parNation.keys())
+            .sort(function (a, b) { return parNation.get(b).points - parNation.get(a).points; });
+
+        const nbDivisions = nations.length >= 16 ? Math.floor(nations.length / 16) : 0;
+        const nbQualifiees = nbDivisions * 16;
+
+        const classement = nations.map(function (nation, i) {
+            const c = parNation.get(nation);
+            return {
+                rang: i + 1, nation: nation, drapeau: drapeau(nation),
+                meilleurJoueurNom: c.nom, points: c.points,
+                division: i < nbQualifiees ? Math.floor(i / 16) + 1 : null
+            };
+        });
+
+        res.json({ success: true, classement: classement, nbDivisions: nbDivisions });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Annuaire : joueurs valides d'un circuit tries par nation puis par classement Live
 // decroissant a l'interieur de la nation (jamais Race, qui retombe a 0 pendant
 // chaque Pre-saison/Semaine 0 - peu adapte a un annuaire consultable en permanence).
