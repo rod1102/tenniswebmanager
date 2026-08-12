@@ -3563,17 +3563,24 @@ function classementNationsSomme(circuits) {
 // WTA) d'un meme coach - un coach sans l'un des deux personnages est quand meme
 // classe, sur la seule somme de celui qu'il a.
 function classementCoachSomme(circuits, semaineMin, semaineActuelle, monUserId) {
+    // Par coach : points cumules + le joueur ATP et la joueuse WTA eux-memes (nom +
+    // drapeau), pour que l'affichage puisse montrer "Coach (drapeau Joueur - drapeau
+    // Joueuse)" plutot que le seul pseudo du coach.
     const parCoach = new Map();
     circuits.forEach(function (circuit) {
         calculerClassementGlobal(circuit, semaineMin, semaineActuelle).forEach(function (c) {
             if (!c.userId) return; // ignore les rivaux, un "coach" a toujours un vrai compte
-            parCoach.set(c.userId, (parCoach.get(c.userId) || 0) + c.points);
+            if (!parCoach.has(c.userId)) parCoach.set(c.userId, { points: 0, atp: null, wta: null });
+            const entree = parCoach.get(c.userId);
+            entree.points += c.points;
+            entree[circuit === 'ATP' ? 'atp' : 'wta'] = { nom: c.nom, drapeau: c.drapeau };
         });
     });
     return Array.from(parCoach.keys())
-        .sort(function (a, b) { return parCoach.get(b) - parCoach.get(a); })
+        .sort(function (a, b) { return parCoach.get(b).points - parCoach.get(a).points; })
         .map(function (uid) {
-            return { userId: uid, nom: nomCoach(uid), points: parCoach.get(uid), estMoi: Number(uid) === Number(monUserId) };
+            const entree = parCoach.get(uid);
+            return { userId: uid, nom: nomCoach(uid), points: entree.points, estMoi: Number(uid) === Number(monUserId), joueurAtp: entree.atp, joueurWta: entree.wta };
         });
 }
 

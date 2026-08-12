@@ -144,7 +144,17 @@
         }
 
         function ligneHtml(j, rang) {
-            const nomAffiche = `${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}`;
+            // Coach en Live/Race : pas de drapeau propre au coach, on montre plutot ses
+            // deux personnages (joueur ATP + joueuse WTA) chacun avec son drapeau.
+            const estCoachLiveRace = circuitCourant === 'coach' && (typeCourant === 'live' || typeCourant === 'race');
+            let nomAffiche;
+            if (estCoachLiveRace) {
+                const partieJoueur = j.joueurAtp ? `${flagImg(j.joueurAtp.drapeau)} ${formaterNomComplet(j.joueurAtp.nom)}` : '—';
+                const partieJoueuse = j.joueurWta ? `${flagImg(j.joueurWta.drapeau)} ${formaterNomComplet(j.joueurWta.nom)}` : '—';
+                nomAffiche = `${formaterNomComplet(j.nom)} (${partieJoueur} - ${partieJoueuse})`;
+            } else {
+                nomAffiche = `${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}`;
+            }
             let nomHtml = nomAffiche;
 
             // Ma propre ligne pointe vers la meme fiche adversaire.html que les autres
