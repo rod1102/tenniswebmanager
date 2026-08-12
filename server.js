@@ -3537,6 +3537,46 @@ app.get('/api/public/classement', (req, res) => {
     }
 });
 
+// Classement NATION = somme des points (Live) de TOUS les joueurs (reels + rivaux)
+// de cette nationalite sur le(s) circuit(s) demande(s) - PAS le meilleur joueur seul
+// (cette derniere logique reste utilisee telle quelle pour le seeding reel de la
+// Coupe Davis/Fed Cup, cf. meilleurJoueurParNation/genererTableauNations, jamais
+// modifiee ici). circuits = ['ATP'], ['WTA'] ou ['ATP','WTA'] pour la version
+// combinee (onglet Coach).
+function classementNationsSomme(circuits) {
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const semaineActuelle = etat.semaine_actuelle;
+    const parNation = new Map();
+    circuits.forEach(function (circuit) {
+        calculerClassementGlobal(circuit, semaineActuelle - LONGUEUR_SAISON, semaineActuelle).forEach(function (c) {
+            if (!c.nationalite) return;
+            parNation.set(c.nationalite, (parNation.get(c.nationalite) || 0) + c.points);
+        });
+    });
+    const nations = Array.from(parNation.keys()).sort(function (a, b) { return parNation.get(b) - parNation.get(a); });
+    return nations.map(function (nation, i) {
+        return { rang: i + 1, nation: nation, drapeau: drapeau(nation), points: parNation.get(nation) };
+    });
+}
+
+// Classement COACH = somme des points (Live ou Race) des DEUX personnages (ATP +
+// WTA) d'un meme coach - un coach sans l'un des deux personnages est quand meme
+// classe, sur la seule somme de celui qu'il a.
+function classementCoachSomme(circuits, semaineMin, semaineActuelle, monUserId) {
+    const parCoach = new Map();
+    circuits.forEach(function (circuit) {
+        calculerClassementGlobal(circuit, semaineMin, semaineActuelle).forEach(function (c) {
+            if (!c.userId) return; // ignore les rivaux, un "coach" a toujours un vrai compte
+            parCoach.set(c.userId, (parCoach.get(c.userId) || 0) + c.points);
+        });
+    });
+    return Array.from(parCoach.keys())
+        .sort(function (a, b) { return parCoach.get(b) - parCoach.get(a); })
+        .map(function (uid) {
+            return { userId: uid, nom: nomCoach(uid), points: parCoach.get(uid), estMoi: Number(uid) === Number(monUserId) };
+        });
+}
+
 app.get('/api/classement/:userId', (req, res) => {
     try {
         const userId = req.userId;
@@ -3551,7 +3591,11 @@ app.get('/api/classement/:userId', (req, res) => {
         res.json({
             success: true,
             atp: { live: calculerClassement(userId, 'ATP', semaineActuelle - LONGUEUR_SAISON, semaineActuelle), race: calculerClassement(userId, 'ATP', debutSaison, semaineActuelle) },
-            wta: { live: calculerClassement(userId, 'WTA', semaineActuelle - LONGUEUR_SAISON, semaineActuelle), race: calculerClassement(userId, 'WTA', debutSaison, semaineActuelle) }
+            wta: { live: calculerClassement(userId, 'WTA', semaineActuelle - LONGUEUR_SAISON, semaineActuelle), race: calculerClassement(userId, 'WTA', debutSaison, semaineActuelle) },
+            coach: {
+                live: classementCoachSomme(['ATP', 'WTA'], semaineActuelle - LONGUEUR_SAISON, semaineActuelle, userId),
+                race: classementCoachSomme(['ATP', 'WTA'], debutSaison, semaineActuelle, userId)
+            }
         });
     } catch (err) {
         console.error(err);
@@ -3559,31 +3603,12 @@ app.get('/api/classement/:userId', (req, res) => {
     }
 });
 
-// Classement par NATION (meilleur joueur reel ou rival de chaque nation, classement
-// Live) - reutilise exactement la logique de seeding de la Coupe Davis/Fed Cup
-// (meilleurJoueurParNation + tranches de 16, cf. genererTableauNations) pour que ce
-// classement corresponde vraiment aux qualifications, plutot qu'une logique separee
-// qui pourrait diverger.
+// circuit = ATP, WTA ou COMBINE (somme des deux, utilisee par l'onglet Coach).
 app.get('/api/classement/nations/:circuit', (req, res) => {
     try {
-        const circuit = req.params.circuit === 'WTA' ? 'WTA' : 'ATP';
-        const parNation = meilleurJoueurParNation(circuit);
-        const nations = Array.from(parNation.keys())
-            .sort(function (a, b) { return parNation.get(b).points - parNation.get(a).points; });
-
-        const nbDivisions = nations.length >= 16 ? Math.floor(nations.length / 16) : 0;
-        const nbQualifiees = nbDivisions * 16;
-
-        const classement = nations.map(function (nation, i) {
-            const c = parNation.get(nation);
-            return {
-                rang: i + 1, nation: nation, drapeau: drapeau(nation),
-                meilleurJoueurNom: c.nom, points: c.points,
-                division: i < nbQualifiees ? Math.floor(i / 16) + 1 : null
-            };
-        });
-
-        res.json({ success: true, classement: classement, nbDivisions: nbDivisions });
+        const param = req.params.circuit;
+        const circuits = param === 'WTA' ? ['WTA'] : (param === 'COMBINE' ? ['ATP', 'WTA'] : ['ATP']);
+        res.json({ success: true, classement: classementNationsSomme(circuits) });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });

@@ -65,16 +65,16 @@
 
         let classementData = null;
         let pronosData = null;
-        let nationData = { atp: null, wta: null };
+        let nationData = { atp: null, wta: null, coach: null };
         let circuitCourant = 'atp';
         let typeCourant = 'live';
 
-        // Options de 2e niveau proposees selon le choix de 1er niveau (ATP/WTA/Coach) -
-        // evite d'afficher les 9 combinaisons d'un coup (retour utilisateur explicite).
+        // Options de 2e niveau : les memes 4 partout (Live/Race/Nation/Pronos), que ce
+        // soit pour un circuit (ATP/WTA) ou pour la vue Coach (somme des 2 personnages).
         const OPTIONS_TYPE = {
-            atp: [{ cle: 'live', libelle: 'Live' }, { cle: 'race', libelle: 'Race' }, { cle: 'nation', libelle: 'Nation' }],
-            wta: [{ cle: 'live', libelle: 'Live' }, { cle: 'race', libelle: 'Race' }, { cle: 'nation', libelle: 'Nation' }],
-            coach: [{ cle: 'atp', libelle: 'Pronos ATP' }, { cle: 'wta', libelle: 'Pronos WTA' }, { cle: 'combine', libelle: 'Pronos Combiné' }]
+            atp: [{ cle: 'live', libelle: 'Live' }, { cle: 'race', libelle: 'Race' }, { cle: 'nation', libelle: 'Nation' }, { cle: 'pronos', libelle: 'Pronos' }],
+            wta: [{ cle: 'live', libelle: 'Live' }, { cle: 'race', libelle: 'Race' }, { cle: 'nation', libelle: 'Nation' }, { cle: 'pronos', libelle: 'Pronos' }],
+            coach: [{ cle: 'live', libelle: 'Live' }, { cle: 'race', libelle: 'Race' }, { cle: 'nation', libelle: 'Nation' }, { cle: 'pronos', libelle: 'Pronos' }]
         };
 
         function construireOngletsType() {
@@ -135,16 +135,22 @@
             }
         }
 
+        // Une ligne represente un coach (pas un joueur/rival precis) des qu'on est sur
+        // Pronos (n'importe quel onglet) ou sur l'onglet Coach en Live/Race - dans ces
+        // cas l'identite pointe vers coach.html via userId plutot que vers la fiche
+        // adversaire d'un joueur/rival precis (`cle`).
+        function estIdentiteCoach() {
+            return typeCourant === 'pronos' || circuitCourant === 'coach';
+        }
+
         function ligneHtml(j, rang) {
             const nomAffiche = `${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}`;
             let nomHtml = nomAffiche;
 
             // Ma propre ligne pointe vers la meme fiche adversaire.html que les autres
             // joueurs reels (Infos/Palmares/Badges/...), pas vers joueur.html (page de
-            // gestion) - demande explicite de l'utilisateur. Les lignes "Pronos"
-            // (identite = un coach, pas un joueur/rival precis) pointent vers la fiche
-            // coach via son userId plutot que via `cle`, qu'elles n'ont pas.
-            if (circuitCourant === 'coach') {
+            // gestion) - demande explicite de l'utilisateur.
+            if (estIdentiteCoach()) {
                 if (j.userId) {
                     nomHtml = `<a class="lien-adversaire" href="coach.html?id=${j.userId}">${nomAffiche}</a>`;
                 }
@@ -165,13 +171,11 @@
             `;
         }
 
-        function ligneNationHtml(n) {
-            const qualifie = n.division !== null;
+        function ligneNationHtml(n, rang) {
             return `
-                <tr${qualifie ? '' : ' style="opacity:0.5;"'}>
-                    <td class="rang">${n.rang}</td>
+                <tr>
+                    <td class="rang">${rang}</td>
                     <td>${flagImg(n.drapeau)} ${n.nation}</td>
-                    <td>${formaterNomComplet(n.meilleurJoueurNom)}</td>
                     <td class="pts">${n.points}</td>
                 </tr>
             `;
@@ -180,32 +184,15 @@
         function afficherClassementNation() {
             const thead = document.getElementById('classement-thead');
             const corps = document.getElementById('classement-body');
-            thead.innerHTML = '<tr><th>Rang</th><th>Nation</th><th>Meilleur joueur</th><th>Points</th></tr>';
+            thead.innerHTML = '<tr><th>Rang</th><th>Nation</th><th>Points</th></tr>';
 
-            const data = nationData[circuitCourant];
-            if (!data || !data.classement || data.classement.length === 0) {
-                corps.innerHTML = '<tr><td colspan="4" class="match-hint">Aucun classement disponible pour le moment.</td></tr>';
+            const liste = nationData[circuitCourant];
+            if (!liste || liste.length === 0) {
+                corps.innerHTML = '<tr><td colspan="3" class="match-hint">Aucun classement disponible pour le moment.</td></tr>';
                 return;
             }
 
-            const labelCoupe = circuitCourant === 'atp' ? 'la Coupe Davis' : 'la Fed Cup';
-            const nbQualifiees = data.nbDivisions * 16;
-
-            let html = nbQualifiees === 0
-                ? `<tr><td colspan="4" class="match-hint">Pas encore assez de nations (minimum 16) pour un tableau ${labelCoupe.replace('la ', '')}.</td></tr>`
-                : '';
-
-            data.classement.forEach(function (n, i) {
-                if (data.nbDivisions > 1 && n.division && i % 16 === 0) {
-                    html += `<tr class="classement-separateur"><td colspan="4">Division ${n.division}</td></tr>`;
-                }
-                if (nbQualifiees > 0 && i === nbQualifiees) {
-                    html += `<tr class="classement-separateur"><td colspan="4">Non qualifiées pour ${labelCoupe}</td></tr>`;
-                }
-                html += ligneNationHtml(n);
-            });
-
-            corps.innerHTML = html;
+            corps.innerHTML = liste.map(function (n, i) { return ligneNationHtml(n, i + 1); }).join('');
         }
 
         function afficherClassement() {
@@ -217,13 +204,13 @@
                 return;
             }
             thead.innerHTML = '<tr><th>Rang</th><th id="classement-entete-nom">Joueur</th><th>Points</th></tr>';
+            document.getElementById('classement-entete-nom').textContent = estIdentiteCoach() ? 'Coach' : 'Joueur';
 
             let liste;
-            if (circuitCourant === 'coach') {
-                document.getElementById('classement-entete-nom').textContent = 'Coach';
-                liste = pronosData ? pronosData[typeCourant] : [];
+            if (typeCourant === 'pronos') {
+                const cle = circuitCourant === 'coach' ? 'combine' : circuitCourant;
+                liste = pronosData ? pronosData[cle] : [];
             } else {
-                document.getElementById('classement-entete-nom').textContent = 'Joueur';
                 liste = classementData ? classementData[circuitCourant][typeCourant] : [];
             }
 
@@ -270,15 +257,17 @@
             afficherClassement();
         }
 
+        const PARAM_NATIONS = { atp: 'ATP', wta: 'WTA', coach: 'COMBINE' };
+
         async function chargerNations(circuit) {
-            const response = await fetch('/api/classement/nations/' + circuit.toUpperCase());
+            const response = await fetch('/api/classement/nations/' + PARAM_NATIONS[circuit]);
             const data = await response.json();
 
             if (!response.ok) {
                 return;
             }
 
-            nationData[circuit] = data;
+            nationData[circuit] = data.classement;
             afficherClassement();
         }
 
@@ -316,6 +305,7 @@
         chargerPronos();
         chargerNations('atp');
         chargerNations('wta');
+        chargerNations('coach');
     </script>
 </body>
 </html>
