@@ -55,7 +55,13 @@ const SEMAINES_COUPES_EQUIPE = [
     { semaine: 5, manche: '1er tour' },
     { semaine: 14, manche: 'Quarts de finale' },
     { semaine: 37, manche: 'Demi-finales' },
-    { semaine: 47, manche: 'Finale' }
+    { semaine: 47, manche: 'Finale' },
+    // Barrage de maintien (World Group Play-offs) : meme semaine que les Demi-
+    // finales, comme dans le vrai ancien format (a ce stade il ne reste que 4
+    // nations du Groupe mondial en lice, les 8 perdantes du 1er tour jouent leur
+    // barrage de maintien contre 8 challengers en parallele). Cf. memoire
+    // project_coupe_groupe_mondial pour le detail du systeme promotion/relegation.
+    { semaine: 37, manche: 'Barrage de maintien' }
 ];
 
 const CALENDRIER_TOURNOIS = [

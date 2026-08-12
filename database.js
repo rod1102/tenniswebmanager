@@ -486,6 +486,23 @@ db.exec(`
 `);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_coupe_styles_unique ON coupe_styles(coupe_equipe_id, player_id)`);
 
+// Groupe mondial (2026-08-12, demande explicite) : composition PERSISTANTE des 16
+// nations d'un circuit pour une saison donnee - remplace le tirage integral chaque
+// annee par un systeme de promotion/relegation. Une nation y reste tant qu'elle
+// gagne son 1er tour (maintien automatique) ou gagne son barrage de maintien
+// (promotion) ; elle en sort si elle perd les deux. Une ligne par (saison, circuit,
+// nation) - saison conservee pour garder l'historique complet des compositions
+// passees, pas seulement la plus recente.
+db.exec(`
+    CREATE TABLE IF NOT EXISTS coupe_groupe_mondial (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        saison INTEGER NOT NULL,
+        circuit TEXT NOT NULL,
+        nation TEXT NOT NULL
+    )
+`);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_coupe_groupe_mondial_unique ON coupe_groupe_mondial(saison, circuit, nation)`);
+
 // Vraie session serveur (2026-08-11) : un jeton oppose = une ligne, supprime a la
 // deconnexion ou a l'expiration. Remplace le mecanisme precedent (userId envoye en
 // clair par le client a chaque appel, jamais verifie cote serveur).

@@ -296,6 +296,20 @@
 
                 parSemaine[semaine].forEach(function (t) {
                     const carte = document.createElement('div');
+
+                    // Coupe Davis / Fed Cup : simple visibilite (aucun tournoi individuel
+                    // ne se joue cette semaine-la), pas d'inscription possible.
+                    if (t.estCoupe) {
+                        carte.className = 'tournoi-card';
+                        carte.innerHTML = `
+                            <div class="tournoi-card-name">${t.nom}</div>
+                            <div class="tournoi-card-meta">${t.manche}</div>
+                            <div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Pas d'inscription — compétition par équipe nationale</div>
+                        `;
+                        grille.appendChild(carte);
+                        return;
+                    }
+
                     carte.className = 'tournoi-card tournoi-card-' + t.surface;
 
                     const nomClasse = t.circuit === 'ATP' ? 'tournoi-name-atp' : 'tournoi-name-wta';

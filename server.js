@@ -2797,12 +2797,24 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
         const finAnnee = debut + (cycleLongueur - positionDebut);
 
         const eligibles = [];
+        // Coupe Davis (ATP) / Fed Cup (WTA) : aucun tournoi individuel ne se joue ces
+        // semaines-la (cf. SEMAINES_COUPES_EQUIPE), le calendrier serait sinon vide et
+        // silencieux ces semaines-la - simple visibilite, pas d'inscription possible.
+        const nomCoupe = circuit === 'ATP' ? 'Coupe Davis' : 'Fed Cup';
         for (let semaine = debut; semaine <= finAnnee; semaine++) {
             const phase = phaseDeSemaine(semaine);
             if (phase.type !== 'tournoi') continue;
             CALENDRIER_TOURNOIS
                 .filter(function (t) { return t.circuit === circuit && t.semaine_debut === phase.positionSemaine; })
                 .forEach(function (t) { eligibles.push(Object.assign({}, t, { semaine, positionSemaine: t.semaine_debut, ouvert: semaine <= finOuvert })); });
+            SEMAINES_COUPES_EQUIPE
+                .filter(function (sc) { return sc.semaine === phase.positionSemaine; })
+                .forEach(function (sc) {
+                    eligibles.push({
+                        id: 'coupe-' + circuit + '-' + sc.manche, estCoupe: true, circuit: circuit,
+                        nom: nomCoupe, manche: sc.manche, semaine: semaine, positionSemaine: sc.semaine
+                    });
+                });
         }
 
         const tournoisExistants = db.prepare('SELECT id, calendrier_id, semaine, statut FROM tournois WHERE semaine BETWEEN ? AND ?').all(debut, finAnnee);
@@ -5253,9 +5265,19 @@ app.post('/api/annonce', (req, res) => {
 // (candidature Pre-saison+S0, vote S1), puis pour CHAQUE manche : surface (S-3),
 // composition/ordre (S-2), styles (S-1), matchs (S0) - cf. memoire
 // project_discord_et_pistes_futures pour l'historique complet de la conception.
+//
+// Groupe mondial + promotion/relegation (2026-08-12, demande explicite) : le
+// tableau de 16 n'est plus retire integralement chaque saison. Les 8 vainqueurs
+// du 1er tour sont maintenus AUTOMATIQUEMENT dans le Groupe mondial l'annee
+// suivante (quel que soit leur parcours ensuite en quarts/demies/finale, qui ne
+// determinent que le vainqueur sportif de la saison). Les 8 perdants du 1er tour
+// jouent en meme temps que les demies (S37) un barrage de maintien contre les 8
+// meilleures nations HORS Groupe mondial (classement Live du moment) ; les 8
+// vainqueurs de ce barrage completent le Groupe mondial a 16 la saison suivante.
+// Cf. memoire project_coupe_groupe_mondial.
 
 const MANCHES_COUPE = ['1er_tour', 'quarts', 'demies', 'finale'];
-const LABELS_MANCHE = { '1er_tour': '1er tour', quarts: 'Quarts de finale', demies: 'Demi-finales', finale: 'Finale' };
+const LABELS_MANCHE = { '1er_tour': '1er tour', quarts: 'Quarts de finale', demies: 'Demi-finales', finale: 'Finale', barrage: 'Barrage de maintien' };
 
 // Libelle d'une rencontre (numero 1-5) - partage entre l'ecriture des lignes matchs
 // (simulerMancheCoupe) et leur relecture sur la page Matchs (matchs.numero_tour).
@@ -5303,63 +5325,79 @@ function meilleurJoueurParNation(circuit) {
     return parNation;
 }
 
-// Les nations dont le meilleur joueur (reel ou rival) a le plus de points Live
-// sont retenues par tranches de 16 (Division 1 = les 16 meilleures, Division 2 =
-// les 16 suivantes, etc., seulement si au moins 32/48/... nations existent) ;
-// chaque division est appariee independamment par seeding classique (1 vs 16,
-// 2 vs 15, etc.), la nation la mieux classee de la paire recoit l'avantage du
-// terrain au 1er tour. Nations en surplus au-dela du dernier multiple de 16
-// entier : pas d'equipe cette saison-la (retentent leur chance la saison suivante).
-function genererTableauNations(circuit) {
-    const parNation = meilleurJoueurParNation(circuit);
-    const nations = Array.from(parNation.keys())
-        .sort(function (a, b) { return parNation.get(b).points - parNation.get(a).points; });
-
-    const nbDivisions = Math.max(1, Math.floor(nations.length / 16));
-    const divisions = [];
-    for (let d = 0; d < nbDivisions; d++) {
-        const nationsDivision = nations.slice(d * 16, d * 16 + 16);
-        const paires = [];
-        for (let i = 0; i < 8; i++) {
-            paires.push({ domicile: nationsDivision[i], exterieur: nationsDivision[15 - i] });
-        }
-        divisions.push({ division: d + 1, paires: paires });
-    }
-    return divisions;
-}
-
 function nombreSaisonAffichee() {
     const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
     return phaseAffichee(etat.semaine_actuelle).numeroSaison;
 }
 
-// Cree le tableau des 16 nations + les 8 ties du 1er tour pour une saison/circuit
-// donnes, si ce n'est pas deja fait (idempotent). Appelee au debut de la Pre-saison.
-// Pas de Coupe Davis/Fed Cup en Saison 1 (choix explicite de l'utilisateur) : les
-// rangs de meilleur joueur par nation ne seraient sinon composes que de rivaux
-// fictifs faute d'assez de vrais coachs inscrits en tout debut de partie - on laisse
-// le temps a de vrais joueurs de rejoindre avant la 1ere edition, en Saison 2.
+// Constitue le Groupe mondial (16 nations) d'une saison/circuit, si ce n'est pas
+// deja fait (idempotent) : soit un bootstrap (toute 1ere edition - les 16
+// meilleures nations au classement Live), soit une reconduction de la saison
+// precedente (8 maintenues + 8 promues du barrage - voir plus haut).
+function constituerGroupeMondial(circuit, saison) {
+    const dejaConstitue = db.prepare('SELECT COUNT(*) AS n FROM coupe_groupe_mondial WHERE saison = ? AND circuit = ?').get(saison, circuit).n;
+    if (dejaConstitue > 0) return;
+
+    const saisonPrecedente = db.prepare('SELECT MAX(saison) AS s FROM coupe_groupe_mondial WHERE circuit = ? AND saison < ?').get(circuit, saison).s;
+
+    let nations;
+    if (!saisonPrecedente) {
+        const parNation = meilleurJoueurParNation(circuit);
+        nations = Array.from(parNation.keys())
+            .sort(function (a, b) { return parNation.get(b).points - parNation.get(a).points; })
+            .slice(0, 16);
+    } else {
+        const maintenues = db.prepare(`
+            SELECT nation_vainqueur AS nation FROM coupe_equipes
+            WHERE saison = ? AND circuit = ? AND manche = '1er_tour' AND statut = 'termine'
+        `).all(saisonPrecedente, circuit).map(function (r) { return r.nation; });
+        const promues = db.prepare(`
+            SELECT nation_vainqueur AS nation FROM coupe_equipes
+            WHERE saison = ? AND circuit = ? AND manche = 'barrage' AND statut = 'termine'
+        `).all(saisonPrecedente, circuit).map(function (r) { return r.nation; });
+        nations = maintenues.concat(promues);
+    }
+
+    nations.forEach(function (nation) {
+        db.prepare('INSERT OR IGNORE INTO coupe_groupe_mondial (saison, circuit, nation) VALUES (?, ?, ?)').run(saison, circuit, nation);
+    });
+}
+
+// Cree les 8 ties du 1er tour pour une saison/circuit donnes, si ce n'est pas deja
+// fait (idempotent). Appelee au debut de la Pre-saison. Pas de Coupe Davis/Fed Cup
+// en Saison 1 (choix explicite de l'utilisateur) : les rangs de meilleur joueur par
+// nation ne seraient sinon composes que de rivaux fictifs faute d'assez de vrais
+// coachs inscrits en tout debut de partie - on laisse le temps a de vrais joueurs
+// de rejoindre avant la 1ere edition, en Saison 2.
 function assurerTableauCoupe(circuit) {
     const saison = nombreSaisonAffichee();
     if (saison <= 1) return;
     const existe = db.prepare('SELECT COUNT(*) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ?').get(saison, circuit).n;
     if (existe > 0) return;
 
-    const divisions = genererTableauNations(circuit);
+    constituerGroupeMondial(circuit, saison);
+    const nations = db.prepare('SELECT nation FROM coupe_groupe_mondial WHERE saison = ? AND circuit = ?').all(saison, circuit).map(function (r) { return r.nation; });
+    if (nations.length < 16) return; // pas encore assez de nations connues (ne devrait pas arriver une fois la partie lancee)
+
+    // Seeding du 1er tour par classement Live courant (1 vs 16, 2 vs 15, etc.),
+    // la nation la mieux classee de chaque paire recoit l'avantage du terrain.
+    const parNation = meilleurJoueurParNation(circuit);
+    const nationsSeeds = nations.slice().sort(function (a, b) {
+        return (parNation.has(b) ? parNation.get(b).points : 0) - (parNation.has(a) ? parNation.get(a).points : 0);
+    });
+
     // Appelee EXACTEMENT au debut de la Pre-saison (position 1 du cycle de 54) :
     // semaine_actuelle EST donc la semaine de Pre-saison elle-meme. La Semaine 5
     // (position 7 : 1=presaison, 2=S0, 3=S1...7=S5) tombe 6 semaines plus tard.
     const etatCourant = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
     const semaineDuMatch = etatCourant.semaine_actuelle + 6;
 
-    divisions.forEach(function (dv) {
-        dv.paires.forEach(function (p, i) {
-            db.prepare(`
-                INSERT INTO coupe_equipes (saison, circuit, manche, semaine, nation_domicile, nation_exterieur, statut, position, division)
-                VALUES (?, ?, '1er_tour', ?, ?, ?, 'a_venir', ?, ?)
-            `).run(saison, circuit, semaineDuMatch, p.domicile, p.exterieur, i, dv.division);
-        });
-    });
+    for (let i = 0; i < 8; i++) {
+        db.prepare(`
+            INSERT INTO coupe_equipes (saison, circuit, manche, semaine, nation_domicile, nation_exterieur, statut, position, division)
+            VALUES (?, ?, '1er_tour', ?, ?, ?, 'a_venir', ?, 1)
+        `).run(saison, circuit, semaineDuMatch, nationsSeeds[i], nationsSeeds[15 - i], i);
+    }
 }
 
 // Semaine de match de chaque manche (position dans le cycle de saison, cf.
@@ -5371,6 +5409,51 @@ const SEMAINE_PAR_MANCHE = {
     finale: SEMAINES_COUPES_EQUIPE[3].semaine
 };
 
+// Barrage de maintien : une fois les 8 ties du 1er tour terminees, oppose les 8
+// nations perdantes aux 8 meilleures nations HORS Groupe mondial actuel (classement
+// Live du moment). Seeding : le perdant le mieux classe affronte le challenger le
+// moins bien classe (et inversement), le perdant recoit l'avantage du terrain (il
+// defend sa place). Le vainqueur de chaque barrage rejoint le Groupe mondial de la
+// saison suivante (cf. constituerGroupeMondial) - pas de manche apres le barrage,
+// contrairement a 1er_tour/quarts/demies/finale.
+function genererBarrage(saison, circuit) {
+    const dejaGeneree = db.prepare("SELECT COUNT(*) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ? AND manche = 'barrage'").get(saison, circuit).n;
+    if (dejaGeneree > 0) return;
+
+    const premiersTours = db.prepare("SELECT * FROM coupe_equipes WHERE saison = ? AND circuit = ? AND manche = '1er_tour'").all(saison, circuit);
+    if (premiersTours.length === 0 || premiersTours.some(function (t) { return t.statut !== 'termine'; })) return;
+
+    const perdants = premiersTours.map(function (t) {
+        return t.nation_vainqueur === t.nation_domicile ? t.nation_exterieur : t.nation_domicile;
+    });
+
+    const membresGroupe = new Set(db.prepare('SELECT nation FROM coupe_groupe_mondial WHERE saison = ? AND circuit = ?').all(saison, circuit).map(function (r) { return r.nation; }));
+    const parNation = meilleurJoueurParNation(circuit);
+    const challengers = Array.from(parNation.keys())
+        .filter(function (n) { return !membresGroupe.has(n); })
+        .sort(function (a, b) { return parNation.get(b).points - parNation.get(a).points; })
+        .slice(0, 8);
+    if (challengers.length < 8) return; // pas assez de nations candidates hors Groupe mondial (partie encore jeune)
+
+    const perdantsTries = perdants.slice().sort(function (a, b) {
+        return (parNation.has(b) ? parNation.get(b).points : 0) - (parNation.has(a) ? parNation.get(a).points : 0);
+    });
+
+    const semaineBarrage = premiersTours[0].semaine + (SEMAINES_COUPES_EQUIPE[2].semaine - SEMAINES_COUPES_EQUIPE[0].semaine);
+
+    perdantsTries.forEach(function (perdant, i) {
+        db.prepare(`
+            INSERT INTO coupe_equipes (saison, circuit, manche, semaine, nation_domicile, nation_exterieur, statut, position, division)
+            VALUES (?, ?, 'barrage', ?, ?, ?, 'a_venir', ?, 1)
+        `).run(saison, circuit, semaineBarrage, perdant, challengers[7 - i], i);
+        // Les challengers n'ont jamais eu de fenetre de candidature/vote (leur
+        // qualification n'est connue qu'a la fin du 1er tour) : capitaine designe
+        // directement par repli (meilleur joueur reel de la nation, ou pilotage
+        // automatique complet si aucun), meme mecanisme que resoudreCapitaine.
+        resoudreCapitaine(saison, circuit, challengers[7 - i]);
+    });
+}
+
 // Une fois TOUTES les ties d'une manche terminees, genere la manche suivante en
 // appariant les vainqueurs par position consecutive (0&1 -> 0, 2&3 -> 1, etc.) -
 // pas de protection de tete de serie façon "S-curve" au-dela du 1er tour, simplification
@@ -5378,6 +5461,8 @@ const SEMAINE_PAR_MANCHE = {
 // a plusieurs) est traitee independamment : une division peut generer sa manche
 // suivante sans attendre qu'une autre division ait fini la sienne.
 function genererMancheSuivante(saison, circuit, mancheActuelle) {
+    if (mancheActuelle === '1er_tour') genererBarrage(saison, circuit);
+
     const indexManche = MANCHES_COUPE.indexOf(mancheActuelle);
     if (indexManche === -1 || indexManche === MANCHES_COUPE.length - 1) return; // pas de manche apres la finale
 
