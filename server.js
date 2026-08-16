@@ -2028,43 +2028,14 @@ function pointsRivaux(circuit, semaineMin, semaineActuelle) {
     `).all(semaineMin, semaineActuelle, circuit);
 }
 
-// Classement (Live ou Race selon les bornes de semaine passees) pour un coach et un
-// circuit donnes : rivaux persistants du roster + le joueur reel, tries par points.
-// `cle` identifie chaque ligne ('rival:id' ou 'joueur:id') pour permettre de retrouver
-// le rang de n'importe quel participant d'un tournoi (voir calculerRangsLive).
-function calculerClassement(userId, circuit, semaineMin, semaineActuelle) {
-    const liste = pointsRivaux(circuit, semaineMin, semaineActuelle).map(function (r) {
-        return { cle: 'rival:' + r.id, nom: r.nom, nationalite: r.nationalite, drapeau: drapeau(r.nationalite), points: r.points, estMoi: false };
-    });
-
-    const joueurCircuit = db.prepare("SELECT * FROM players WHERE user_id = ? AND statut = 'valide'").all(userId)
-        .find(function (p) { return (p.type === 'joueur' ? 'ATP' : 'WTA') === circuit; });
-    if (joueurCircuit) {
-        const totalMoi = db.prepare(`
-            SELECT COALESCE(SUM(tj.points_gagnes), 0) AS points
-            FROM tournoi_joueurs tj
-            JOIN tournois t ON t.id = tj.tournoi_id
-            WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.semaine > ? AND t.semaine <= ?
-        `).get(joueurCircuit.id, semaineMin, semaineActuelle);
-        liste.push({
-            cle: 'joueur:' + joueurCircuit.id,
-            nom: joueurCircuit.prenom + ' ' + joueurCircuit.nom,
-            nationalite: joueurCircuit.nationalite,
-            drapeau: drapeau(joueurCircuit.nationalite),
-            points: totalMoi.points,
-            estMoi: true
-        });
-    }
-
-    liste.sort(function (a, b) { return b.points - a.points; });
-    return liste;
-}
-
-// Classement TOUS coachs confondus (pas un seul) pour un circuit et une fenetre de
-// semaines donnes : rivaux persistants + TOUS les joueurs reels valides de ce
-// circuit. Utilise pour la qualification aux Masters de fin de saison (Top 8 Race)
-// et pour l'annuaire (Top Live par nation) - jamais pour l'affichage "estMoi" d'un
-// coach precis, qui reste sur calculerClassement.
+// Classement PARTAGE (tous coachs confondus, pas un seul) pour un circuit et une
+// fenetre de semaines donnes : rivaux persistants + TOUS les joueurs reels valides
+// de ce circuit. Utilise pour la qualification aux Masters de fin de saison (Top 8
+// Race), pour l'annuaire (Top Live par nation), et pour les onglets ATP/WTA
+// Live/Race de classements.html (2026-08-16 - avant cette date, ces onglets
+// passaient par une fonction separee qui ne montrait que les rivaux + le joueur de
+// l'appelant, jamais les vrais joueurs des AUTRES coachs meme s'ils avaient deja
+// marque des points).
 function calculerClassementGlobal(circuit, semaineMin, semaineActuelle) {
     const liste = pointsRivaux(circuit, semaineMin, semaineActuelle).map(function (r) {
         return { cle: 'rival:' + r.id, nom: r.nom, nationalite: r.nationalite, drapeau: drapeau(r.nationalite), points: r.points, niveau: r.niveau, playerId: null, rivalId: r.id, userId: null };
@@ -2098,20 +2069,19 @@ function calculerClassementGlobal(circuit, semaineMin, semaineActuelle) {
     return liste;
 }
 
-// Rang Live (fenetre glissante de 52 semaines) de chaque participant d'un circuit,
-// sous forme de Map cle -> rang (1-based), pour afficher le classement dans le
-// tableau d'un tournoi sans recalculer une requete par participant.
-function calculerRangsLive(userId, circuit) {
-    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
-    const liste = calculerClassement(userId, circuit, etat.semaine_actuelle - LONGUEUR_SAISON, etat.semaine_actuelle);
-    const rangs = new Map();
-    liste.forEach(function (j, i) { rangs.set(j.cle, i + 1); });
-    return rangs;
+// classementGlobal + le flag estMoi calcule du point de vue de l'appelant (mise en
+// surbrillance de sa propre ligne) - c'est cette version qui alimente les onglets
+// ATP/WTA Live/Race de classements.html.
+function classementPartage(circuit, semaineMin, semaineActuelle, monUserId) {
+    return calculerClassementGlobal(circuit, semaineMin, semaineActuelle).map(function (c) {
+        return Object.assign({}, c, { estMoi: c.userId !== null && Number(c.userId) === Number(monUserId) });
+    });
 }
 
-// Rang Live GLOBAL (tous coachs + rivaux confondus, PAS le point de vue d'un seul
-// coach comme calculerRangsLive) sous forme de Map cle -> rang - utilise pour
-// afficher le "Classement" actuel sur une fiche adversaire (reel ou rival).
+// Rang Live (fenetre glissante de 52 semaines) de chaque participant d'un circuit,
+// sous forme de Map cle -> rang (1-based), pour afficher le classement dans le
+// tableau d'un tournoi sans recalculer une requete par participant. Aussi utilise
+// pour afficher le "Classement" actuel sur une fiche adversaire (reel ou rival).
 function calculerRangsLiveGlobal(circuit) {
     const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
     const liste = calculerClassementGlobal(circuit, etat.semaine_actuelle - LONGUEUR_SAISON, etat.semaine_actuelle);
@@ -3372,7 +3342,7 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
         let instance = null;
         let estInscrit = false;
         if (instanceRow) {
-            const rangs = calculerRangsLive(userId, entree.circuit);
+            const rangs = calculerRangsLiveGlobal(entree.circuit);
             function rangDe(rivalId, estReel, playerId) {
                 if (rivalId) return rangs.get('rival:' + rivalId) || null;
                 if (estReel) return rangs.get('joueur:' + playerId) || null;
@@ -3609,8 +3579,8 @@ app.get('/api/classement/:userId', (req, res) => {
 
         res.json({
             success: true,
-            atp: { live: calculerClassement(userId, 'ATP', semaineActuelle - LONGUEUR_SAISON, semaineActuelle), race: calculerClassement(userId, 'ATP', debutSaison, semaineActuelle) },
-            wta: { live: calculerClassement(userId, 'WTA', semaineActuelle - LONGUEUR_SAISON, semaineActuelle), race: calculerClassement(userId, 'WTA', debutSaison, semaineActuelle) },
+            atp: { live: classementPartage('ATP', semaineActuelle - LONGUEUR_SAISON, semaineActuelle, userId), race: classementPartage('ATP', debutSaison, semaineActuelle, userId) },
+            wta: { live: classementPartage('WTA', semaineActuelle - LONGUEUR_SAISON, semaineActuelle, userId), race: classementPartage('WTA', debutSaison, semaineActuelle, userId) },
             coach: {
                 live: classementCoachSomme(['ATP', 'WTA'], semaineActuelle - LONGUEUR_SAISON, semaineActuelle, userId),
                 race: classementCoachSomme(['ATP', 'WTA'], debutSaison, semaineActuelle, userId)
