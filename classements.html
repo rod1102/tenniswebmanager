@@ -229,17 +229,7 @@
                 return;
             }
 
-            const top100 = liste.slice(0, 100);
-            const indexMoi = liste.findIndex(function (j) { return j.estMoi; });
-
-            let html = top100.map(function (j, i) { return ligneHtml(j, i + 1); }).join('');
-
-            if (indexMoi >= 100) {
-                html += '<tr class="classement-separateur"><td colspan="3">···</td></tr>';
-                html += ligneHtml(liste[indexMoi], indexMoi + 1);
-            }
-
-            corps.innerHTML = html;
+            corps.innerHTML = liste.map(function (j, i) { return ligneHtml(j, i + 1); }).join('');
         }
 
         async function chargerClassement() {
