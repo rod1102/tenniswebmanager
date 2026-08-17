@@ -193,7 +193,7 @@ app.post('/api/inscription', (req, res) => {
         const ip = req.ip;
         const nbComptesIp = db.prepare('SELECT COUNT(*) AS n FROM users WHERE ip_inscription = ?').get(ip).n;
         if (nbComptesIp >= LIMITE_COMPTES_PAR_IP) {
-            return res.status(409).json({ error: 'Un compte existe deja depuis cette adresse. Un seul compte par personne.' });
+            return res.status(409).json({ error: 'Limite IP atteinte : un compte a deja ete cree depuis cette connexion (un seul compte par personne).' });
         }
 
         const passwordHash = bcrypt.hashSync(password, 10);
