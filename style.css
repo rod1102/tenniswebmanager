@@ -398,7 +398,7 @@ h1 {
 }
 
 .dashboard-inner {
-    max-width: 900px;
+    max-width: 1100px;
     margin: 0 auto;
 }
 
@@ -1516,7 +1516,7 @@ h1 {
 }
 
 .tab-panel {
-    max-width: 720px;
+    max-width: 900px;
     margin: 0 auto;
 }
 
@@ -1579,9 +1579,17 @@ table.points td.pts {
     color: #F5F7FA;
 }
 
+/* S'affranchit du plafond de largeur de .dashboard-inner (900px, partage par toute
+   la page) - sinon un grand tableau de tournoi (5 tours et plus) deborde et force un
+   defilement horizontal meme sur un ecran large. Technique "full-bleed" classique :
+   sort du flux centre pour occuper toute la largeur de la fenetre, avec sa propre
+   marge interieure. */
 .tab-panel-wide {
-    max-width: 100%;
-    width: 100%;
+    max-width: 100vw;
+    width: 100vw;
+    margin-left: calc(50% - 50vw);
+    padding: 0 24px;
+    box-sizing: border-box;
 }
 
 .style-tour-grid {
