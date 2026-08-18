@@ -1014,6 +1014,11 @@ h1 {
     text-align: left;
 }
 
+.regle-table-centree th:not(:first-child),
+.regle-table-centree td:not(:first-child) {
+    text-align: center;
+}
+
 .regle-intro {
     max-width: 640px;
     margin: 0 auto 24px;
