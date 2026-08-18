@@ -90,6 +90,7 @@ function estRoutePublique(req) {
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
         if (/^\/api\/presse\/\d+$/.test(req.path)) return true;
+        if (req.path === '/api/_debug/ip') return true;
         return false;
     }
     return false;
@@ -117,6 +118,12 @@ function authentifier(req, res, next) {
 }
 
 app.use(authentifier);
+
+// TEMPORAIRE - diagnostic du bug "tout le monde recoit Limite IP atteinte", a
+// retirer une fois le probleme de proxy Railway confirme/corrige.
+app.get('/api/_debug/ip', (req, res) => {
+    res.json({ reqIp: req.ip, reqIps: req.ips, xForwardedFor: req.headers['x-forwarded-for'], trustProxyFn: app.get('trust proxy fn') ? 'set' : 'unset' });
+});
 
 const BUDGET_POINTS = 120;
 const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
