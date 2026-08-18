@@ -1019,6 +1019,47 @@ h1 {
     text-align: center;
 }
 
+/* ---------- Info-bulle "?" (creation des personnages) ---------- */
+
+.info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.15);
+    color: #C4CDD6;
+    font-size: 0.62rem;
+    font-weight: 700;
+    cursor: pointer;
+    margin-left: 4px;
+    position: relative;
+    vertical-align: middle;
+}
+
+.info-tooltip {
+    display: none;
+    position: absolute;
+    bottom: 130%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #1A1F29;
+    color: #F5F7FA;
+    padding: 6px 10px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 400;
+    white-space: nowrap;
+    z-index: 10;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.info-icon:hover .info-tooltip,
+.info-icon.active .info-tooltip {
+    display: block;
+}
+
 .regle-intro {
     max-width: 640px;
     margin: 0 auto 24px;
