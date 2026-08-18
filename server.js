@@ -2279,6 +2279,12 @@ function tirerAuSort(tournoiId, entreeCalendrier) {
     });
 
     db.prepare("UPDATE tournois SET statut = 'a_venir' WHERE id = ?").run(tournoiId);
+
+    // Le tableau est fige : la liste d'attente n'a plus lieu d'etre (les confirmes
+    // sont deja des lignes tournoi_joueurs permanentes, les non-retenus n'auront
+    // jamais de slot pour cette edition precise).
+    const semaineDuTournoi = db.prepare('SELECT semaine FROM tournois WHERE id = ?').get(tournoiId).semaine;
+    db.prepare('DELETE FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ?').run(entreeCalendrier.id, semaineDuTournoi);
 }
 
 // Style de jeu en cours pour un joueur reel a l'interieur d'un tournoi : deduit du
@@ -2815,12 +2821,12 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
         const tournoisExistants = db.prepare('SELECT id, calendrier_id, semaine, statut FROM tournois WHERE semaine BETWEEN ? AND ?').all(debut, finAnnee);
         const tournoiMap = new Map(tournoisExistants.map(function (t) { return [t.calendrier_id + '-' + t.semaine, t]; }));
 
+        // "Inscrit" reflete tournoi_liste_attente (confirme OU en liste d'attente),
+        // pas seulement une ligne est_reel=1 dans tournoi_joueurs - sinon un joueur en
+        // attente reverrait "S'inscrire" au lieu de "Se desinscrire".
         const inscriptionsReelles = db.prepare(`
-            SELECT tournois.calendrier_id, tournois.semaine
-            FROM tournois
-            JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
-            WHERE tournois.semaine BETWEEN ? AND ?
-              AND tournoi_joueurs.player_id = ? AND tournoi_joueurs.est_reel = 1
+            SELECT calendrier_id, semaine FROM tournoi_liste_attente
+            WHERE semaine BETWEEN ? AND ? AND player_id = ?
         `).all(debut, finAnnee, playerId);
         const inscritSet = new Set(inscriptionsReelles.map(function (i) { return i.calendrier_id + '-' + i.semaine; }));
 
@@ -2979,11 +2985,72 @@ function creerTournoi(entree, semaine, rivauxUtilises) {
     return tournoiId;
 }
 
-function inscrireJoueurAuTournoi(userId, player, entree, semaine, energieMisee) {
-    // Filet de securite (deja valide/rejete cote route pour une inscription directe) :
-    // jamais plus que le plafond de la categorie, ni plus que l'energie disponible.
-    const plafondCategorie = PLAFOND_MISE_ENERGIE[String(entree.categorie)] || 0;
-    const mise = Math.max(0, Math.min(Math.floor(Number(energieMisee) || 0), plafondCategorie, player.points_energie));
+// Reequilibre le tableau d'un tournoi encore en inscriptions a partir de
+// tournoi_liste_attente (source de verite unique de "qui s'est inscrit") : les
+// slots non-rivaux (lambdas ou vrais joueurs deja installes) sont attribues aux
+// inscrits reels par ordre de classement Live, meilleur en premier. Les rivaux ne
+// sont JAMAIS delogés par un vrai joueur (choix explicite de l'utilisateur,
+// 2026-08-18) - seuls les vrais joueurs se disputent entre eux les slots lambda ;
+// au-dela de la capacite, ils restent en liste d'attente (pas de ligne dans
+// tournoi_joueurs). Appelee apres CHAQUE inscription/desinscription reelle.
+function rebalancerTournoi(tournoiId, entree, semaine) {
+    const inscriptions = db.prepare(`
+        SELECT p.* FROM tournoi_liste_attente tla
+        JOIN players p ON p.id = tla.player_id
+        WHERE tla.calendrier_id = ? AND tla.semaine = ?
+    `).all(entree.id, semaine);
+    if (inscriptions.length === 0) return;
+
+    const rangs = calculerRangsLiveGlobal(entree.circuit);
+    inscriptions.forEach(function (p) { p._rang = rangs.get('joueur:' + p.id) || Infinity; });
+    inscriptions.sort(function (a, b) { return a._rang - b._rang; });
+
+    const lignes = db.prepare("SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? AND nom != 'BYE'").all(tournoiId);
+    const capacite = lignes.filter(function (l) { return l.rival_id === null; }).length;
+    const confirmes = inscriptions.slice(0, capacite);
+    const idsConfirmes = new Set(confirmes.map(function (p) { return p.id; }));
+    const estFeminin = entree.circuit === 'WTA';
+
+    // Retire du tableau tout vrai joueur qui ne fait plus partie des confirmes
+    // (bumpe par un mieux classe, ou lui-meme desinscrit) - repli sur un lambda frais.
+    lignes.forEach(function (l) {
+        if (l.est_reel && !idsConfirmes.has(l.player_id)) {
+            const lambda = genererJoueurLambda(entree.categorie, estFeminin);
+            db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 0, player_id = NULL, energie_misee = 0 WHERE id = ?')
+                .run(lambda.nom, lambda.nationalite, lambda.niveau, l.id);
+        }
+    });
+
+    // Installe chaque confirme qui n'a pas encore de ligne dans le tableau.
+    const niveauxConfirmes = [];
+    confirmes.forEach(function (p) {
+        const niveauReel = Math.round(niveauNormal(p, entree.surface));
+        niveauxConfirmes.push(niveauReel);
+        const dejaLa = db.prepare('SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoiId, p.id);
+        if (dejaLa) return;
+        const slotLibre = db.prepare("SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 0 AND rival_id IS NULL ORDER BY RANDOM() LIMIT 1").get(tournoiId);
+        if (!slotLibre) return; // ne devrait pas arriver, capacite deja verifiee ci-dessus
+        db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 1, player_id = ?, rival_id = NULL WHERE id = ?').run(
+            p.prenom + ' ' + p.nom, p.nationalite, niveauReel, p.id, slotLibre.id
+        );
+    });
+
+    // Les bots doivent toujours avoir un niveau plus faible que les vrais joueurs
+    // (demande explicite de l'utilisateur, 2026-08-18) : aligne sur le moins bon vrai
+    // joueur actuellement confirme, recalcule a chaque rebalance (jamais les rivaux,
+    // qui gardent leur propre niveau).
+    if (niveauxConfirmes.length > 0) {
+        const niveauPlancher = Math.min.apply(null, niveauxConfirmes);
+        db.prepare("UPDATE tournoi_joueurs SET niveau = ? WHERE tournoi_id = ? AND est_reel = 0 AND rival_id IS NULL AND nom != 'BYE'").run(niveauPlancher, tournoiId);
+    }
+}
+
+// Une inscription reelle n'est plus jamais rejetee pour "tableau complet" (liste
+// d'attente illimitee, 2026-08-18) : elle est enregistree dans
+// tournoi_liste_attente, puis rebalancerTournoi() decide qui occupe reellement un
+// slot. La mise d'energie ne se choisit plus ici (voir POST /api/tournois/mise-
+// energie), toujours 0 a l'inscription.
+function inscrireJoueurAuTournoi(userId, player, entree, semaine) {
     // Un joueur blesse est contraint de declarer forfait pour les tournois a venir
     // (regle du PDF) : pas de nouvelle inscription tant que la condition n'est pas
     // revenue a "en_forme" (recuperation via une semaine de repos).
@@ -2997,8 +3064,8 @@ function inscrireJoueurAuTournoi(userId, player, entree, semaine, energieMisee) 
     const dejaInscrit = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaine);
 
     if (dejaInscrit) {
-        const dejaReel = db.prepare('SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(dejaInscrit.id, player.id);
-        if (dejaReel) {
+        const dejaEnListe = db.prepare('SELECT 1 FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ? AND player_id = ?').get(entree.id, semaine, player.id);
+        if (dejaEnListe) {
             return { error: 'Deja inscrit a ce tournoi.' };
         }
         if (dejaInscrit.statut !== 'inscriptions') {
@@ -3007,29 +3074,17 @@ function inscrireJoueurAuTournoi(userId, player, entree, semaine, energieMisee) 
     }
 
     const autreTournoiCetteSemaine = db.prepare(`
-        SELECT tournois.id
-        FROM tournois
-        JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
-        WHERE tournois.semaine = ?
-          AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
-          AND tournois.calendrier_id != ?
+        SELECT 1 FROM tournoi_liste_attente WHERE semaine = ? AND player_id = ? AND calendrier_id != ?
     `).get(semaine, player.id, entree.id);
     if (autreTournoiCetteSemaine) {
         return { error: 'Ce joueur est deja inscrit a un autre tournoi cette semaine-la.' };
     }
 
     // Assure l'existence du pool partage (le cree si personne, coach ou lambda, n'y
-    // est encore jamais entre), puis vole toujours un slot lambda existant — meme
-    // mecanisme que le 1er coach ou le 50e, plus de branche speciale "creation avec
-    // joueur reel deja dedans".
+    // est encore jamais entre) avant d'enregistrer l'inscription.
     const tournoiId = dejaInscrit ? dejaInscrit.id : creerTournoi(entree, semaine);
-    const unLambda = db.prepare("SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 0 AND nom != 'BYE' ORDER BY RANDOM() LIMIT 1").get(tournoiId);
-    if (!unLambda) {
-        return { error: 'Impossible de rejoindre ce tournoi (tableau complet).' };
-    }
-    db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 1, player_id = ?, rival_id = NULL, energie_misee = ? WHERE id = ?').run(
-        player.prenom + ' ' + player.nom, player.nationalite, Math.round(niveauNormal(player, entree.surface)), player.id, mise, unLambda.id
-    );
+    db.prepare('INSERT OR IGNORE INTO tournoi_liste_attente (calendrier_id, semaine, player_id) VALUES (?, ?, ?)').run(entree.id, semaine, player.id);
+    rebalancerTournoi(tournoiId, entree, semaine);
 
     return { tournoiId };
 }
@@ -3131,23 +3186,21 @@ app.post('/api/tournois/desinscription', (req, res) => {
         if (!tournoi) {
             return res.status(404).json({ error: 'Inscription introuvable.' });
         }
-        if (tournoi.statut === 'termine') {
-            return res.status(400).json({ error: 'Ce tournoi est deja termine, impossible de se desinscrire.' });
+        if (tournoi.statut !== 'inscriptions') {
+            return res.status(400).json({ error: 'Le tableau de ce tournoi est deja tire, impossible de se desinscrire.' });
         }
 
-        const ligneReelle = db.prepare('SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoiId, playerId);
-        if (!ligneReelle) {
+        const inscription = db.prepare('SELECT id FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ? AND player_id = ?').get(tournoi.calendrier_id, tournoi.semaine, playerId);
+        if (!inscription) {
             return res.status(400).json({ error: 'Ce joueur n est pas inscrit a ce tournoi.' });
         }
 
-        // On ne supprime plus tout le tournoi (le pool d'entrants reste consultable,
-        // visible depuis l'ouverture des inscriptions) : on remplace juste la ligne du
-        // joueur reel par un nouveau joueur lambda.
+        // Retire l'inscription (confirmee ou en liste d'attente), puis rebalancerTournoi
+        // se charge de tout : si ce joueur occupait un slot dans le tableau, il revient
+        // lambda et un inscrit mieux classe encore en attente prend sa place le cas echeant.
+        db.prepare('DELETE FROM tournoi_liste_attente WHERE id = ?').run(inscription.id);
         const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
-        const lambda = genererJoueurLambda(entree.categorie, entree.circuit === 'WTA');
-        db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 0, player_id = NULL, rival_id = NULL WHERE id = ?').run(
-            lambda.nom, lambda.nationalite, lambda.niveau, ligneReelle.id
-        );
+        rebalancerTournoi(tournoiId, entree, tournoi.semaine);
 
         res.json({ success: true });
     } catch (err) {
@@ -3363,9 +3416,13 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
         const bareme = BAREME_POINTS[entree.bareme] || [];
 
         const instanceRow = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(calendrierId, semaineNum);
+        // Vrai si confirme dans le tableau (tournoi_joueurs, seule source qui survit
+        // au tirage au sort - la liste d'attente est videe a ce moment-la) OU encore en
+        // liste d'attente (tant que le tableau n'a pas ete tire).
+        const estInscrit = (!!instanceRow && !!db.prepare('SELECT 1 FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(instanceRow.id, playerId))
+            || !!db.prepare('SELECT 1 FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ? AND player_id = ?').get(calendrierId, semaineNum, playerId);
 
         let instance = null;
-        let estInscrit = false;
         if (instanceRow) {
             const rangs = calculerRangsLiveGlobal(entree.circuit);
             function rangDe(rivalId, estReel, playerId) {
@@ -3374,13 +3431,55 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
                 return null;
             }
 
-            const joueurs = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? ORDER BY position_tableau').all(instanceRow.id);
+            const joueurs = db.prepare(`
+                SELECT tj.*, p.user_id AS coach_user_id
+                FROM tournoi_joueurs tj
+                LEFT JOIN players p ON p.id = tj.player_id
+                WHERE tj.tournoi_id = ?
+                ORDER BY tj.position_tableau
+            `).all(instanceRow.id);
             joueurs.forEach(function (j) {
                 j.drapeau = drapeau(j.nationalite);
                 j.rang = rangDe(j.rival_id, j.est_reel, j.player_id);
+                j.coachNom = j.est_reel ? nomCoach(j.coach_user_id) : null;
             });
-            instance = Object.assign({}, instanceRow, { joueurs });
-            estInscrit = joueurs.some(function (j) { return j.est_reel && j.player_id === Number(playerId); });
+            // Niveau confidentiel : reste utilise pour le tri (tete de serie puis niveau,
+            // comme avant) mais efface du JSON envoye au client pour tout le monde sauf
+            // le joueur qui consulte - sinon la valeur resterait visible brute dans
+            // l'onglet reseau du navigateur meme si l'affichage la masque.
+            joueurs.sort(function (a, b) {
+                if (a.tete_de_serie && b.tete_de_serie) return a.tete_de_serie - b.tete_de_serie;
+                if (a.tete_de_serie) return -1;
+                if (b.tete_de_serie) return 1;
+                return b.niveau - a.niveau;
+            });
+            joueurs.forEach(function (j) {
+                const estMoi = j.est_reel && j.player_id === Number(playerId);
+                if (!estMoi) j.niveau = null;
+            });
+            // Liste d'attente : inscriptions reelles qui n'ont pas (ou plus) de ligne
+            // confirmee dans tournoi_joueurs - affichees a part (fond rouge cote client),
+            // triees par classement comme la priorite qui determine qui passe devant qui.
+            const idsConfirmes = new Set(joueurs.filter(function (j) { return j.est_reel; }).map(function (j) { return j.player_id; }));
+            const enAttente = db.prepare(`
+                SELECT p.*
+                FROM tournoi_liste_attente tla
+                JOIN players p ON p.id = tla.player_id
+                WHERE tla.calendrier_id = ? AND tla.semaine = ?
+            `).all(calendrierId, semaineNum)
+                .filter(function (w) { return !idsConfirmes.has(w.id); })
+                .map(function (w) {
+                    const estMoi = w.id === Number(playerId);
+                    return {
+                        nom: w.prenom + ' ' + w.nom, nationalite: w.nationalite, drapeau: drapeau(w.nationalite),
+                        coachNom: nomCoach(w.user_id), player_id: w.id, est_reel: 1,
+                        niveau: estMoi ? Math.round(niveauNormal(w, entree.surface)) : null,
+                        rang: rangs.get('joueur:' + w.id) || null
+                    };
+                })
+                .sort(function (a, b) { return (a.rang || Infinity) - (b.rang || Infinity); });
+
+            instance = Object.assign({}, instanceRow, { joueurs, enAttente });
 
             const matchs = db.prepare(`
                 SELECT tournoi_matchs.*,
@@ -3416,12 +3515,7 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
         }
 
         const autreTournoiCetteSemaine = db.prepare(`
-            SELECT tournois.id
-            FROM tournois
-            JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
-            WHERE tournois.semaine = ?
-              AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
-              AND tournois.calendrier_id != ?
+            SELECT 1 FROM tournoi_liste_attente WHERE semaine = ? AND player_id = ? AND calendrier_id != ?
         `).get(semaineNum, playerId, calendrierId);
 
         const peutInscrire = !estInscrit

@@ -319,12 +319,14 @@
                     let actionHtml;
                     if (t.categorie === 'finals') {
                         actionHtml = `<div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Qualification automatique — Top 8 Race</div>`;
+                    } else if (t.inscriptionFermee) {
+                        // Le tableau est tire : plus de desinscription possible, meme pour
+                        // un joueur deja inscrit (priorite sur t.inscrit ci-dessous).
+                        actionHtml = `<div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Tableau déjà tiré</div>`;
                     } else if (t.inscrit) {
                         actionHtml = `<button class="cta cta-secondary tournoi-desinscription-btn" style="padding:8px 14px; font-size:0.75rem;">Se désinscrire</button>`;
                     } else if (peutEncoreInscrire) {
                         actionHtml = `<button class="cta cta-primary tournoi-inscription-btn" style="padding:8px 14px; font-size:0.75rem;">S'inscrire</button>`;
-                    } else if (t.ouvert) {
-                        actionHtml = `<div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Tableau déjà tiré</div>`;
                     } else {
                         actionHtml = `<button class="tournoi-coeur-btn ${t.favori ? 'active' : ''}" title="Programmer l'inscription dès l'ouverture">${t.favori ? '♥' : '♡'}</button>`;
                     }
@@ -335,10 +337,10 @@
                         ${actionHtml}
                     `;
 
-                    if (t.categorie === 'finals') {
+                    if (t.categorie === 'finals' || t.inscriptionFermee) {
                         // Pas de bouton pour les Masters/Finals (qualification automatique
-                        // Top 8 Race) - actionHtml n'a rendu qu'un texte informatif, rien a
-                        // ecouter.
+                        // Top 8 Race) ni pour un tableau deja tire - actionHtml n'a rendu
+                        // qu'un texte informatif, rien a ecouter.
                     } else if (t.inscrit) {
                         carte.querySelector('.tournoi-desinscription-btn').addEventListener('click', function () {
                             desinscrire(player.id, t.tournoiId, this);
@@ -347,7 +349,7 @@
                         carte.querySelector('.tournoi-inscription-btn').addEventListener('click', function () {
                             inscrire(player.id, t.id, t.semaine, this);
                         });
-                    } else if (!t.ouvert) {
+                    } else {
                         carte.querySelector('.tournoi-coeur-btn').addEventListener('click', function () {
                             basculerFavori(player.id, t.id, t.semaine, this);
                         });

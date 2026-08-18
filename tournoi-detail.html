@@ -261,8 +261,12 @@
                 return;
             }
 
+            // Les rivaux et les bots (tous deux la pour completer le tableau s'il manque
+            // de vrais joueurs) restent invisibles ici - seuls les vrais joueurs
+            // confirmes/en attente apparaissent, la liste des inscrits refletant
+            // uniquement l'engagement de vraies personnes.
             const tries = instance.joueurs
-                .filter(function (j) { return j.nom !== 'BYE'; })
+                .filter(function (j) { return j.est_reel; })
                 .sort(function (a, b) {
                     if (a.tete_de_serie && b.tete_de_serie) return a.tete_de_serie - b.tete_de_serie;
                     if (a.tete_de_serie) return -1;
@@ -270,18 +274,38 @@
                     return b.niveau - a.niveau;
                 });
 
+            function carteInscrit(j, enAttente) {
+                const estMoi = j.est_reel && j.player_id === Number(playerId);
+                const nomTxt = flagImg(j.drapeau) + ' ' + formaterNomComplet(j.nom) + (estMoi ? ' (Toi)' : '');
+                const nomAffiche = lienAdversaire(nomTxt, j.est_reel, j.player_id, j.rival_id);
+                // Niveau confidentiel : seul le tien t'est montre, jamais celui des autres
+                // (rivaux compris). Le nom du coach, lui, n'apparait que pour un vrai
+                // joueur (les rivaux n'ont pas de coach).
+                const meta = [];
+                if (estMoi) meta.push('Niveau ' + j.niveau);
+                if (j.coachNom) meta.push('Coach : ' + j.coachNom);
+                if (j.nationalite) meta.push(j.nationalite);
+                if (j.tour_elimine) meta.push(j.tour_elimine);
+                if (enAttente) meta.push('En liste d\'attente — des joueurs mieux classés sont déjà retenus');
+                const classeFond = enAttente ? 'tournoi-card-attente' : 'tournoi-card-highlight';
+                return `<div class="tournoi-card ${classeFond}">
+                    <div class="tournoi-card-name">${j.tete_de_serie ? '[' + j.tete_de_serie + '] ' : ''}${nomAffiche}</div>
+                    <div class="tournoi-card-meta">${meta.join(' · ')}</div>
+                </div>`;
+            }
+
+            const nbConfirmes = tries.length;
+            const placesRestantes = instance.taille_tableau - nbConfirmes;
+            const noteCompletude = placesRestantes > 0
+                ? `<p class="match-hint" style="text-align:left; padding:8px 0;">${placesRestantes} place${placesRestantes > 1 ? 's' : ''} restante${placesRestantes > 1 ? 's' : ''} — complétée${placesRestantes > 1 ? 's' : ''} automatiquement faute d'assez de joueurs humains inscrits.</p>`
+                : '';
+
             panneau.innerHTML = `
                 <div class="tournoi-list">
-                    ${tries.map(function (j) {
-                        const estMoi = j.est_reel && j.player_id === Number(playerId);
-                        const nomTxt = flagImg(j.drapeau) + ' ' + formaterNomComplet(j.nom) + (estMoi ? ' (Toi)' : '');
-                        const nomAffiche = lienAdversaire(nomTxt, j.est_reel, j.player_id, j.rival_id);
-                        return `<div class="tournoi-card${j.est_reel ? ' tournoi-card-highlight' : ''}">
-                            <div class="tournoi-card-name">${j.tete_de_serie ? '[' + j.tete_de_serie + '] ' : ''}${nomAffiche}</div>
-                            <div class="tournoi-card-meta">Niveau ${j.niveau}${j.nationalite ? ' · ' + j.nationalite : ''}${j.tour_elimine ? ' · ' + j.tour_elimine : ''}</div>
-                        </div>`;
-                    }).join('')}
+                    ${tries.map(function (j) { return carteInscrit(j, false); }).join('')}
+                    ${(instance.enAttente || []).map(function (j) { return carteInscrit(j, true); }).join('')}
                 </div>
+                ${noteCompletude}
             `;
         }
 

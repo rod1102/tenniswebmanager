@@ -1398,9 +1398,18 @@ h1 {
 .trophee.trophee-wimbledon { color: #6B3FA0; }
 .trophee.trophee-usopen { color: #3D6FD1; }
 
+/* Onglet "Inscrits" d'une fiche tournoi : fond bleu pour tout le monde (rivaux +
+   vrais joueurs confirmes), fond rouge uniquement pour un vrai joueur inscrit mais
+   pas encore retenu dans le tableau (des mieux classes ont deja pris les slots
+   disponibles). */
 .tournoi-card-highlight {
-    border-color: #D4F000;
-    background: rgba(212, 240, 0, 0.08);
+    border-color: #5FA8E8;
+    background: rgba(95, 168, 232, 0.08);
+}
+
+.tournoi-card-attente {
+    border-color: #E24B4A;
+    background: rgba(226, 75, 74, 0.08);
 }
 
 .tournoi-name-atp { color: #5FA8E8; }

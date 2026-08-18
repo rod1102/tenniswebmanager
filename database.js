@@ -296,6 +296,26 @@ db.exec(`
     )
 `);
 
+// Liste d'attente des inscriptions reelles a un tournoi (2026-08-18, demande
+// explicite) : source de verite unique de "qui s'est inscrit", INDEPENDANTE du
+// tableau tournoi_joueurs qui, lui, reste toujours a taille_tableau lignes exactes.
+// Un vrai joueur peut toujours s'inscrire (plus de rejet "tableau complet") ; a
+// chaque inscription/desinscription, rebalancerTournoi() recalcule qui occupe
+// reellement un slot dans tournoi_joueurs (les mieux classes en priorite, jamais au
+// detriment d'un rival) et qui reste en liste d'attente. Pas de FK, meme convention
+// que tournois/tournoi_joueurs (une migration RENAME future casserait sinon
+// silencieusement ces references).
+db.exec(`
+    CREATE TABLE IF NOT EXISTS tournoi_liste_attente (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        calendrier_id TEXT NOT NULL,
+        semaine INTEGER NOT NULL,
+        player_id INTEGER NOT NULL,
+        date_inscription TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+`);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_tournoi_liste_attente_unique ON tournoi_liste_attente(calendrier_id, semaine, player_id)`);
+
 // Roster de rivaux GLOBAL (partage par tous les coachs, cf. tournois global) : pas
 // de user_id, un seul pool par circuit pour tout le monde.
 db.exec(`
