@@ -122,7 +122,11 @@ app.use(authentifier);
 // TEMPORAIRE - diagnostic du bug "tout le monde recoit Limite IP atteinte", a
 // retirer une fois le probleme de proxy Railway confirme/corrige.
 app.get('/api/_debug/ip', (req, res) => {
-    res.json({ reqIp: req.ip, reqIps: req.ips, xForwardedFor: req.headers['x-forwarded-for'], trustProxyFn: app.get('trust proxy fn') ? 'set' : 'unset' });
+    res.json({
+        reqIp: req.ip, reqIps: req.ips, xForwardedFor: req.headers['x-forwarded-for'],
+        ipCalculee: ipReelle(req),
+        repartitionIpExistantes: db.prepare('SELECT ip_inscription, COUNT(*) AS n FROM users GROUP BY ip_inscription').all()
+    });
 });
 
 const BUDGET_POINTS = 120;
@@ -177,6 +181,18 @@ function conditionSestDegradee(avant, apres) {
 // compte" habituel puisque ca s'applique aussi en dev/local).
 const LIMITE_COMPTES_PAR_IP = 1;
 
+// Railway ajoute son propre maillon devant l'appli (X-Forwarded-For contient au
+// moins 2 adresses : le vrai visiteur, puis un hop interne Railway) - avec "trust
+// proxy: 1", Express renvoyait ce hop interne (identique pour tout le monde) au
+// lieu du vrai visiteur, bloquant TOUTES les inscriptions des le 2e compte jamais
+// cree (bug trouve le 2026-08-17). On lit directement le premier maillon de
+// l'en-tete plutot que de compter les hops avec trust proxy - repli sur req.ip si
+// l'en-tete est absent (dev local, pas de proxy).
+function ipReelle(req) {
+    const xff = req.headers['x-forwarded-for'];
+    return xff ? xff.split(',')[0].trim() : req.ip;
+}
+
 app.post('/api/inscription', (req, res) => {
     try {
         const { email, password, pseudo } = req.body;
@@ -197,7 +213,7 @@ app.post('/api/inscription', (req, res) => {
             return res.status(409).json({ error: 'Un compte existe deja avec cet email.' });
         }
 
-        const ip = req.ip;
+        const ip = ipReelle(req);
         const nbComptesIp = db.prepare('SELECT COUNT(*) AS n FROM users WHERE ip_inscription = ?').get(ip).n;
         if (nbComptesIp >= LIMITE_COMPTES_PAR_IP) {
             return res.status(409).json({ error: 'Limite IP atteinte : un compte a deja ete cree depuis cette connexion (un seul compte par personne).' });
