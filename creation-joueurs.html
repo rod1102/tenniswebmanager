@@ -674,6 +674,19 @@
                 return;
             }
 
+            function nomValide(texte) {
+                return /^\p{L}+([\s'-]\p{L}+)*$/u.test((texte || '').trim());
+            }
+
+            if (!nomValide(document.getElementById('p1-prenom').value) || !nomValide(document.getElementById('p1-nom').value)) {
+                alert('Le prénom et le nom du joueur ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.');
+                return;
+            }
+            if (!nomValide(document.getElementById('p2-prenom').value) || !nomValide(document.getElementById('p2-nom').value)) {
+                alert('Le prénom et le nom de la joueuse ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.');
+                return;
+            }
+
             if (majBudget('p1') !== 0) {
                 alert('Le total des points du joueur doit être exactement de ' + BUDGET + '.');
                 return;

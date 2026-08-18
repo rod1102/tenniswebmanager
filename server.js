@@ -243,6 +243,13 @@ function dispositionsValides(joueur) {
     return total === BUDGET_DISPOSITIONS;
 }
 
+// Lettres (accents compris), espaces, apostrophes et tirets uniquement - meme jeu
+// de caracteres que celui deja suppose par capitaliserPrenom/formaterNom partout
+// ailleurs dans le jeu. Rejette chiffres, caracteres speciaux, chaine vide/blanche.
+function nomValide(texte) {
+    return /^\p{L}+([\s'-]\p{L}+)*$/u.test((texte || '').trim());
+}
+
 function calculerNiveau(joueur) {
     const total = COMPETENCES.reduce(function (somme, cle) { return somme + Number(joueur[cle]); }, 0);
     return Math.round((total / COMPETENCES.length) * 10) / 10;
@@ -262,6 +269,12 @@ app.post('/api/joueurs', (req, res) => {
 
         if (!joueur || !joueuse) {
             return res.status(400).json({ error: 'Il manque les infos d un des deux personnages.' });
+        }
+        if (!nomValide(joueur.prenom) || !nomValide(joueur.nom)) {
+            return res.status(400).json({ error: 'Le prenom et le nom du joueur ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.' });
+        }
+        if (!nomValide(joueuse.prenom) || !nomValide(joueuse.nom)) {
+            return res.status(400).json({ error: 'Le prenom et le nom de la joueuse ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.' });
         }
         if (!competencesValides(joueur)) {
             return res.status(400).json({ error: 'Le total des competences du joueur doit faire exactement ' + BUDGET_POINTS + ' points.' });
