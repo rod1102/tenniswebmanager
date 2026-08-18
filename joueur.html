@@ -587,8 +587,8 @@
                 <div class="stats-header">État du jour</div>
                 ${afficherKine(player.condition)}
                 <div class="bar-row"><span class="bar-label">Forme</span><div class="bar-track"><div class="bar-fill" style="width:${player.forme}%;"></div></div><span class="bar-value">${player.forme}</span></div>
-                <div class="stat-row"><span class="stat-label">Mental courant</span><span class="stat-value">${player.mental_courant}</span></div>
-                <div class="stat-row"><span class="stat-label">Mental max</span><span class="stat-value">${player.mental_max}</span></div>
+                <div class="bar-row"><span class="bar-label" style="width:110px;">Mental courant</span><div class="bar-track" style="background:transparent;"></div><span class="bar-value">${player.mental_courant}</span></div>
+                <div class="bar-row"><span class="bar-label" style="width:110px;">Mental max</span><div class="bar-track" style="background:transparent;"></div><span class="bar-value">${player.mental_max}</span></div>
                 <div class="bar-row"><span class="bar-label">Usure</span><div class="bar-track"><div class="bar-fill usure" style="width:${player.usure}%;"></div></div><span class="bar-value">${player.usure}</span></div>
                 <div class="bar-row"><span class="bar-label">Énergie</span><div class="bar-track"><div class="bar-fill ${classeEnergie(player.points_energie)}" style="width:${Math.min(100, player.points_energie)}%;"></div></div><span class="bar-value">${player.points_energie}</span></div>
                 ${xpLigne}

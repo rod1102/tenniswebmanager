@@ -51,6 +51,13 @@
     </div>
 
     <script>
+        // Le logo (present sur toutes les pages internes) pointe vers index.html - deja
+        // connecte, on ne veut pas atterrir sur la page publique (boutons Connexion/
+        // Creer un compte, aucun menu) qui donne l'impression fausse d'etre deconnecte.
+        if (sessionStorage.getItem('currentUserId')) {
+            window.location.href = 'accueil.html';
+        }
+
         function flagImg(code) {
             if (!code) return '';
             return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
