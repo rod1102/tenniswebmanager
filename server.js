@@ -3002,15 +3002,18 @@ function creerTournoi(entree, semaine, rivauxUtilises) {
 }
 
 // Reequilibre le tableau d'un tournoi encore en inscriptions a partir de
-// tournoi_liste_attente (source de verite unique de "qui s'est inscrit") : les
-// inscrits reels et les rivaux actuellement dans le tableau sont fusionnes et
-// classes par classement Live, meilleur en premier ; les "capacite" premiers
-// occupent le tableau (choix explicite de l'utilisateur, 2026-08-19 - un vrai
-// joueur peut desormais deloger le rival le moins bien classe, plus jamais de bot
-// tant que le roster de rivaux - 200/circuit - n'est pas epuise). Au-dela de la
-// capacite, seuls des vrais joueurs restent en liste d'attente (les rivaux, eux,
-// quittent simplement le tableau sans jamais y "attendre"). Appelee apres CHAQUE
-// inscription/desinscription reelle.
+// tournoi_liste_attente (source de verite unique de "qui s'est inscrit"). Un vrai
+// joueur a TOUJOURS priorite sur un rival (demande explicite de l'utilisateur,
+// 2026-08-19) : les "capacite" premiers inscrits reels (par classement) delogent
+// systematiquement des rivaux, quel que soit le classement de ces derniers - seul
+// le surplus de vrais joueurs au-dela de la capacite totale part en liste d'attente.
+// Les rivaux ne se disputent qu'ENTRE EUX les slots qui restent une fois tous les
+// vrais joueurs places, toujours les mieux classes en priorite. Plus jamais de bot
+// tant que le roster de rivaux (200/circuit) n'est pas epuise. La priorite au vrai
+// joueur ne s'applique qu'ici (qui entre dans le tableau) - une fois dedans, le
+// tirage au sort (tirerAuSort) seede tout le monde par classement sans distinction,
+// un rival mieux classe qu'un vrai joueur reste tete de serie devant lui. Appelee
+// apres CHAQUE inscription/desinscription reelle.
 function rebalancerTournoi(tournoiId, entree, semaine) {
     const rangs = calculerRangsLiveGlobal(entree.circuit);
 
@@ -3020,35 +3023,32 @@ function rebalancerTournoi(tournoiId, entree, semaine) {
         WHERE tla.calendrier_id = ? AND tla.semaine = ?
     `).all(entree.id, semaine).map(function (p) {
         return { type: 'reel', id: p.id, rang: rangs.get('joueur:' + p.id) || Infinity, data: p, niveau: Math.round(niveauNormal(p, entree.surface)) };
-    });
+    }).sort(function (a, b) { return a.rang - b.rang; });
 
     const lignes = db.prepare("SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? AND nom != 'BYE'").all(tournoiId);
     const capacite = lignes.length;
 
-    const rivauxActuels = lignes.filter(function (l) { return l.rival_id !== null; }).map(function (l) {
-        return { type: 'rival', id: l.rival_id, rang: rangs.get('rival:' + l.rival_id) || Infinity };
-    });
+    const retenusReels = inscriptions.slice(0, capacite);
+    const slotsRivaux = capacite - retenusReels.length;
 
-    let retenus = inscriptions.concat(rivauxActuels).sort(function (a, b) { return a.rang - b.rang; }).slice(0, capacite);
+    // Rivaux retenus pour les slots restants : ceux deja dans ce tableau, plus tout
+    // rival du roster non deja utilise par un AUTRE tournoi de la meme semaine -
+    // les mieux classes en priorite.
+    const rivauxActuelsSet = new Set(lignes.filter(function (l) { return l.rival_id !== null; }).map(function (l) { return l.rival_id; }));
+    const utilisesAilleursSemaine = new Set(
+        db.prepare('SELECT DISTINCT rival_id FROM tournoi_joueurs WHERE rival_id IS NOT NULL AND tournoi_id IN (SELECT id FROM tournois WHERE semaine = ? AND id != ?)')
+            .all(semaine, tournoiId).map(function (r) { return r.rival_id; })
+    );
+    const candidatsRivaux = db.prepare('SELECT id FROM classement_joueurs WHERE circuit = ?').all(entree.circuit)
+        .map(function (r) { return r.id; })
+        .filter(function (id) { return rivauxActuelsSet.has(id) || !utilisesAilleursSemaine.has(id); })
+        .sort(function (a, b) { return (rangs.get('rival:' + a) || Infinity) - (rangs.get('rival:' + b) || Infinity); });
 
-    // Complete avec les meilleurs rivaux du roster (200/circuit) si le nombre de
-    // candidats connus est insuffisant (ex : le dernier vrai joueur se desinscrit
-    // sans personne en attente pour prendre sa place).
-    if (retenus.length < capacite) {
-        const idsRivauxRetenus = new Set(retenus.filter(function (c) { return c.type === 'rival'; }).map(function (c) { return c.id; }));
-        const utilisesSemaine = new Set(
-            db.prepare('SELECT DISTINCT rival_id FROM tournoi_joueurs WHERE rival_id IS NOT NULL AND tournoi_id IN (SELECT id FROM tournois WHERE semaine = ?)')
-                .all(semaine).map(function (r) { return r.rival_id; })
-        );
-        const supplement = db.prepare('SELECT id FROM classement_joueurs WHERE circuit = ?').all(entree.circuit)
-            .filter(function (r) { return !idsRivauxRetenus.has(r.id) && !utilisesSemaine.has(r.id); })
-            .sort(function (a, b) { return (rangs.get('rival:' + a.id) || Infinity) - (rangs.get('rival:' + b.id) || Infinity); });
-        for (let i = 0; retenus.length < capacite && i < supplement.length; i++) {
-            retenus.push({ type: 'rival', id: supplement[i].id, rang: rangs.get('rival:' + supplement[i].id) || Infinity });
-        }
-    }
+    const retenus = retenusReels.concat(
+        candidatsRivaux.slice(0, slotsRivaux).map(function (id) { return { type: 'rival', id: id, rang: rangs.get('rival:' + id) || Infinity }; })
+    );
 
-    const idsReelsRetenus = new Set(retenus.filter(function (c) { return c.type === 'reel'; }).map(function (c) { return c.id; }));
+    const idsReelsRetenus = new Set(retenusReels.map(function (c) { return c.id; }));
     const idsRivauxRetenus = new Set(retenus.filter(function (c) { return c.type === 'rival'; }).map(function (c) { return c.id; }));
 
     // Slots dont l'occupant actuel n'est plus retenu.
@@ -6249,6 +6249,24 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
 
     return { nationVainqueur, domicileGagne };
 }
+
+// TEMPORAIRE - inspection en lecture seule de l'etat des tournois S1 en production,
+// pour preparer leur regeneration retroactive (plus de bots). A retirer une fois
+// termine.
+app.get('/api/_debug/etat-s1', (req, res) => {
+    if (!estAdmin(req.userId)) return res.status(403).json({ error: 'Admin uniquement.' });
+    const saison = nombreSaisonAffichee();
+    const tournois = db.prepare("SELECT id, calendrier_id, nom, circuit, semaine, statut, tour_actuel, taille_tableau FROM tournois ORDER BY semaine, circuit").all();
+    const resultats = tournois.map(function (t) {
+        const joueurs = db.prepare("SELECT est_reel, rival_id, player_id, nom FROM tournoi_joueurs WHERE tournoi_id = ? AND nom != 'BYE'").all(t.id);
+        return Object.assign({}, t, {
+            reels: joueurs.filter(function (j) { return j.est_reel; }).map(function (j) { return j.nom; }),
+            rivaux: joueurs.filter(function (j) { return !j.est_reel && j.rival_id; }).length,
+            bots: joueurs.filter(function (j) { return !j.est_reel && !j.rival_id; }).length
+        });
+    });
+    res.json({ saisonAffichee: saison, tournois: resultats });
+});
 
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);

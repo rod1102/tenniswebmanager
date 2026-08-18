@@ -279,11 +279,9 @@
                 const estMoi = j.est_reel && j.player_id === Number(playerId);
                 const nomTxt = flagImg(j.drapeau) + ' ' + formaterNomComplet(j.nom) + (estMoi ? ' (Toi)' : '');
                 const nomAffiche = lienAdversaire(nomTxt, j.est_reel, j.player_id, j.rival_id);
-                // Niveau confidentiel : seul le tien t'est montre, jamais celui des autres
-                // (rivaux compris). Le nom du coach, lui, n'apparait que pour un vrai
-                // joueur (les rivaux n'ont pas de coach).
+                // Niveau totalement confidentiel ici, y compris le tien - le nom du coach,
+                // lui, n'apparait que pour un vrai joueur (les rivaux n'ont pas de coach).
                 const meta = [];
-                if (estMoi) meta.push('Niveau ' + j.niveau);
                 if (j.coachNom) meta.push('Coach : ' + j.coachNom);
                 if (j.nationalite) meta.push(j.nationalite);
                 if (j.tour_elimine) meta.push(j.tour_elimine);
