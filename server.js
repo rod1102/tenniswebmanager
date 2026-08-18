@@ -2144,29 +2144,34 @@ function classementALaSemaine(circuit, cle, semaine) {
 // SEULE EXCEPTION : les Masters de fin de saison (categorie 'finals'), qui court-
 // circuitent cette fonction au profit de genererEntrantsFinals (qualification
 // automatique, pas d'inscription volontaire) - voir creerTournoi.
+// Plus aucun bot dans un tableau (demande explicite de l'utilisateur, 2026-08-19) :
+// le roster de rivaux persistants (200 par circuit) suffit largement a remplir
+// n'importe quel tableau. Les rivaux retenus sont les mieux classes au Live (pas
+// juste le meilleur niveau brut) - coherent avec le tri des tetes de serie dans
+// tirerAuSort, qui utilise le meme classement.
 function genererEntrants(entreeCalendrier, rivauxUtilises) {
     const tailleReelle = entreeCalendrier.taille_tableau;
-    const estFeminin = entreeCalendrier.circuit === 'WTA';
     const utilises = rivauxUtilises || new Set();
     const entrants = [];
 
-    // Contingent de rivaux persistants (le quart du tableau, meme logique que le
-    // nombre de tetes de serie dans tirerAuSort) : ils cumuleront des points pour
-    // le classement (roster global, partage par tous les coachs). Le reste du
-    // tableau reste des lambdas jetables comme avant.
     assurerRoster(entreeCalendrier.circuit);
-    const nbRosterSlots = Math.max(4, Math.round(tailleReelle / 4));
+    const rangs = calculerRangsLiveGlobal(entreeCalendrier.circuit);
     const roster = db.prepare('SELECT * FROM classement_joueurs WHERE circuit = ?').all(entreeCalendrier.circuit);
     const disponibles = roster
         .filter(function (r) { return !utilises.has(r.id); })
-        .sort(function (a, b) { return b.niveau - a.niveau; })
-        .slice(0, nbRosterSlots);
+        .sort(function (a, b) { return (rangs.get('rival:' + a.id) || Infinity) - (rangs.get('rival:' + b.id) || Infinity); })
+        .slice(0, tailleReelle);
 
     disponibles.forEach(function (r) {
         utilises.add(r.id);
         entrants.push({ nom: r.nom, nationalite: r.nationalite, niveau: r.niveau, est_reel: 0, player_id: null, rival_id: r.id });
     });
 
+    // Filet de securite si le roster deduplique (tournois paralleles de la meme
+    // semaine) venait vraiment a manquer - ne devrait jamais arriver avec 200
+    // rivaux par circuit, mais un lambda exceptionnel vaut mieux qu'un tableau
+    // incomplet qui plante.
+    const estFeminin = entreeCalendrier.circuit === 'WTA';
     while (entrants.length < tailleReelle) {
         const lambda = genererJoueurLambda(entreeCalendrier.categorie, estFeminin);
         entrants.push({ nom: lambda.nom, nationalite: lambda.nationalite, niveau: lambda.niveau, est_reel: 0, player_id: null, rival_id: null });
@@ -2218,12 +2223,23 @@ function tirerAuSort(tournoiId, entreeCalendrier) {
     while (taillePuissance2 < tailleReelle) taillePuissance2 *= 2;
     const nbByes = taillePuissance2 - tailleReelle;
 
+    // Tetes de serie basees sur le classement Live (pas le "niveau" brut, qui reste
+    // la force de jeu utilisee pour la simulation des matchs mais dont l'echelle
+    // differe entre rivaux et vrais joueurs) : le mieux classe herite de la tete de
+    // serie la plus favorable, rival ou vrai joueur, sans distinction (demande
+    // explicite de l'utilisateur, 2026-08-19).
+    const rangsSeed = calculerRangsLiveGlobal(entreeCalendrier.circuit);
+    function rangDeEntrant(e) {
+        if (e.rival_id) return rangsSeed.get('rival:' + e.rival_id) || Infinity;
+        if (e.est_reel) return rangsSeed.get('joueur:' + e.player_id) || Infinity;
+        return Infinity;
+    }
     const entrants = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ?').all(tournoiId);
-    const parNiveauDesc = entrants.slice().sort(function (a, b) { return b.niveau - a.niveau; });
+    const parRangAsc = entrants.slice().sort(function (a, b) { return rangDeEntrant(a) - rangDeEntrant(b); });
     const nbTetes = Math.min(entrants.length, Math.max(1, Math.floor(taillePuissance2 / 4)));
 
     const majTeteDeSerie = db.prepare('UPDATE tournoi_joueurs SET tete_de_serie = ? WHERE id = ?');
-    parNiveauDesc.forEach(function (e, i) {
+    parRangAsc.forEach(function (e, i) {
         e.tete_de_serie = i < nbTetes ? i + 1 : null;
         majTeteDeSerie.run(e.tete_de_serie, e.id);
     });
@@ -2243,7 +2259,7 @@ function tirerAuSort(tournoiId, entreeCalendrier) {
 
     const slots = new Array(taillePuissance2).fill(undefined);
     for (let i = 0; i < nbTetes; i++) {
-        slots[positionDeSeed[i + 1]] = parNiveauDesc[i];
+        slots[positionDeSeed[i + 1]] = parRangAsc[i];
     }
 
     // Exemptions (byes) donnees en priorite aux meilleures tetes de serie, placees
@@ -2255,7 +2271,7 @@ function tirerAuSort(tournoiId, entreeCalendrier) {
         slots[positionAdverse] = 'BYE';
     }
 
-    const nonSeedes = melanger(parNiveauDesc.slice(nbTetes));
+    const nonSeedes = melanger(parRangAsc.slice(nbTetes));
     let curseur = 0;
     for (let i = 0; i < slots.length; i++) {
         if (slots[i] === undefined) {
@@ -2987,58 +3003,97 @@ function creerTournoi(entree, semaine, rivauxUtilises) {
 
 // Reequilibre le tableau d'un tournoi encore en inscriptions a partir de
 // tournoi_liste_attente (source de verite unique de "qui s'est inscrit") : les
-// slots non-rivaux (lambdas ou vrais joueurs deja installes) sont attribues aux
-// inscrits reels par ordre de classement Live, meilleur en premier. Les rivaux ne
-// sont JAMAIS delogés par un vrai joueur (choix explicite de l'utilisateur,
-// 2026-08-18) - seuls les vrais joueurs se disputent entre eux les slots lambda ;
-// au-dela de la capacite, ils restent en liste d'attente (pas de ligne dans
-// tournoi_joueurs). Appelee apres CHAQUE inscription/desinscription reelle.
+// inscrits reels et les rivaux actuellement dans le tableau sont fusionnes et
+// classes par classement Live, meilleur en premier ; les "capacite" premiers
+// occupent le tableau (choix explicite de l'utilisateur, 2026-08-19 - un vrai
+// joueur peut desormais deloger le rival le moins bien classe, plus jamais de bot
+// tant que le roster de rivaux - 200/circuit - n'est pas epuise). Au-dela de la
+// capacite, seuls des vrais joueurs restent en liste d'attente (les rivaux, eux,
+// quittent simplement le tableau sans jamais y "attendre"). Appelee apres CHAQUE
+// inscription/desinscription reelle.
 function rebalancerTournoi(tournoiId, entree, semaine) {
+    const rangs = calculerRangsLiveGlobal(entree.circuit);
+
     const inscriptions = db.prepare(`
         SELECT p.* FROM tournoi_liste_attente tla
         JOIN players p ON p.id = tla.player_id
         WHERE tla.calendrier_id = ? AND tla.semaine = ?
-    `).all(entree.id, semaine);
-    if (inscriptions.length === 0) return;
-
-    const rangs = calculerRangsLiveGlobal(entree.circuit);
-    inscriptions.forEach(function (p) { p._rang = rangs.get('joueur:' + p.id) || Infinity; });
-    inscriptions.sort(function (a, b) { return a._rang - b._rang; });
+    `).all(entree.id, semaine).map(function (p) {
+        return { type: 'reel', id: p.id, rang: rangs.get('joueur:' + p.id) || Infinity, data: p, niveau: Math.round(niveauNormal(p, entree.surface)) };
+    });
 
     const lignes = db.prepare("SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? AND nom != 'BYE'").all(tournoiId);
-    const capacite = lignes.filter(function (l) { return l.rival_id === null; }).length;
-    const confirmes = inscriptions.slice(0, capacite);
-    const idsConfirmes = new Set(confirmes.map(function (p) { return p.id; }));
-    const estFeminin = entree.circuit === 'WTA';
+    const capacite = lignes.length;
 
-    // Retire du tableau tout vrai joueur qui ne fait plus partie des confirmes
-    // (bumpe par un mieux classe, ou lui-meme desinscrit) - repli sur un lambda frais.
+    const rivauxActuels = lignes.filter(function (l) { return l.rival_id !== null; }).map(function (l) {
+        return { type: 'rival', id: l.rival_id, rang: rangs.get('rival:' + l.rival_id) || Infinity };
+    });
+
+    let retenus = inscriptions.concat(rivauxActuels).sort(function (a, b) { return a.rang - b.rang; }).slice(0, capacite);
+
+    // Complete avec les meilleurs rivaux du roster (200/circuit) si le nombre de
+    // candidats connus est insuffisant (ex : le dernier vrai joueur se desinscrit
+    // sans personne en attente pour prendre sa place).
+    if (retenus.length < capacite) {
+        const idsRivauxRetenus = new Set(retenus.filter(function (c) { return c.type === 'rival'; }).map(function (c) { return c.id; }));
+        const utilisesSemaine = new Set(
+            db.prepare('SELECT DISTINCT rival_id FROM tournoi_joueurs WHERE rival_id IS NOT NULL AND tournoi_id IN (SELECT id FROM tournois WHERE semaine = ?)')
+                .all(semaine).map(function (r) { return r.rival_id; })
+        );
+        const supplement = db.prepare('SELECT id FROM classement_joueurs WHERE circuit = ?').all(entree.circuit)
+            .filter(function (r) { return !idsRivauxRetenus.has(r.id) && !utilisesSemaine.has(r.id); })
+            .sort(function (a, b) { return (rangs.get('rival:' + a.id) || Infinity) - (rangs.get('rival:' + b.id) || Infinity); });
+        for (let i = 0; retenus.length < capacite && i < supplement.length; i++) {
+            retenus.push({ type: 'rival', id: supplement[i].id, rang: rangs.get('rival:' + supplement[i].id) || Infinity });
+        }
+    }
+
+    const idsReelsRetenus = new Set(retenus.filter(function (c) { return c.type === 'reel'; }).map(function (c) { return c.id; }));
+    const idsRivauxRetenus = new Set(retenus.filter(function (c) { return c.type === 'rival'; }).map(function (c) { return c.id; }));
+
+    // Slots dont l'occupant actuel n'est plus retenu.
+    const slotsLibres = lignes.filter(function (l) {
+        if (l.est_reel) return !idsReelsRetenus.has(l.player_id);
+        if (l.rival_id !== null) return !idsRivauxRetenus.has(l.rival_id);
+        return true; // ancien bot de secours residuel, toujours remplacable
+    });
+
+    // Retenus qui n'ont pas deja la ligne qui leur correspond.
+    const dejaEnPlace = new Set();
     lignes.forEach(function (l) {
-        if (l.est_reel && !idsConfirmes.has(l.player_id)) {
-            const lambda = genererJoueurLambda(entree.categorie, estFeminin);
-            db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 0, player_id = NULL, energie_misee = 0 WHERE id = ?')
-                .run(lambda.nom, lambda.nationalite, lambda.niveau, l.id);
+        if (l.est_reel && idsReelsRetenus.has(l.player_id)) dejaEnPlace.add('reel:' + l.player_id);
+        if (l.rival_id !== null && idsRivauxRetenus.has(l.rival_id)) dejaEnPlace.add('rival:' + l.rival_id);
+    });
+
+    let curseur = 0;
+    retenus.filter(function (c) { return !dejaEnPlace.has(c.type + ':' + c.id); }).forEach(function (c) {
+        const slot = slotsLibres[curseur];
+        curseur++;
+        if (!slot) return; // ne devrait pas arriver, comptes verifies ci-dessus
+        if (c.type === 'reel') {
+            db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 1, player_id = ?, rival_id = NULL, energie_misee = 0 WHERE id = ?')
+                .run(c.data.prenom + ' ' + c.data.nom, c.data.nationalite, c.niveau, c.id, slot.id);
+        } else {
+            const r = db.prepare('SELECT * FROM classement_joueurs WHERE id = ?').get(c.id);
+            db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 0, player_id = NULL, rival_id = ? WHERE id = ?')
+                .run(r.nom, r.nationalite, r.niveau, r.id, slot.id);
         }
     });
 
-    // Installe chaque confirme qui n'a pas encore de ligne dans le tableau.
-    const niveauxConfirmes = [];
-    confirmes.forEach(function (p) {
-        const niveauReel = Math.round(niveauNormal(p, entree.surface));
-        niveauxConfirmes.push(niveauReel);
-        const dejaLa = db.prepare('SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoiId, p.id);
-        if (dejaLa) return;
-        const slotLibre = db.prepare("SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 0 AND rival_id IS NULL ORDER BY RANDOM() LIMIT 1").get(tournoiId);
-        if (!slotLibre) return; // ne devrait pas arriver, capacite deja verifiee ci-dessus
-        db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 1, player_id = ?, rival_id = NULL WHERE id = ?').run(
-            p.prenom + ' ' + p.nom, p.nationalite, niveauReel, p.id, slotLibre.id
-        );
+    // Filet de secours ultime (roster de 200 rivaux/circuit vraiment epuise, ne
+    // devrait jamais arriver en pratique) : bouche les slots encore libres avec un
+    // bot plutot que de laisser une ligne orpheline.
+    const estFeminin = entree.circuit === 'WTA';
+    slotsLibres.slice(curseur).forEach(function (slot) {
+        const lambda = genererJoueurLambda(entree.categorie, estFeminin);
+        db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 0, player_id = NULL, rival_id = NULL, energie_misee = 0 WHERE id = ?')
+            .run(lambda.nom, lambda.nationalite, lambda.niveau, slot.id);
     });
 
-    // Les bots doivent toujours avoir un niveau plus faible que les vrais joueurs
-    // (demande explicite de l'utilisateur, 2026-08-18) : aligne sur le moins bon vrai
-    // joueur actuellement confirme, recalcule a chaque rebalance (jamais les rivaux,
-    // qui gardent leur propre niveau).
+    // Si jamais un bot de secours existe, son niveau reste toujours plus faible que
+    // n'importe quel vrai joueur confirme (demande explicite de l'utilisateur,
+    // 2026-08-18).
+    const niveauxConfirmes = retenus.filter(function (c) { return c.type === 'reel'; }).map(function (c) { return c.niveau; });
     if (niveauxConfirmes.length > 0) {
         const niveauPlancher = Math.min.apply(null, niveauxConfirmes);
         db.prepare("UPDATE tournoi_joueurs SET niveau = ? WHERE tournoi_id = ? AND est_reel = 0 AND rival_id IS NULL AND nom != 'BYE'").run(niveauPlancher, tournoiId);
