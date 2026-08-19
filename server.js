@@ -4048,19 +4048,15 @@ app.get('/api/public/classement', (req, res) => {
     }
 });
 
-// Classement NATION = somme des points (Live) de TOUS les joueurs (reels + rivaux)
-// de cette nationalite sur le(s) circuit(s) demande(s) - PAS le cumul des 4
-// meilleurs (cette derniere logique reste utilisee telle quelle pour le seeding
-// reel de la Coupe Davis/Fed Cup, cf. classementNationsTop4, jamais modifiee ici).
+// Classement NATION public (classements.html) = meme logique que le seeding reel
+// de la Coupe Davis/Fed Cup (cf. classementNationsTop4) : cumul des points Live des
+// 4 meilleurs joueurs de la nation, calcule circuit par circuit puis additionne.
 // circuits = ['ATP'], ['WTA'] ou ['ATP','WTA'] pour la version combinee (onglet Coach).
 function classementNationsSomme(circuits) {
-    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
-    const semaineActuelle = etat.semaine_actuelle;
     const parNation = new Map();
     circuits.forEach(function (circuit) {
-        calculerClassementGlobal(circuit, semaineActuelle - FENETRE_LIVE, semaineActuelle).forEach(function (c) {
-            if (!c.nationalite) return;
-            parNation.set(c.nationalite, (parNation.get(c.nationalite) || 0) + c.points);
+        classementNationsTop4(circuit).forEach(function (points, nation) {
+            parNation.set(nation, (parNation.get(nation) || 0) + points);
         });
     });
     const nations = Array.from(parNation.keys()).sort(function (a, b) { return parNation.get(b) - parNation.get(a); });
@@ -5810,14 +5806,13 @@ function joueursEligiblesNation(circuit, nation) {
     return reels.concat(rivaux);
 }
 
-// Meilleur joueur (reel ou rival) de chaque nation sur le classement Live courant
-// - sert a la fois a selectionner les 16 nations retenues et a les departager/seeder.
 // Classement d'une nation (PDF) : cumul des points Live des 4 meilleurs joueurs
 // (reels ou rivaux) de cette nationalite - utilise pour le seeding du Groupe
 // mondial, le tirage du 1er tour et la selection/le seeding des challengers de
-// barrage. calculerClassementGlobal renvoie deja un classement trie par points
-// decroissants : les 4 premieres occurrences rencontrees pour une nation donnee
-// sont donc bien ses 4 meilleurs joueurs, en un seul passage.
+// barrage, ET repris tel quel par le classement NATION public (classementNationsSomme,
+// classements.html). calculerClassementGlobal renvoie deja un classement trie par
+// points decroissants : les 4 premieres occurrences rencontrees pour une nation
+// donnee sont donc bien ses 4 meilleurs joueurs, en un seul passage.
 function classementNationsTop4(circuit) {
     const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
     const classement = calculerClassementGlobal(circuit, etat.semaine_actuelle - FENETRE_LIVE, etat.semaine_actuelle);
