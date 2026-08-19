@@ -3489,17 +3489,29 @@ app.post('/api/tournois/style', (req, res) => {
         }
 
         if (ligneReelle.style_choisi) {
-            // Resoumission : verrouillee, sauf pour les tournois 2 semaines (7 tours) -
-            // dans ce cas les tours deja joues restent figes, seuls ceux a venir sont
-            // modifiables, sans limite de fenetre temporelle (des le depart).
+            const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
+
             if (labelsAttendus.length !== 7) {
-                return res.status(400).json({ error: 'Les styles de ce tournoi ne peuvent etre choisis qu une seule fois.' });
-            }
-            let stylesActuels = [];
-            try { stylesActuels = JSON.parse(ligneReelle.style_choisi); } catch (e) { stylesActuels = []; }
-            for (let i = 0; i < tournoi.tour_actuel; i++) {
-                if (styles[i] !== stylesActuels[i]) {
-                    return res.status(400).json({ error: 'Impossible de modifier le style d un tour deja joue.' });
+                // Tournois classiques (1 semaine) : librement modifiables tant que la
+                // semaine en cours n'a pas atteint celle du tournoi - des que la semaine
+                // change (executerAvancementSemaine) pour entrer dans celle du tournoi,
+                // c'est verrouille, meme si le premier tour n'a pas encore ete simule.
+                if (semaineActuelle >= tournoi.semaine) {
+                    return res.status(400).json({ error: 'Les styles de ce tournoi ne sont plus modifiables une fois sa semaine commencee.' });
+                }
+            } else {
+                // Tournois 2 semaines (7 tours, GC/M1000 96) : meme principe applique
+                // tour par tour - les tours 0-2 se jouent la semaine tournoi.semaine, les
+                // tours 3-6 la semaine tournoi.semaine + 1 (cf. semaineTour dans
+                // executerAvancementTour). Chaque tour reste modifiable tant que SA
+                // semaine n'a pas commence, verrouille des qu'elle commence.
+                let stylesActuels = [];
+                try { stylesActuels = JSON.parse(ligneReelle.style_choisi); } catch (e) { stylesActuels = []; }
+                for (let i = 0; i < styles.length; i++) {
+                    const semaineTour = i >= 3 ? tournoi.semaine + 1 : tournoi.semaine;
+                    if (semaineActuelle >= semaineTour && styles[i] !== stylesActuels[i]) {
+                        return res.status(400).json({ error: 'Les styles de cette semaine du tournoi ne sont plus modifiables.' });
+                    }
                 }
             }
         }
