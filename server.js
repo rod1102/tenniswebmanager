@@ -1693,6 +1693,75 @@ const STYLE_DELTAS_MANCHE = {
     marathonien: [0, 7, 14, 21, 28]
 };
 
+// ---------- Dispositions (activees le 2026-08-19, bareme fourni par l'utilisateur) ----------
+// Bonus de niveau de jeu par rang investi dans une disposition (index = rang,
+// plafonne a 10 - les gains d'intersaison/Coaching mental peuvent depasser 5 mais
+// aucune valeur au-dela de 10 n'a ete fournie).
+const BONUS_DISPOSITION = [0, 5, 10, 15, 20, 25, 29, 33, 36, 38, 40];
+function bonusDisposition(rang) {
+    return BONUS_DISPOSITION[Math.max(0, Math.min(10, Math.round(rang || 0)))];
+}
+
+// Seules les 2 lignes matchs REEL vs REEL sont ecrites separement (une par coach),
+// donc match_id ET match_id_j2 peuvent chacun pointer vers la ligne matchs d'un
+// joueur donne - LEFT/INNER JOIN sur l'un OU l'autre retrouve la bonne rencontre
+// quel que soit le cote joue par ce joueur. Rivaux et lambdas n'ont pas de ligne
+// matchs (jamais appelant ici, dispositions reservees aux vrais joueurs).
+function confrontationsPasseesDeTournoi(playerId) {
+    return db.prepare(`
+        SELECT matchs.semaine,
+               tj1.player_id AS tj1_player_id, tj1.rival_id AS tj1_rival_id,
+               tj2.player_id AS tj2_player_id, tj2.rival_id AS tj2_rival_id
+        FROM matchs
+        JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id OR tm.match_id_j2 = matchs.id
+        JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
+        JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
+        WHERE matchs.player_id = ? AND matchs.tournoi_id IS NOT NULL
+    `).all(playerId).map(function (m) {
+        const jeSuisTj1 = m.tj1_player_id === Number(playerId);
+        return {
+            semaine: m.semaine,
+            adversairePlayerId: jeSuisTj1 ? m.tj2_player_id : m.tj1_player_id,
+            adversaireRivalId: jeSuisTj1 ? m.tj2_rival_id : m.tj1_rival_id
+        };
+    });
+}
+
+function nbConfrontations(confrontations, adversaireEstReel, adversaireId, limiterASaison, saisonActuelle) {
+    return confrontations.filter(function (c) {
+        if (limiterASaison && phaseAffichee(c.semaine).numeroSaison !== saisonActuelle) return false;
+        return adversaireEstReel ? c.adversairePlayerId === adversaireId : c.adversaireRivalId === adversaireId;
+    }).length;
+}
+
+// Bonus de niveau de jeu apporte par les dispositions d'un vrai joueur pour UN
+// match precis (tournoi individuel uniquement pour l'instant - pas encore branche
+// sur les rencontres de Coupe Davis/Fed Cup). "fixe" s'applique pendant tout le
+// match, "sangFroid" seulement dans le set decisif (le jeu se joue toujours en 2
+// sets gagnants, donc systematiquement le 3e). Plusieurs dispositions peuvent se
+// cumuler (demande explicite de l'utilisateur) : chaque condition remplie ajoute
+// son propre bonus indépendamment des autres.
+function calculerBonusDispositions(player, adversaireEntree, contexte) {
+    const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
+    const saisonActuelle = phaseAffichee(semaineActuelle).numeroSaison;
+    const confrontations = confrontationsPasseesDeTournoi(player.id);
+    const adversaireEstReel = !!adversaireEntree.est_reel;
+    const adversaireId = adversaireEstReel ? adversaireEntree.player_id : adversaireEntree.rival_id;
+
+    const nbSaison = nbConfrontations(confrontations, adversaireEstReel, adversaireId, true, saisonActuelle);
+    const nbCarriere = nbConfrontations(confrontations, adversaireEstReel, adversaireId, false, null);
+
+    let fixe = 0;
+    if (nbSaison >= 2) fixe += bonusDisposition(player.disposition_adversite); // a partir du 3e match cette saison
+    if (!contexte.esTeteDeSerie && contexte.adversaireEsTeteDeSerie) fixe += bonusDisposition(player.disposition_coupeur_de_tetes);
+    if (contexte.estDemiOuFinale) fixe += bonusDisposition(player.disposition_dernier_carre);
+    if (contexte.tourIndex <= 1) fixe += bonusDisposition(player.disposition_premiers_tours); // les 2 premiers tours
+    if (contexte.estIndoor) fixe += bonusDisposition(player.disposition_indoor);
+    if (nbCarriere >= 11) fixe += bonusDisposition(player.disposition_rivalite); // a partir du 12e match en carriere
+
+    return { fixe, sangFroid: bonusDisposition(player.disposition_sang_froid) };
+}
+
 // Calcule les niveaux (normal/mental) d'un cote ajustes pour la manche en cours
 // selon son style de jeu. Utilisee symetriquement pour A et B : un adversaire
 // lambda/rival n'a simplement jamais de style (styleA falsy = aucun ajustement),
@@ -1723,7 +1792,10 @@ function ajusterNiveauxStyle(niveauA_normal, niveauA_mental, styleA, mentalCoura
     return { normal: niveauA_normal, mental: niveauA_mental };
 }
 
-function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_mental, styleA, mentalCourantA, styleB, mentalCourantB) {
+// bonusSangFroidA/B (disposition "Sang froid", optionnels) : n'ajoutent au niveau
+// de jeu que dans le set decisif - le jeu se joue toujours en 2 sets gagnants, donc
+// c'est systematiquement le 3e set (numeroSet === 3), jamais un 5e.
+function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_mental, styleA, mentalCourantA, styleB, mentalCourantB, bonusSangFroidA, bonusSangFroidB) {
     let setsA = 0, setsB = 0;
     const scoreParManche = [];
     let totalJeux = 0;
@@ -1734,10 +1806,12 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
     let ballesBreakSauveesA = 0, ballesBreakSauveesB = 0;
 
     while (setsA < 2 && setsB < 2) {
-        const niveauxA = ajusterNiveauxStyle(niveauA_normal, niveauA_mental, styleA, mentalCourantA, numeroSet);
+        const bonusSetDecisifA = numeroSet === 3 ? (bonusSangFroidA || 0) : 0;
+        const bonusSetDecisifB = numeroSet === 3 ? (bonusSangFroidB || 0) : 0;
+        const niveauxA = ajusterNiveauxStyle(niveauA_normal + bonusSetDecisifA, niveauA_mental, styleA, mentalCourantA, numeroSet);
         const niveauA_normal_manche = niveauxA.normal;
         const niveauA_mental_manche = niveauxA.mental;
-        const niveauxB = ajusterNiveauxStyle(niveauB_normal, niveauB_mental, styleB, mentalCourantB, numeroSet);
+        const niveauxB = ajusterNiveauxStyle(niveauB_normal + bonusSetDecisifB, niveauB_mental, styleB, mentalCourantB, numeroSet);
         const niveauB_normal_manche = niveauxB.normal;
         const niveauB_mental_manche = niveauxB.mental;
         evenements.push({
@@ -2364,9 +2438,9 @@ function miroirScore(score) {
     }).join(', ');
 }
 
-function jouerMatchTournoi(tournoi, label, j1, j2) {
+function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
     if (j1.est_reel && j2.est_reel) {
-        return jouerMatchReelVsReel(tournoi, label, j1, j2);
+        return jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex);
     }
 
     const reel = j1.est_reel ? j1 : j2;
@@ -2393,7 +2467,17 @@ function jouerMatchTournoi(tournoi, label, j1, j2) {
         return { vainqueur: lambda, score: 'Forfait (blessure)', matchId: insertionForfait.lastInsertRowid, matchIdJ2: null };
     }
 
-    const niveauReel_mental = niveauReel_normal + player.mental_courant;
+    const entreeCalendrier = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
+    const bonus = calculerBonusDispositions(player, lambda, {
+        esTeteDeSerie: !!reel.tete_de_serie,
+        adversaireEsTeteDeSerie: !!lambda.tete_de_serie,
+        estDemiOuFinale: label === '1/2 finale' || label === 'Finale',
+        tourIndex: tourIndex,
+        estIndoor: !!(entreeCalendrier && entreeCalendrier.indoor)
+    });
+    const niveauReel_normal_avecDispositions = niveauReel_normal + bonus.fixe;
+
+    const niveauReel_mental = niveauReel_normal_avecDispositions + player.mental_courant;
     const niveauLambda_normal = lambda.niveau;
     const niveauLambda_mental = niveauLambda_normal + 100;
 
@@ -2402,7 +2486,7 @@ function jouerMatchTournoi(tournoi, label, j1, j2) {
     // Le joueur reel est toujours simule cote "A" : les evenements du moteur
     // (simulerMatch/resoudreJeu) etiquettent toujours 'A' comme "Toi", quelle que
     // soit sa position dans le tableau du tournoi.
-    const resultat = simulerMatch(niveauReel_normal, niveauReel_mental, niveauLambda_normal, niveauLambda_mental, styleA, player.mental_courant);
+    const resultat = simulerMatch(niveauReel_normal_avecDispositions, niveauReel_mental, niveauLambda_normal, niveauLambda_mental, styleA, player.mental_courant, null, undefined, bonus.sangFroid, 0);
 
     const { kineIntervenu } = appliquerEtatPostMatch(player, tournoi.surface, styleA, resultat.totalJeux, resultat.pointsImportants);
 
@@ -2415,7 +2499,7 @@ function jouerMatchTournoi(tournoi, label, j1, j2) {
         player.user_id, player.id, tournoi.surface, 'tournoi', tournoi.semaine,
         vainqueurEstReel ? 'joueur' : 'adversaire',
         resultat.score,
-        Math.round(niveauReel_normal), Math.round(niveauLambda_normal),
+        Math.round(niveauReel_normal_avecDispositions), Math.round(niveauLambda_normal),
         JSON.stringify(resultat.evenements),
         tournoi.id, label, kineIntervenu ? 1 : 0, resultat.ballesBreakSauveesA
     );
@@ -2427,7 +2511,7 @@ function jouerMatchTournoi(tournoi, label, j1, j2) {
 // Chaque cote garde ses propres stats/mental/style/forfait (pas de cote "lambda"
 // simplifie) ; DEUX lignes matchs sont ecrites (une par coach, chacune de son propre
 // point de vue), et tournoi_matchs.match_id/match_id_j2 les relient toutes les deux.
-function jouerMatchReelVsReel(tournoi, label, j1, j2) {
+function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
     const player1 = db.prepare('SELECT * FROM players WHERE id = ?').get(j1.player_id);
     const player2 = db.prepare('SELECT * FROM players WHERE id = ?').get(j2.player_id);
 
@@ -2473,15 +2557,24 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2) {
         };
     }
 
-    const niveau1_normal = niveauNormal(player1, tournoi.surface, (j1.energie_misee || 0) * 5);
+    const entreeCalendrier = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
+    const contexteCommun = {
+        estDemiOuFinale: label === '1/2 finale' || label === 'Finale',
+        tourIndex: tourIndex,
+        estIndoor: !!(entreeCalendrier && entreeCalendrier.indoor)
+    };
+    const bonus1 = calculerBonusDispositions(player1, j2, Object.assign({ esTeteDeSerie: !!j1.tete_de_serie, adversaireEsTeteDeSerie: !!j2.tete_de_serie }, contexteCommun));
+    const bonus2 = calculerBonusDispositions(player2, j1, Object.assign({ esTeteDeSerie: !!j2.tete_de_serie, adversaireEsTeteDeSerie: !!j1.tete_de_serie }, contexteCommun));
+
+    const niveau1_normal = niveauNormal(player1, tournoi.surface, (j1.energie_misee || 0) * 5) + bonus1.fixe;
     const niveau1_mental = niveau1_normal + player1.mental_courant;
-    const niveau2_normal = niveauNormal(player2, tournoi.surface, (j2.energie_misee || 0) * 5);
+    const niveau2_normal = niveauNormal(player2, tournoi.surface, (j2.energie_misee || 0) * 5) + bonus2.fixe;
     const niveau2_mental = niveau2_normal + player2.mental_courant;
 
     const style1 = styleDuTourCourant(tournoi.id, player1, j1);
     const style2 = styleDuTourCourant(tournoi.id, player2, j2);
 
-    const resultat = simulerMatch(niveau1_normal, niveau1_mental, niveau2_normal, niveau2_mental, style1, player1.mental_courant, style2, player2.mental_courant);
+    const resultat = simulerMatch(niveau1_normal, niveau1_mental, niveau2_normal, niveau2_mental, style1, player1.mental_courant, style2, player2.mental_courant, bonus1.sangFroid, bonus2.sangFroid);
 
     const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants);
     const etat2 = appliquerEtatPostMatch(player2, tournoi.surface, style2, resultat.totalJeux, resultat.pointsImportants);
@@ -2511,9 +2604,9 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2) {
     return { vainqueur: j1Gagne ? j1 : j2, score: resultat.score, matchId: matchId1, matchIdJ2: matchId2 };
 }
 
-function resoudreMatchAdversaire(tournoi, label, j1, j2) {
+function resoudreMatchAdversaire(tournoi, label, j1, j2, tourIndex) {
     if (j1.est_reel || j2.est_reel) {
-        return jouerMatchTournoi(tournoi, label, j1, j2);
+        return jouerMatchTournoi(tournoi, label, j1, j2, tourIndex);
     }
     // Meme les matchs 100% lambda jouent un vrai match (score plausible) plutot qu'un
     // simple tirage, pour que le tableau et les resultats du tournoi restent lisibles
@@ -2596,7 +2689,7 @@ function simulerUnTour(tournoiId) {
         } else if (j2.nom === 'BYE') {
             vainqueur = j1;
         } else {
-            const resultat = resoudreMatchAdversaire(tournoi, label, j1, j2);
+            const resultat = resoudreMatchAdversaire(tournoi, label, j1, j2, tourIndex);
             vainqueur = resultat.vainqueur;
             score = resultat.score;
             matchId = resultat.matchId;
@@ -6266,6 +6359,28 @@ app.get('/api/_debug/etat-s1', (req, res) => {
         });
     });
     res.json({ saisonAffichee: saison, tournois: resultats });
+});
+
+// TEMPORAIRE - test isole du calcul des bonus de dispositions, sans avoir a
+// fabriquer un tournoi complet. A retirer une fois termine.
+app.get('/api/_debug/test-dispositions/:playerId', (req, res) => {
+    if (!estAdmin(req.userId)) return res.status(403).json({ error: 'Admin uniquement.' });
+    const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.params.playerId);
+    if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+    const adversaireFictif = { est_reel: 0, rival_id: Number(req.query.adversaireRivalId) || 999999, player_id: null, tete_de_serie: req.query.adversaireTeteDeSerie === '1' ? 1 : null };
+    const contexte = {
+        esTeteDeSerie: req.query.esTeteDeSerie === '1',
+        adversaireEsTeteDeSerie: req.query.adversaireTeteDeSerie === '1',
+        estDemiOuFinale: req.query.estDemiOuFinale === '1',
+        tourIndex: Number(req.query.tourIndex) || 0,
+        estIndoor: req.query.estIndoor === '1'
+    };
+    const bonus = calculerBonusDispositions(player, adversaireFictif, contexte);
+    res.json({ dispositions: {
+        adversite: player.disposition_adversite, coupeur_de_tetes: player.disposition_coupeur_de_tetes,
+        dernier_carre: player.disposition_dernier_carre, premiers_tours: player.disposition_premiers_tours,
+        sang_froid: player.disposition_sang_froid, indoor: player.disposition_indoor, rivalite: player.disposition_rivalite
+    }, contexte, bonus });
 });
 
 app.listen(PORT, () => {
