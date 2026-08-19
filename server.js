@@ -1165,6 +1165,7 @@ function appliquerChangementDeSaison(nouvelleSemaine) {
 function executerAvancementSemaine() {
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         const semaine = etat.semaine_actuelle;
+        const nouvelleSemaine = semaine + 1;
 
         // Ancre temps reel de cette semaine ingame : seule source de verite pour
         // calculer a quelle heure reelle chaque tour des tournois qui s'y deroulent
@@ -1174,7 +1175,17 @@ function executerAvancementSemaine() {
 
         const joueurs = db.prepare("SELECT * FROM players WHERE statut = 'valide'").all();
 
+        // phaseActuelle (semaine qu'on quitte) gouverne l'erosion/la decroissance des
+        // automatismes : une attrition pour "avoir vecu" cette semaine-la, jamais
+        // pendant une Pre-saison/Semaine 0 neutre. phaseNouvelleSemaine (semaine qu'on
+        // s'apprete a commencer) gouverne au contraire le credit du planning - un
+        // choix fait pour la semaine X doit devenir disponible des que semaine_actuelle
+        // affiche X, pas une semaine plus tard une fois X deja terminee (bug corrige
+        // ici : avant, le planning lu restait toujours celui de la semaine qu'on
+        // quitte, donc le credit n'apparaissait jamais avant d'avoir déjà avance
+        // au-dela de la semaine concernee).
         const phaseActuelle = phaseDeSemaine(semaine);
+        const phaseNouvelleSemaine = phaseDeSemaine(nouvelleSemaine);
 
         // Tournoi = evenement GLOBAL partage par tous les coachs : un seul pool
         // cree/tire par entree calendaire due cette semaine (tous circuits confondus),
@@ -1204,22 +1215,9 @@ function executerAvancementSemaine() {
         });
 
         joueurs.forEach(function (player) {
-            if (phaseActuelle.type !== 'tournoi') {
-                // Pre-saison / Semaine 0 : aucune resolution de planning, aucune
-                // erosion, aucun automatisme, aucune XP distribuee.
-                db.prepare('DELETE FROM plannings WHERE player_id = ? AND semaine = ?').run(player.id, semaine);
-                db.prepare(`
-                    INSERT OR IGNORE INTO journal_semaine_joueur
-                        (player_id, semaine, action_prevue, tournoi_nom, xp_credite, disposition_a_gagner_ajoutee, disposition_a_deplacer_ajoutee, forme_avant, forme_apres, horodatage)
-                    VALUES (?, ?, NULL, NULL, 0, 0, 0, ?, ?, ?)
-                `).run(player.id, semaine, player.forme, player.forme, new Date().toISOString());
-                return;
-            }
-
-            // Un tournoi peut maintenant deborder sur plusieurs semaines ingame (les
-            // 7-tours) : un joueur reste "engage" tant que son tournoi n'est pas
-            // termine, quelle que soit la semaine ou ce tournoi a ete cree - pas
-            // seulement les tournois dus cette semaine precise comme avant.
+            // Un tournoi peut deborder sur plusieurs semaines ingame (les 7-tours) :
+            // un joueur reste "engage" tant que son tournoi n'est pas termine, quelle
+            // que soit la semaine ou ce tournoi a ete cree.
             const tournoiEngage = db.prepare(`
                 SELECT t.nom, t.surface
                 FROM tournoi_joueurs tj
@@ -1233,7 +1231,11 @@ function executerAvancementSemaine() {
                 player = db.prepare('SELECT * FROM players WHERE id = ?').get(player.id);
             }
 
-            const ordre = joueurEngageCetteSemaine ? null : db.prepare('SELECT action FROM plannings WHERE player_id = ? AND semaine = ?').get(player.id, semaine);
+            // Planning de la semaine qu'on s'apprete a commencer (nouvelleSemaine), pas
+            // celle qu'on quitte - voir commentaire plus haut.
+            const ordre = (!joueurEngageCetteSemaine && phaseNouvelleSemaine.type === 'tournoi')
+                ? db.prepare('SELECT action FROM plannings WHERE player_id = ? AND semaine = ?').get(player.id, nouvelleSemaine)
+                : null;
             const formeAvant = player.forme;
 
             let forme = player.forme;
@@ -1287,21 +1289,26 @@ function executerAvancementSemaine() {
                 surfaceProtegee = tournoiEngage.surface;
             }
 
-            SURFACES.forEach(function (surf) {
-                if (surf !== surfaceProtegee) {
-                    automatismes[surf] = Math.max(0, automatismes[surf] - 5);
+            // Erosion des competences et decroissance des automatismes : uniquement
+            // pour avoir vecu une VRAIE semaine de tournoi (phaseActuelle, la semaine
+            // qu'on quitte) - jamais pendant une Pre-saison/Semaine 0 neutre, meme si
+            // la semaine qu'on s'apprete a commencer (nouvelleSemaine) en est une.
+            let competencesErodees = {};
+            COMPETENCES.forEach(function (cle) { competencesErodees[cle] = player[cle]; });
+            if (phaseActuelle.type === 'tournoi') {
+                SURFACES.forEach(function (surf) {
+                    if (surf !== surfaceProtegee) {
+                        automatismes[surf] = Math.max(0, automatismes[surf] - 5);
+                    }
+                });
+                COMPETENCES.forEach(function (cle) {
+                    const valeur = player[cle];
+                    const perte = Math.floor(valeur * 0.04);
+                    competencesErodees[cle] = Math.max(0, valeur - perte);
+                });
+                if (semaine % 4 === 0) {
+                    pointsEnergie = Math.min(100, pointsEnergie + 5);
                 }
-            });
-
-            const competencesErodees = {};
-            COMPETENCES.forEach(function (cle) {
-                const valeur = player[cle];
-                const perte = Math.floor(valeur * 0.04);
-                competencesErodees[cle] = Math.max(0, valeur - perte);
-            });
-
-            if (semaine % 4 === 0) {
-                pointsEnergie = Math.min(100, pointsEnergie + 5);
             }
 
             const nouveauNiveau = COMPETENCES.reduce(function (s, c) { return s + competencesErodees[c]; }, 0) / COMPETENCES.length;
@@ -1322,12 +1329,14 @@ function executerAvancementSemaine() {
                 player.id
             );
 
+            // Journal de la semaine qui vient d'etre creditee (nouvelleSemaine) - pas
+            // celle qu'on quitte, coherent avec le planning lu plus haut.
             db.prepare(`
                 INSERT OR IGNORE INTO journal_semaine_joueur
                     (player_id, semaine, action_prevue, tournoi_nom, xp_credite, disposition_a_gagner_ajoutee, disposition_a_deplacer_ajoutee, forme_avant, forme_apres, horodatage)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
-                player.id, semaine,
+                player.id, nouvelleSemaine,
                 joueurEngageCetteSemaine ? 'tournoi' : (ordre ? ordre.action : null),
                 tournoiEngage ? tournoiEngage.nom : null,
                 pointsExperience,
@@ -1337,7 +1346,7 @@ function executerAvancementSemaine() {
             );
 
             if (ordre) {
-                db.prepare('DELETE FROM plannings WHERE player_id = ? AND semaine = ?').run(player.id, semaine);
+                db.prepare('DELETE FROM plannings WHERE player_id = ? AND semaine = ?').run(player.id, nouvelleSemaine);
             }
         });
 
@@ -1352,7 +1361,6 @@ function executerAvancementSemaine() {
             liste.forEach(function (j, i) { insertHistorique.run(circuit, j.cle, semaine, i + 1); });
         });
 
-        const nouvelleSemaine = semaine + 1;
         db.prepare('UPDATE jeu_etat SET semaine_actuelle = semaine_actuelle + 1 WHERE id = 1').run();
 
         // Changement de saison : declenche une seule fois, exactement au moment ou
@@ -1360,7 +1368,7 @@ function executerAvancementSemaine() {
         // ensuite dans cette Pre-saison (meme verrou saison_lancee que pour le tout
         // premier lancement) : l'admin doit relancer explicitement la nouvelle saison
         // via /api/admin/lancer-saison, ce n'est plus automatique (demande explicite).
-        if (phaseDeSemaine(nouvelleSemaine).type === 'presaison') {
+        if (phaseNouvelleSemaine.type === 'presaison') {
             appliquerChangementDeSaison(nouvelleSemaine);
             db.prepare('UPDATE jeu_etat SET saison_lancee = 0 WHERE id = 1').run();
         }
@@ -1369,7 +1377,6 @@ function executerAvancementSemaine() {
         // bascule S1->S2 (le vote de S1 vient de se terminer). Les manches elles-memes
         // se simulent rencontre par rencontre via executerAvancementTourCoupe (memes
         // creneaux qu'un tournoi individuel classique), pas ici.
-        const phaseNouvelleSemaine = phaseDeSemaine(nouvelleSemaine);
         if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine === 2) {
             resoudreCapitainesSaison(phaseAffichee(nouvelleSemaine).numeroSaison);
         }
