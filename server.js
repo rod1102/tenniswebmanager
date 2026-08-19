@@ -6361,28 +6361,6 @@ app.get('/api/_debug/etat-s1', (req, res) => {
     res.json({ saisonAffichee: saison, tournois: resultats });
 });
 
-// TEMPORAIRE - test isole du calcul des bonus de dispositions, sans avoir a
-// fabriquer un tournoi complet. A retirer une fois termine.
-app.get('/api/_debug/test-dispositions/:playerId', (req, res) => {
-    if (!estAdmin(req.userId)) return res.status(403).json({ error: 'Admin uniquement.' });
-    const player = db.prepare('SELECT * FROM players WHERE id = ?').get(req.params.playerId);
-    if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
-    const adversaireFictif = { est_reel: 0, rival_id: Number(req.query.adversaireRivalId) || 999999, player_id: null, tete_de_serie: req.query.adversaireTeteDeSerie === '1' ? 1 : null };
-    const contexte = {
-        esTeteDeSerie: req.query.esTeteDeSerie === '1',
-        adversaireEsTeteDeSerie: req.query.adversaireTeteDeSerie === '1',
-        estDemiOuFinale: req.query.estDemiOuFinale === '1',
-        tourIndex: Number(req.query.tourIndex) || 0,
-        estIndoor: req.query.estIndoor === '1'
-    };
-    const bonus = calculerBonusDispositions(player, adversaireFictif, contexte);
-    res.json({ dispositions: {
-        adversite: player.disposition_adversite, coupeur_de_tetes: player.disposition_coupeur_de_tetes,
-        dernier_carre: player.disposition_dernier_carre, premiers_tours: player.disposition_premiers_tours,
-        sang_froid: player.disposition_sang_froid, indoor: player.disposition_indoor, rivalite: player.disposition_rivalite
-    }, contexte, bonus });
-});
-
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
 });
