@@ -6366,7 +6366,7 @@ app.get('/api/_debug/etat-s1', (req, res) => {
 // tant qu'aucun tour n'a encore ete simule (tour_actuel = 0). Ne touche jamais un
 // tournoi deja en cours ou termine (donc jamais les tournois de la Saison 0). A
 // retirer une fois termine.
-app.post('/api/_debug/regenerer-tournois', (req, res) => {
+app.get('/api/_debug/regenerer-tournois', (req, res) => {
     if (!estAdmin(req.userId)) return res.status(403).json({ error: 'Admin uniquement.' });
     const candidats = db.prepare("SELECT * FROM tournois WHERE tour_actuel = 0 AND statut != 'termine'").all();
     const resultats = candidats.map(function (tournoi) {
