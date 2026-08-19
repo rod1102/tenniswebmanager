@@ -6343,6 +6343,52 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
     return { nationVainqueur, domicileGagne };
 }
 
+// TEMPORAIRE - reparation d'urgence : remet les vrais joueurs inscrits AVANT la
+// mise en place de tournoi_liste_attente (jamais backfillee pour eux) dans les
+// tournois d'ou la regeneration retroactive les a delogés a tort. A retirer une
+// fois termine.
+const RECUPERATION_INSCRIPTIONS = [
+    { calendrierId: 'atp-brisbane', semaine: 57, noms: ['Radamel Escobar', 'Tae-Oh Jung'] },
+    { calendrierId: 'wta-brisbane', semaine: 57, noms: ['Nomaqhawe Mbanjwa'] },
+    { calendrierId: 'atp-adelaide', semaine: 58, noms: ['Santino Marella'] },
+    { calendrierId: 'atp-auckland', semaine: 58, noms: ['Tae-Oh Jung'] },
+    { calendrierId: 'wta-adelaide', semaine: 58, noms: ['Ella FRISK', 'Beth Pheonix', 'Seori Bae'] },
+    { calendrierId: 'atp-ao', semaine: 59, noms: ['Magnus ASGAARD', 'Tae-Oh Jung', 'Santino Marella', 'Aldo Barattela'] },
+    { calendrierId: 'wta-ao', semaine: 59, noms: ['Seori Bae', 'Ella FRISK', 'Kate Branddon', 'Beth Pheonix'] }
+];
+app.get('/api/_debug/recuperer-inscriptions', (req, res) => {
+    if (!estAdmin(req.userId)) return res.status(403).json({ error: 'Admin uniquement.' });
+    const resultats = [];
+    RECUPERATION_INSCRIPTIONS.forEach(function (grp) {
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === grp.calendrierId; });
+        if (!entree) { resultats.push({ calendrierId: grp.calendrierId, erreur: 'introuvable dans le calendrier' }); return; }
+        const typeAttendu = entree.circuit === 'ATP' ? 'joueur' : 'joueuse';
+
+        grp.noms.forEach(function (nomComplet) {
+            const i = nomComplet.lastIndexOf(' ');
+            const prenom = nomComplet.slice(0, i);
+            const nom = nomComplet.slice(i + 1);
+            const player = db.prepare('SELECT * FROM players WHERE type = ? AND LOWER(prenom) = LOWER(?) AND LOWER(nom) = LOWER(?)').get(typeAttendu, prenom, nom);
+            if (!player) { resultats.push({ calendrierId: grp.calendrierId, nom: nomComplet, action: 'INTROUVABLE' }); return; }
+            db.prepare('INSERT OR IGNORE INTO tournoi_liste_attente (calendrier_id, semaine, player_id) VALUES (?, ?, ?)').run(grp.calendrierId, grp.semaine, player.id);
+            resultats.push({ calendrierId: grp.calendrierId, nom: nomComplet, playerId: player.id, action: 'reinscrit' });
+        });
+
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(grp.calendrierId, grp.semaine);
+        if (tournoi) {
+            rebalancerTournoi(tournoi.id, entree, grp.semaine);
+            if (tournoi.statut === 'a_venir') {
+                db.prepare("UPDATE tournoi_joueurs SET position_tableau = -1, tete_de_serie = NULL WHERE tournoi_id = ? AND nom != 'BYE'").run(tournoi.id);
+                db.prepare("DELETE FROM tournoi_joueurs WHERE tournoi_id = ? AND nom = 'BYE'").run(tournoi.id);
+                tirerAuSort(tournoi.id, entree);
+            }
+            const reelsFinal = db.prepare("SELECT nom FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 1").all(tournoi.id).map(function (r) { return r.nom; });
+            resultats.push({ calendrierId: grp.calendrierId, semaine: grp.semaine, reelsDansLeTableauMaintenant: reelsFinal });
+        }
+    });
+    res.json({ resultats });
+});
+
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
 });
