@@ -3233,6 +3233,16 @@ app.get('/api/tournois/passes/:playerId', (req, res) => {
         const cycleLongueur = LONGUEUR_SAISON;
         const phaseActuelle = phaseDeSemaine(etat.semaine_actuelle);
 
+        // Reellement termines uniquement (statut de la ligne tournois elle-meme, pas
+        // seulement "la semaine du calendrier est atteinte") - un tournoi de la
+        // semaine en cours, pas encore joue ou encore en cours, ne doit jamais
+        // apparaitre ici tant que son dernier tour n'est pas simule.
+        const tournoisTermines = new Set(
+            db.prepare("SELECT calendrier_id, semaine FROM tournois WHERE circuit = ? AND statut = 'termine' AND semaine BETWEEN ? AND ?")
+                .all(circuit, etat.semaine_actuelle - cycleLongueur, etat.semaine_actuelle)
+                .map(function (t) { return t.calendrier_id + '-' + t.semaine; })
+        );
+
         // Uniquement le passage en cours dans le cycle (saison en cours) : les tournois
         // d'un cycle precedent ne sont pas remontes ici pour l'instant. Pendant la
         // Pre-saison/Semaine 0, la saison en cours n'a encore rien joue.
@@ -3243,6 +3253,7 @@ app.get('/api/tournois/passes/:playerId', (req, res) => {
                     const semaine = etat.semaine_actuelle - (phaseActuelle.positionSemaine - t.semaine_debut);
                     return Object.assign({}, t, { semaine, positionSemaine: t.semaine_debut });
                 })
+                .filter(function (t) { return tournoisTermines.has(t.id + '-' + t.semaine); })
             : [];
 
         // Mes inscriptions reelles (le tournoi lui-meme est partage, l'appartenance vit
