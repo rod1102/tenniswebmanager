@@ -1488,6 +1488,49 @@ app.post('/api/admin/lancer-saison', (req, res) => {
     }
 });
 
+// Route temporaire (2026-08-20) : bascule LONGUEUR_SAISON de 54 a 50 semaines
+// (52->48 semaines de tournois) casse l'alignement de tout ce qui a deja ete cree
+// sous l'ancien calcul - remise a zero complete de la partie en cours pour
+// redemarrer une saison propre sous le nouveau calcul. Comptes et personnages
+// (competences, dispositions placees) conserves ; tout ce qui depend du cycle
+// hebdomadaire/saisonnier est remis a l'etat "sortie de creation".
+app.post('/api/admin/reset-saison-48-semaines', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const reinitialiser = db.transaction(function () {
+            [
+                'tournoi_matchs', 'tournoi_joueurs', 'tournois', 'matchs', 'classement_historique',
+                'plannings', 'journal_semaine_joueur', 'semaines_reelles',
+                'coupe_rubbers', 'coupe_composition', 'coupe_styles', 'coupe_equipes',
+                'coupe_capitaines', 'coupe_candidatures', 'coupe_votes', 'coupe_groupe_mondial'
+            ].forEach(function (table) {
+                db.prepare('DELETE FROM ' + table).run();
+            });
+
+            db.prepare(`
+                UPDATE players SET
+                    usure = 0, points_energie = 0, points_experience = 0,
+                    surface_dur_automatismes = 0, surface_terre_automatismes = 0, surface_herbe_automatismes = 0,
+                    mental_max = 100, mental_courant = 100, forme = 100,
+                    points_dispositions_a_gagner = 0, points_dispositions_a_retirer = 0,
+                    points_dispositions_a_deplacer = 0, points_competences_a_repartir = 0,
+                    cap_service = 0, cap_retour = 0, cap_coup_droit_revers = 0, cap_effet = 0,
+                    cap_volee = 0, cap_deplacement = 0, cap_puissance = 0, cap_resistance = 0
+                WHERE statut = 'valide'
+            `).run();
+
+            db.prepare('UPDATE jeu_etat SET semaine_actuelle = 1, saison_offset = 0, saison_lancee = 0 WHERE id = 1').run();
+        });
+        reinitialiser();
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Avancement automatique : fidele au PDF ("chaque semaine reelle equivaut a deux
 // semaines ingame"), rythme fixe a lundi et jeudi 8h00 heure locale.
 const JOURS_ECHEANCE_AUTO = [1, 4]; // lundi, jeudi (Date.getDay())

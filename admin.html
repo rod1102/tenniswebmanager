@@ -46,6 +46,10 @@
                     <button id="avancer-btn" class="cta cta-primary" style="margin-top:12px;">Faire avancer la semaine</button>
                     <button id="avancer-tour-btn" class="cta cta-secondary" style="margin-top:12px;">Avancer un tour</button>
                 </div>
+                <div style="margin-top:24px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.1);">
+                    <button id="reset-saison-48-btn" class="cta" style="background:#B00020; color:#fff;">Réinitialiser la partie (passage à 48 semaines)</button>
+                    <p class="match-hint" style="max-width:480px; margin:8px auto 0;">Action temporaire, à utiliser une seule fois : efface tous les tournois/classements/Coupe Davis en cours et redémarre une saison propre à la semaine 1. Les comptes et personnages (compétences, dispositions) sont conservés.</p>
+                </div>
             </div>
 
             <h1 class="dashboard-title" style="font-size:1.8rem;">Inscriptions en attente</h1>
@@ -268,6 +272,26 @@
                 return;
             }
             alert('Saison lancée — l\'avancement automatique reprend.');
+            chargerSemaine();
+        });
+
+        document.getElementById('reset-saison-48-btn').addEventListener('click', async function () {
+            const c1 = confirm('Ceci efface DEFINITIVEMENT tous les tournois, classements et rencontres de Coupe Davis/Fed Cup en cours, et remet la partie a la semaine 1 (Pre-saison). Les comptes et personnages sont conserves. Continuer ?');
+            if (!c1) return;
+            const c2 = confirm('Derniere confirmation : cette action est irreversible. Vraiment reinitialiser la partie ?');
+            if (!c2) return;
+
+            const response = await fetch('/api/admin/reset-saison-48-semaines', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error);
+                return;
+            }
+            alert('Partie reinitialisee. Nouvelle saison a 48 semaines, semaine 1 (Pre-saison).');
             chargerSemaine();
         });
 

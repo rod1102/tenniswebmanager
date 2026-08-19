@@ -311,11 +311,11 @@ function genererJoueurLambda(categorie, estFeminin) {
     };
 }
 
-const LONGUEUR_SAISON = 54; // 1 Pre-saison + 1 Semaine 0 + 52 semaines de tournois
+const LONGUEUR_SAISON = 50; // 1 Pre-saison + 1 Semaine 0 + 48 semaines de tournois
 
 // Interprete un semaine_actuelle absolu (sans borne, incremente indefiniment) en
 // phase de saison : presaison/s0 (aucun tournoi, aucune XP) ou tournoi (avec la
-// position 1-52 a chercher dans CALENDRIER_TOURNOIS).
+// position 1-48 a chercher dans CALENDRIER_TOURNOIS).
 function phaseDeSemaine(semaine) {
     const positionSaison = ((semaine - 1) % LONGUEUR_SAISON) + 1;
     const numeroSaison = Math.floor((semaine - 1) / LONGUEUR_SAISON) + 1;
