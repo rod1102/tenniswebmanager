@@ -535,6 +535,17 @@ db.exec(`
     )
 `);
 
+// Marque les evenements globaux (declenches a l'issue d'un tournoi precis, cf.
+// PDF) deja appliques cette saison, pour ne jamais les rejouer deux fois quand
+// le tournoi ATP et le tournoi WTA du meme evenement se terminent separement.
+db.exec(`
+    CREATE TABLE IF NOT EXISTS evenements_globaux (
+        evenement TEXT NOT NULL,
+        semaine INTEGER NOT NULL,
+        PRIMARY KEY (evenement, semaine)
+    )
+`);
+
 const migrations = [
     "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'coach'",
     "ALTER TABLE players ADD COLUMN statut TEXT DEFAULT 'en_attente'",
@@ -607,5 +618,13 @@ migrations.forEach(function (sql) {
         // Colonne deja existante : rien a faire
     }
 });
+
+// Nettoyage : avant le correctif du refus admin, un personnage refuse restait
+// fige sur statut='refuse' sans jamais etre supprime, empechant le coach de
+// recreer ses personnages. Desormais /api/admin/decision supprime directement
+// la ligne au lieu de la marquer 'refuse', donc plus aucune ligne ne devrait
+// jamais reprendre ce statut - cette purge ne rattrape que les refus deja
+// enregistres avant ce correctif. Sans effet (0 ligne) une fois la base a jour.
+db.prepare("DELETE FROM players WHERE statut = 'refuse'").run();
 
 module.exports = db;

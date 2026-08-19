@@ -997,6 +997,23 @@ h1 {
     text-align: left;
 }
 
+.regle-liste {
+    color: #C4CDD6;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin: 0 0 16px;
+    padding-left: 20px;
+    text-align: left;
+}
+
+.regle-liste li {
+    margin-bottom: 6px;
+}
+
+.regle-liste li::marker {
+    color: #D4F000;
+}
+
 .regle-table-wrap {
     overflow-x: auto;
     margin-bottom: 16px;

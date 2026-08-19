@@ -1113,12 +1113,14 @@ function executerAvancementSemaine() {
             // 7-tours) : un joueur reste "engage" tant que son tournoi n'est pas
             // termine, quelle que soit la semaine ou ce tournoi a ete cree - pas
             // seulement les tournois dus cette semaine precise comme avant.
-            const joueurEngageCetteSemaine = !!db.prepare(`
-                SELECT 1
+            const tournoiEngage = db.prepare(`
+                SELECT t.nom, t.surface
                 FROM tournoi_joueurs tj
                 JOIN tournois t ON t.id = tj.tournoi_id
                 WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut != 'termine'
+                LIMIT 1
             `).get(player.id);
+            const joueurEngageCetteSemaine = !!tournoiEngage;
 
             if (joueurEngageCetteSemaine) {
                 player = db.prepare('SELECT * FROM players WHERE id = ?').get(player.id);
@@ -1168,6 +1170,14 @@ function executerAvancementSemaine() {
                 }
             }
 
+            // Un joueur engage en tournoi cette semaine protege aussi l'automatisme de
+            // la surface jouee (pas seulement une semaine d'entrainement de surface
+            // dediee) - regle exacte du PDF : exclusion de "la surface ou le joueur a
+            // joue durant la semaine en simple".
+            if (joueurEngageCetteSemaine && tournoiEngage.surface && SURFACES.includes(tournoiEngage.surface)) {
+                surfaceProtegee = tournoiEngage.surface;
+            }
+
             SURFACES.forEach(function (surf) {
                 if (surf !== surfaceProtegee) {
                     automatismes[surf] = Math.max(0, automatismes[surf] - 5);
@@ -1203,14 +1213,6 @@ function executerAvancementSemaine() {
                 player.id
             );
 
-            const tournoiEnCours = joueurEngageCetteSemaine ? db.prepare(`
-                SELECT t.nom
-                FROM tournoi_joueurs tj
-                JOIN tournois t ON t.id = tj.tournoi_id
-                WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut != 'termine'
-                LIMIT 1
-            `).get(player.id) : null;
-
             db.prepare(`
                 INSERT OR IGNORE INTO journal_semaine_joueur
                     (player_id, semaine, action_prevue, tournoi_nom, xp_credite, disposition_a_gagner_ajoutee, disposition_a_deplacer_ajoutee, forme_avant, forme_apres, horodatage)
@@ -1218,7 +1220,7 @@ function executerAvancementSemaine() {
             `).run(
                 player.id, semaine,
                 joueurEngageCetteSemaine ? 'tournoi' : (ordre ? ordre.action : null),
-                tournoiEnCours ? tournoiEnCours.nom : null,
+                tournoiEngage ? tournoiEngage.nom : null,
                 pointsExperience,
                 ordre && ordre.action === 'coaching_mental' ? 1 : 0,
                 ordre && ordre.action === 'coaching_mental' ? 1 : 0,
@@ -2400,18 +2402,36 @@ function styleDuTourCourant(tournoiId, player, entrant) {
     return stylesChoisis[dejaJoues] || 'aucun';
 }
 
+// Perte du mental courant a l'issue d'un match, selon la categorie du tournoi et le
+// tour atteint (bareme exact du PDF - 1000 et finals partagent le meme bareme).
+const PERTE_MENTAL_COURANT = {
+    slam: { premiers: 1.5, quarts: 2.5, demies: 4, finale: 6 },
+    1000: { premiers: 1, quarts: 1.5, demies: 2, finale: 3 },
+    finals: { premiers: 1, quarts: 1.5, demies: 2, finale: 3 },
+    500: { premiers: 0.5, quarts: 1, demies: 1.5, finale: 2 },
+    250: { premiers: 0.5, quarts: 1, demies: 1, finale: 1.5 }
+};
+
+function perteMentalCourant(categorie, label) {
+    const bareme = PERTE_MENTAL_COURANT[categorie] || PERTE_MENTAL_COURANT[250];
+    if (label === 'Finale') return bareme.finale;
+    if (label === '1/2 finale' || label === 'Demi-finale') return bareme.demies;
+    if (label === '1/4 finale') return bareme.quarts;
+    return bareme.premiers;
+}
+
 // Consequences post-match sur un joueur reel (forme/usure/mental/automatisme/
 // condition) selon SON PROPRE style. Taux de perte de forme (Prudence 0.08 / En
 // Avant 0.12 / defaut 0.10), de gain de mental max (Mental d'acier 0.15 / defaut
 // 0.1) et de gain d'automatisme (Reperage 6 / defaut 3) cf. tournoi_joueurs.style_choisi.
-function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants) {
+function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants, categorie, label) {
     const tauxPerteForme = style === 'prudence' ? 0.08 : (style === 'en_avant' ? 0.12 : 0.10);
     const tauxGainMentalMax = style === 'mental_acier' ? 0.15 : 0.1;
     const gainAutomatisme = style === 'reperage' ? 6 : 3;
     const nouvelleForme = Math.max(0, player.forme - totalJeux * tauxPerteForme);
     const nouvelleUsure = player.usure + 1;
     const nouveauMentalMax = Math.round((player.mental_max + pointsImportants * tauxGainMentalMax) * 10) / 10;
-    const nouveauMentalCourant = Math.max(0, Math.round((player.mental_courant - 0.5) * 10) / 10);
+    const nouveauMentalCourant = Math.max(0, Math.round((player.mental_courant - perteMentalCourant(categorie, label)) * 10) / 10);
     const cleAutomatisme = 'surface_' + surface + '_automatismes';
     const nouvelAutomatisme = Math.min(30, player[cleAutomatisme] + gainAutomatisme);
     const nouvelleCondition = degraderCondition(player.condition, player.forme, player.points_energie, totalJeux);
@@ -2500,7 +2520,7 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
     // soit sa position dans le tableau du tournoi.
     const resultat = simulerMatch(niveauReel_normal_avecDispositions, niveauReel_mental, niveauLambda_normal, niveauLambda_mental, styleA, player.mental_courant, null, undefined, bonus.sangFroid, 0);
 
-    const { kineIntervenu } = appliquerEtatPostMatch(player, tournoi.surface, styleA, resultat.totalJeux, resultat.pointsImportants);
+    const { kineIntervenu } = appliquerEtatPostMatch(player, tournoi.surface, styleA, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label);
 
     const vainqueurEstReel = resultat.vainqueur === 'A';
 
@@ -2588,8 +2608,8 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
 
     const resultat = simulerMatch(niveau1_normal, niveau1_mental, niveau2_normal, niveau2_mental, style1, player1.mental_courant, style2, player2.mental_courant, bonus1.sangFroid, bonus2.sangFroid);
 
-    const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants);
-    const etat2 = appliquerEtatPostMatch(player2, tournoi.surface, style2, resultat.totalJeux, resultat.pointsImportants);
+    const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label);
+    const etat2 = appliquerEtatPostMatch(player2, tournoi.surface, style2, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label);
 
     const j1Gagne = resultat.vainqueur === 'A';
 
@@ -2672,6 +2692,40 @@ function deduireEnergieFinTournoi(entrant) {
     db.prepare('UPDATE players SET points_energie = MAX(0, points_energie - ?) WHERE id = ?').run(cout, entrant.player_id);
 }
 
+// A l'issue de Miami, Wimbledon et l'US Open (ATP et WTA comptent comme le meme
+// evenement), le mental max de TOUS les joueurs reels valides perd les 2/3 de ce
+// qui depasse 100 (PDF, pour eviter une inflation indefinie). evenements_globaux
+// dedoublonne : les deux tournois du meme evenement/de la meme semaine ne
+// declenchent la reduction qu'une seule fois.
+const EVENEMENTS_REDUCTION_MENTAL = {
+    'atp-miami': 'miami', 'wta-miami': 'miami',
+    'atp-wimbledon': 'wimbledon', 'wta-wimbledon': 'wimbledon',
+    'atp-us-open': 'us_open', 'wta-us-open': 'us_open'
+};
+
+function appliquerReductionMentalSiEvenement(tournoiId) {
+    const tournoi = db.prepare('SELECT calendrier_id, semaine FROM tournois WHERE id = ?').get(tournoiId);
+    if (!tournoi) return;
+    const evenement = EVENEMENTS_REDUCTION_MENTAL[tournoi.calendrier_id];
+    if (!evenement) return;
+
+    try {
+        db.prepare('INSERT INTO evenements_globaux (evenement, semaine) VALUES (?, ?)').run(evenement, tournoi.semaine);
+    } catch (e) {
+        return; // deja applique pour cet evenement/cette semaine (contrainte PRIMARY KEY)
+    }
+
+    const joueurs = db.prepare("SELECT id, mental_max, mental_courant FROM players WHERE statut = 'valide'").all();
+    const maj = db.prepare('UPDATE players SET mental_max = ?, mental_courant = ? WHERE id = ?');
+    joueurs.forEach(function (j) {
+        if (j.mental_max <= 100) return;
+        const exces = j.mental_max - 100;
+        const nouveauMax = Math.round((j.mental_max - exces * (2 / 3)) * 10) / 10;
+        const nouveauCourant = Math.min(j.mental_courant, nouveauMax);
+        maj.run(nouveauMax, nouveauCourant, j.id);
+    });
+}
+
 // Simule UN SEUL tour d'un tournoi a elimination directe (le prochain non joue,
 // deduit de tournois.tour_actuel), au lieu du tournoi entier d'un coup - appelee par
 // executerAvancementTour au moment ou son creneau horaire est atteint (voir section
@@ -2741,6 +2795,7 @@ function simulerUnTour(tournoiId) {
     if (estDernierTour) {
         db.prepare("UPDATE tournois SET statut = 'termine' WHERE id = ?").run(tournoiId);
         calculerPointsPronostics(tournoiId);
+        appliquerReductionMentalSiEvenement(tournoiId);
     }
 }
 
@@ -2861,6 +2916,7 @@ function simulerUnTourPoules(tournoiId) {
     if (tourIndex === 4) {
         db.prepare("UPDATE tournois SET statut = 'termine' WHERE id = ?").run(tournoiId);
         calculerPointsPronostics(tournoiId);
+        appliquerReductionMentalSiEvenement(tournoiId);
     }
 }
 
