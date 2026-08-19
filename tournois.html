@@ -143,19 +143,17 @@
         }
 
         async function chargerTournoisSemaine(player, circuitAffiche) {
-            const response = await fetch('/api/tournois/mes/' + userId);
+            const response = await fetch('/api/tournois/cette-semaine/' + circuitAffiche + '?userId=' + userId);
             const data = await response.json();
             const liste = document.getElementById('semaine-tournois-list');
             liste.innerHTML = '';
 
             if (!response.ok) {
-                liste.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger tes tournois.') + '</div>';
+                liste.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger les tournois de la semaine.') + '</div>';
                 return;
             }
 
-            const tournoisSemaine = data.tournois.filter(function (t) {
-                return t.circuit === circuitAffiche && t.semaine === semaineActuelleCourante;
-            });
+            const tournoisSemaine = data.tournois;
 
             if (tournoisSemaine.length === 0) {
                 liste.innerHTML = '<div class="match-hint">Aucun tournoi ' + circuitAffiche + ' cette semaine.</div>';
@@ -173,7 +171,8 @@
                         </div>
                         <div class="tournoi-status-badge tournoi-status-${t.statut}">${traduireStatutTournoi(t.statut)}</div>
                     </div>
-                    ${t.statut === 'termine' ? `<div class="tournoi-resultat">Éliminé(e) : ${t.tour_elimine_joueur || '-'} · ${t.points_gagnes_joueur || 0} points</div>` : ''}
+                    ${t.statut === 'termine' && t.participe ? `<div class="tournoi-resultat">Éliminé(e) : ${t.tour_elimine_joueur || '-'} · ${t.points_gagnes_joueur || 0} points</div>` : ''}
+                    ${!t.participe ? `<div class="tournoi-card-meta">Tu n'es pas inscrit(e) à ce tournoi.</div>` : ''}
                 `;
                 liste.appendChild(carte);
             });

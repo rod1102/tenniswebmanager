@@ -3219,6 +3219,40 @@ app.get('/api/tournois/mes/:userId', (req, res) => {
     }
 });
 
+// TOUS les tournois de la semaine en cours pour un circuit (inscrit ou non) -
+// contrairement a /api/tournois/mes, qui ne remonte que les tournois ou l'appelant
+// a une inscription reelle. "participe"/tour_elimine_joueur/points_gagnes_joueur
+// restent alimentes via une jointure sur mes propres joueurs quand j'y suis
+// inscrit, pour garder le meme affichage de resultat cote frontend.
+app.get('/api/tournois/cette-semaine/:circuit', (req, res) => {
+    try {
+        const circuit = req.params.circuit === 'WTA' ? 'WTA' : 'ATP';
+        const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+
+        const tournois = db.prepare(`
+            SELECT tournois.*,
+                   (moi.id IS NOT NULL) AS participe,
+                   moi.tour_elimine AS tour_elimine_joueur, moi.points_gagnes AS points_gagnes_joueur,
+                   vainqueur_j.nom AS nom_vainqueur
+            FROM tournois
+            LEFT JOIN tournoi_joueurs AS moi
+                ON moi.tournoi_id = tournois.id AND moi.est_reel = 1
+                AND moi.player_id IN (SELECT id FROM players WHERE user_id = ? AND type = ?)
+            LEFT JOIN tournoi_joueurs AS vainqueur_j
+                ON vainqueur_j.tournoi_id = tournois.id AND vainqueur_j.tour_elimine = 'Vainqueur'
+            WHERE tournois.circuit = ? AND tournois.semaine = ?
+            ORDER BY tournois.id
+        `).all(req.userId, type, circuit, etat.semaine_actuelle);
+
+        tournois.forEach(function (t) { t.positionSemaine = positionSemaineAffichee(t.semaine); });
+        res.json({ success: true, tournois });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/tournois/passes/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
