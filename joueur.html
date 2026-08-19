@@ -143,6 +143,13 @@
             return `<div class="bar-row"><span class="bar-label">${label}</span><div class="bar-track"><div class="bar-fill ${classeCompetence(valeur)}" style="width:${Math.min(100, valeur)}%;"></div></div><span class="bar-value">${valeur}</span></div>`;
         }
 
+        // Meme police que les competences (bar-row), mais sans barre de progression
+        // visible : une disposition n'a pas de plafond fixe (les gains d'intersaison
+        // peuvent depasser 5), donc pas de largeur en % qui aurait un sens.
+        function ligneDisposition(label, valeur) {
+            return `<div class="bar-row"><span class="bar-label" style="width:140px;">${label}</span><div class="bar-track" style="background:transparent;"></div><span class="bar-value">${valeur}</span></div>`;
+        }
+
         function libellePhase(phase) {
             if (phase.type === 'presaison') return 'Pré-saison (Saison ' + phase.numeroSaison + ')';
             if (phase.type === 's0') return 'Semaine 0 (Saison ' + phase.numeroSaison + ')';
@@ -604,13 +611,13 @@
                 ${ligneCompetence('Résistance', player.resistance)}
 
                 <div class="stats-header">Dispositions</div>
-                <div class="stat-row"><span class="stat-label">Adversité</span><span class="stat-value">${player.disposition_adversite}</span></div>
-                <div class="stat-row"><span class="stat-label">Coupeur de têtes</span><span class="stat-value">${player.disposition_coupeur_de_tetes}</span></div>
-                <div class="stat-row"><span class="stat-label">Dernier carré</span><span class="stat-value">${player.disposition_dernier_carre}</span></div>
-                <div class="stat-row"><span class="stat-label">Premiers tours</span><span class="stat-value">${player.disposition_premiers_tours}</span></div>
-                <div class="stat-row"><span class="stat-label">Sang froid</span><span class="stat-value">${player.disposition_sang_froid}</span></div>
-                <div class="stat-row"><span class="stat-label">Indoor</span><span class="stat-value">${player.disposition_indoor}</span></div>
-                <div class="stat-row"><span class="stat-label">Rivalité</span><span class="stat-value">${player.disposition_rivalite}</span></div>
+                ${ligneDisposition('Adversité', player.disposition_adversite)}
+                ${ligneDisposition('Coupeur de têtes', player.disposition_coupeur_de_tetes)}
+                ${ligneDisposition('Dernier carré', player.disposition_dernier_carre)}
+                ${ligneDisposition('Premiers tours', player.disposition_premiers_tours)}
+                ${ligneDisposition('Sang froid', player.disposition_sang_froid)}
+                ${ligneDisposition('Indoor', player.disposition_indoor)}
+                ${ligneDisposition('Rivalité', player.disposition_rivalite)}
 
                 <div class="stats-header">Spécialisation par surface</div>
                 <div class="surface-grid">
