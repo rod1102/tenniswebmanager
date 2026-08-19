@@ -78,6 +78,49 @@
             premiers_tours: 'Premiers tours', sang_froid: 'Sang froid', indoor: 'Indoor', rivalite: 'Rivalité'
         };
 
+        // Memes info-bulles "?" que sur creation-joueurs.html, pour rester coherent
+        // partout ou ces competences/dispositions sont proposees a la saisie.
+        const COMPETENCES_TOOLTIPS = {
+            service: 'Dur : 2 · Terre : 1 · Herbe : 2',
+            retour: 'Dur : 2 · Terre : 1 · Herbe : 2',
+            coup_droit_revers: 'Dur : 2 · Terre : 2 · Herbe : 1',
+            effet: 'Dur : 1 · Terre : 2 · Herbe : 2',
+            volee: 'Dur : 1 · Terre : 1 · Herbe : 2',
+            deplacement: 'Dur : 1 · Terre : 2 · Herbe : 1',
+            puissance: 'Dur : 2 · Terre : 1 · Herbe : 1',
+            resistance: 'Dur : 1 · Terre : 2 · Herbe : 1'
+        };
+
+        const DISPOSITIONS_TOOLTIPS = {
+            adversite: 'Contre un adversaire affronté 3 fois ou plus cette saison.',
+            coupeur_de_tetes: 'Non tête de série face à une tête de série.',
+            dernier_carre: 'En demi-finale ou en finale.',
+            premiers_tours: 'Lors des deux premiers tours de chaque tournoi.',
+            sang_froid: 'Dans un set décisif.',
+            indoor: 'Lors des tournois en intérieur.',
+            rivalite: 'Après 12 matchs contre le même adversaire au cours de la carrière.'
+        };
+
+        function iconeInfo(texte) {
+            return `<span class="info-icon" tabindex="0">?<span class="info-tooltip">${texte}</span></span>`;
+        }
+
+        // Delegation (pas un simple querySelectorAll au chargement) : ces panneaux sont
+        // injectes dynamiquement a chaque rechargement (planification, inter-saison...),
+        // un attachement statique raterait donc les icones ajoutees apres coup.
+        document.addEventListener('click', function (e) {
+            const icone = e.target.closest('.info-icon');
+            if (icone) {
+                e.preventDefault();
+                e.stopPropagation();
+                const etaitActive = icone.classList.contains('active');
+                document.querySelectorAll('.info-icon.active').forEach(function (i) { i.classList.remove('active'); });
+                if (!etaitActive) icone.classList.add('active');
+                return;
+            }
+            document.querySelectorAll('.info-icon.active').forEach(function (i) { i.classList.remove('active'); });
+        });
+
         const ACTIONS_LABELS = {
             '': '— Non défini —',
             repos: 'Repos',
@@ -212,7 +255,7 @@
                 Object.keys(COMPETENCES_LABELS).forEach(function (cle) {
                     inputsHtml += `
                         <div class="form-group">
-                            <label>${COMPETENCES_LABELS[cle]} (actuel : ${player[cle]})</label>
+                            <label>${COMPETENCES_LABELS[cle]} ${iconeInfo(COMPETENCES_TOOLTIPS[cle])} (actuel : ${player[cle]})</label>
                             <input type="number" min="0" max="${100 - player[cle]}" value="0" class="xp-input" data-cle="${cle}">
                         </div>
                     `;
@@ -233,7 +276,7 @@
                 Object.keys(DISPOSITIONS_LABELS).forEach(function (cle) {
                     inputsDispoHtml += `
                         <div class="form-group">
-                            <label>${DISPOSITIONS_LABELS[cle]} (actuel : ${player['disposition_' + cle]})</label>
+                            <label>${DISPOSITIONS_LABELS[cle]} ${iconeInfo(DISPOSITIONS_TOOLTIPS[cle])} (actuel : ${player['disposition_' + cle]})</label>
                             <input type="number" min="0" value="0" class="dispo-gain-input" data-cle="${cle}">
                         </div>
                     `;
@@ -241,7 +284,7 @@
                 dispositionsGainHtml = `
                     <div class="xp-pool-panel">
                         <div class="xp-pool-title">Points de disposition en réserve : <span id="dispo-gain-restant">${player.points_dispositions_a_gagner}</span></div>
-                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Peuvent rester en attente aussi longtemps que tu veux, pas de plafond de 5 par catégorie en dehors de la création.</div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">À répartir cette semaine (bonus Coaching mental) — non utilisés, ils seront perdus à la prochaine avancée de semaine.</div>
                         <div class="stats-grid">${inputsDispoHtml}</div>
                         <button class="cta cta-primary dispo-gain-btn" data-pool="${player.points_dispositions_a_gagner}" style="padding:10px 20px; font-size:0.8rem;">Répartir ces points</button>
                     </div>
@@ -257,7 +300,7 @@
                 deplacerHtml = `
                     <div class="xp-pool-panel">
                         <div class="xp-pool-title">Déplacement de disposition disponible : <span>${player.points_dispositions_a_deplacer}</span></div>
-                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Déplace 1 point déjà acquis d'une catégorie vers une autre (bonus Coaching mental).</div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Déplace 1 point déjà acquis d'une catégorie vers une autre (bonus Coaching mental) — à faire cette semaine, sinon perdu à la prochaine avancée de semaine.</div>
                         <div class="training-row">
                             <select class="dispo-deplacer-depuis">${optionsDispoHtml}</select>
                             <select class="dispo-deplacer-vers">${optionsDispoHtml}</select>
@@ -805,71 +848,146 @@
             `;
         }
 
-        function fermerBlocagePertes() {
-            const overlay = document.getElementById('dispo-blocage-overlay');
+        function fermerEcranIntersaison() {
+            const overlay = document.getElementById('intersaison-overlay');
             if (overlay) overlay.remove();
         }
 
-        function afficherBlocagePertes(player) {
-            fermerBlocagePertes();
+        // Contenu commun aux 4 volets possibles de l'inter-saison - chaque volet ne
+        // s'affiche que si son pool est > 0. Reutilise a la fois dans l'ecran bloquant
+        // (moulinette/perte en attente) et dans le panneau inline non bloquant
+        // (gagner/deplacer seuls, hors changement de saison).
+        function contenuIntersaison(player) {
+            let html = '';
 
-            let inputsHtml = '';
-            Object.keys(DISPOSITIONS_LABELS).forEach(function (cle) {
-                inputsHtml += `
-                    <div class="form-group">
-                        <label>${DISPOSITIONS_LABELS[cle]} (actuel : ${player['disposition_' + cle]})</label>
-                        <input type="number" min="0" max="${player['disposition_' + cle]}" value="0" class="dispo-perte-input" data-cle="${cle}">
+            if (player.points_competences_a_repartir > 0) {
+                let inputsHtml = '';
+                Object.keys(COMPETENCES_LABELS).forEach(function (cle) {
+                    inputsHtml += `
+                        <div class="form-group">
+                            <label>${COMPETENCES_LABELS[cle]} ${iconeInfo(COMPETENCES_TOOLTIPS[cle])} (max ${player['cap_' + cle]})</label>
+                            <input type="number" min="0" max="${player['cap_' + cle]}" value="0" class="moulinette-input" data-cle="${cle}">
+                        </div>
+                    `;
+                });
+                html += `
+                    <div class="xp-pool-panel">
+                        <div class="xp-pool-title">Moulinette — points à répartir : <span>${player.points_competences_a_repartir}</span></div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Uniquement dans les compétences déjà remplies en fin de saison dernière, jamais au-delà de leur valeur d'alors (indiquée entre parenthèses).</div>
+                        <div class="stats-grid">${inputsHtml}</div>
+                        <button class="cta cta-primary moulinette-btn" style="padding:10px 20px; font-size:0.8rem;">Valider la répartition</button>
                     </div>
                 `;
-            });
+            }
 
+            if (player.points_dispositions_a_retirer > 0) {
+                let inputsHtml = '';
+                Object.keys(DISPOSITIONS_LABELS).forEach(function (cle) {
+                    inputsHtml += `
+                        <div class="form-group">
+                            <label>${DISPOSITIONS_LABELS[cle]} ${iconeInfo(DISPOSITIONS_TOOLTIPS[cle])} (actuel : ${player['disposition_' + cle]})</label>
+                            <input type="number" min="0" max="${player['disposition_' + cle]}" value="0" class="dispo-perte-input" data-cle="${cle}">
+                        </div>
+                    `;
+                });
+                html += `
+                    <div class="xp-pool-panel">
+                        <div class="xp-pool-title">Dispositions — points à retirer : <span>${player.points_dispositions_a_retirer}</span></div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Total à retirer exact, réparti où tu veux.</div>
+                        <div class="stats-grid">${inputsHtml}</div>
+                        <button class="cta cta-primary dispo-perte-btn" style="padding:10px 20px; font-size:0.8rem;">Valider le retrait</button>
+                    </div>
+                `;
+            }
+
+            return html;
+        }
+
+        function attacherHandlersIntersaison(player, onResolu) {
+            const moulinetteBtn = document.querySelector('.moulinette-btn');
+            if (moulinetteBtn) {
+                moulinetteBtn.addEventListener('click', async function () {
+                    const inputs = document.querySelectorAll('.moulinette-input');
+                    const repartition = {};
+                    let total = 0;
+                    inputs.forEach(function (input) {
+                        const val = Number(input.value) || 0;
+                        repartition[input.getAttribute('data-cle')] = val;
+                        total += val;
+                    });
+                    if (total !== player.points_competences_a_repartir) {
+                        alert('Le total doit correspondre exactement à ' + player.points_competences_a_repartir + ' points.');
+                        return;
+                    }
+                    const response = await fetch('/api/joueurs/repartir-competences-moulinette', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId, playerId: player.id, repartition })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.error);
+                        return;
+                    }
+                    onResolu();
+                });
+            }
+
+            const dispoPerteBtn = document.querySelector('.dispo-perte-btn');
+            if (dispoPerteBtn) {
+                dispoPerteBtn.addEventListener('click', async function () {
+                    const inputs = document.querySelectorAll('.dispo-perte-input');
+                    const repartition = {};
+                    let total = 0;
+                    inputs.forEach(function (input) {
+                        const val = Number(input.value) || 0;
+                        repartition[input.getAttribute('data-cle')] = val;
+                        total += val;
+                    });
+                    if (total !== player.points_dispositions_a_retirer) {
+                        alert('Le total doit correspondre exactement à ' + player.points_dispositions_a_retirer + ' points.');
+                        return;
+                    }
+                    const response = await fetch('/api/repartir-dispositions-perte', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId, playerId: player.id, repartition })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.error);
+                        return;
+                    }
+                    onResolu();
+                });
+            }
+
+        }
+
+        function afficherEcranIntersaison(player) {
+            fermerEcranIntersaison();
             const overlay = document.createElement('div');
-            overlay.id = 'dispo-blocage-overlay';
+            overlay.id = 'intersaison-overlay';
             overlay.className = 'dispo-blocage-overlay';
             overlay.innerHTML = `
                 <div class="dispo-blocage-box">
-                    <div class="stats-header">Perte de dispositions à l'intersaison</div>
+                    <div class="player-summary-type" style="margin-bottom:2px;">${player.type === 'joueur' ? 'Ton joueur' : 'Ta joueuse'}</div>
+                    <div class="player-summary-name" style="margin-bottom:14px;">${formaterNom(player.prenom, player.nom)}</div>
+                    <div class="stats-header" style="margin-top:0;">Inter-saison</div>
                     <p class="planning-alerte-texte" style="margin-bottom:12px;">
-                        Il faut retirer exactement <strong>${player.points_dispositions_a_retirer}</strong> point(s) de disposition
-                        avant de pouvoir continuer à gérer ce personnage.
+                        Il faut résoudre ce qui suit avant de pouvoir continuer à gérer ${formaterNom(player.prenom, player.nom)}.
                     </p>
-                    <div class="stats-grid">${inputsHtml}</div>
-                    <button class="cta cta-primary dispo-perte-btn" style="padding:10px 20px; font-size:0.8rem;">Valider le retrait</button>
+                    ${contenuIntersaison(player)}
                 </div>
             `;
             document.body.appendChild(overlay);
-
-            document.querySelector('.dispo-perte-btn').addEventListener('click', async function () {
-                const inputs = document.querySelectorAll('.dispo-perte-input');
-                const repartition = {};
-                let total = 0;
-                inputs.forEach(function (input) {
-                    const val = Number(input.value) || 0;
-                    repartition[input.getAttribute('data-cle')] = val;
-                    total += val;
-                });
-
-                if (total !== player.points_dispositions_a_retirer) {
-                    alert('Le total doit correspondre exactement à ' + player.points_dispositions_a_retirer + ' points.');
-                    return;
-                }
-
-                const response = await fetch('/api/repartir-dispositions-perte', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userId, playerId: player.id, repartition })
-                });
-                const data = await response.json();
-                if (!response.ok) {
-                    alert(data.error);
-                    return;
-                }
-                fermerBlocagePertes();
+            attacherHandlersIntersaison(player, function () {
+                fermerEcranIntersaison();
                 chargerOnglets();
             });
         }
 
-        async function afficherJoueurCourant() {
+async function afficherJoueurCourant() {
             const player = typeCourant === 'joueur' ? joueurData : joueuseData;
             const label = typeCourant === 'joueur' ? 'Mon joueur' : 'Ma joueuse';
 
@@ -886,11 +1004,12 @@
                 return;
             }
 
-            if (player.points_dispositions_a_retirer > 0) {
-                afficherBlocagePertes(player);
+            const bloquant = player.points_dispositions_a_retirer > 0 || player.points_competences_a_repartir > 0;
+            if (bloquant) {
+                afficherEcranIntersaison(player);
                 return;
             }
-            fermerBlocagePertes();
+            fermerEcranIntersaison();
 
             await chargerSemaineInfo(player);
             await chargerPlanification(player);

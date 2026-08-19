@@ -608,7 +608,16 @@ const migrations = [
     "ALTER TABLE coupe_rubbers ADD COLUMN exterieur_id2 INTEGER",
     "ALTER TABLE matchs ADD COLUMN coupe_equipe_id INTEGER",
     "ALTER TABLE coupe_equipes ADD COLUMN rubber_actuel INTEGER DEFAULT 0",
-    "ALTER TABLE coupe_equipes ADD COLUMN division INTEGER DEFAULT 1"
+    "ALTER TABLE coupe_equipes ADD COLUMN division INTEGER DEFAULT 1",
+    "ALTER TABLE players ADD COLUMN points_competences_a_repartir INTEGER DEFAULT 0",
+    "ALTER TABLE players ADD COLUMN cap_service INTEGER DEFAULT 0",
+    "ALTER TABLE players ADD COLUMN cap_retour INTEGER DEFAULT 0",
+    "ALTER TABLE players ADD COLUMN cap_coup_droit_revers INTEGER DEFAULT 0",
+    "ALTER TABLE players ADD COLUMN cap_effet INTEGER DEFAULT 0",
+    "ALTER TABLE players ADD COLUMN cap_volee INTEGER DEFAULT 0",
+    "ALTER TABLE players ADD COLUMN cap_deplacement INTEGER DEFAULT 0",
+    "ALTER TABLE players ADD COLUMN cap_puissance INTEGER DEFAULT 0",
+    "ALTER TABLE players ADD COLUMN cap_resistance INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {

@@ -45,11 +45,11 @@
                 <button class="tab-btn active" data-tab="joueur">Le début de l'aventure</button>
                 <button class="tab-btn" data-tab="semaines">Sa vie au fil des semaines</button>
                 <button class="tab-btn" data-tab="match">Le jour du match</button>
-                <button class="tab-btn" data-tab="styles">Les styles de jeu</button>
+                <button class="tab-btn" data-tab="styles">Les styles de jeu et dispositions</button>
                 <button class="tab-btn" data-tab="blessures">Pépins physiques</button>
                 <button class="tab-btn" data-tab="tournois">Tournois &amp; classements</button>
                 <button class="tab-btn" data-tab="coupe">Coupe Davis &amp; Fed Cup</button>
-                <button class="tab-btn" data-tab="saison">Le tournant d'une saison</button>
+                <button class="tab-btn" data-tab="saison">L'inter-saison</button>
                 <button class="tab-btn" data-tab="libertes">Les libertés prises</button>
                 <button class="tab-btn" data-tab="mentions">Mentions légales</button>
                 <button class="tab-btn" data-tab="confidentialite">Confidentialité</button>
@@ -243,10 +243,16 @@
                         si un set s'achève à 6-6, le jeu décisif se joue lui aussi point par point, jamais en un
                         simple tirage au sort.
                     </p>
+                    <p class="regle-table-note">
+                        Exception : lors d'un match de Grand Chelem chez les hommes, le match est simulé jusqu'à
+                        trois sets gagnants.
+                    </p>
                     <p class="regle-texte">
                         À chaque point, c'est l'écart de niveau entre les deux joueurs qui détermine les chances de
                         chacun : plus l'écart est grand, plus le favori l'emporte souvent, sans que la victoire ne
-                        soit jamais totalement acquise pour autant.
+                        soit jamais totalement acquise pour autant. On détermine le niveau de jeu de chaque joueur en
+                        fonction de ses caractéristiques et du coefficient associé à chacune, des points d'énergie,
+                        de la forme, du mental et des automatismes.
                     </p>
                     <div class="regle-table-wrap">
                         <table class="classement-table">
@@ -264,9 +270,8 @@
                         </table>
                     </div>
                     <p class="regle-table-note">
-                        Entre deux paliers, les chances progressent de façon continue (interpolation), et au-delà de
-                        100 elles continuent de grimper de 2,5 points par tranche de 100 d'écart supplémentaire,
-                        plafonnées à 95 %.
+                        Interpolation continue entre paliers ; au-delà de 100, +2,5 points par tranche de 100
+                        supplémentaire, plafonné à 95 %.
                     </p>
                     <p class="regle-texte">
                         Les points qui comptent vraiment — une balle de break, de set ou de match, ou les points
@@ -280,27 +285,56 @@
                         légèrement dans le même temps —, et son automatisme sur la surface du jour grandit encore un
                         peu.
                     </p>
+                    <div class="stats-header">Le tie-break</div>
+                    <p class="regle-texte">
+                        Lors d'un tie-break, le joueur qui remporte le tirage obtient un point ; les tie-breaks sont
+                        gérés point par point. Pour le remporter, il faut marquer au moins un certain nombre de
+                        points et avoir deux points de plus que son adversaire — le premier joueur remplissant les
+                        deux conditions simultanément obtient alors le jeu :
+                    </p>
+                    <div class="regle-table-wrap">
+                        <table class="classement-table">
+                            <thead>
+                                <tr><th>Tie-break</th><th>Points nécessaires</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>Standard</td><td>7, avec 2 points d'écart</td></tr>
+                                <tr><td>5ᵉ set d'un match en 3 sets gagnants</td><td>10, avec 2 points d'écart</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="stats-header">Coefficients du niveau de jeu</div>
+                    <div class="regle-table-wrap">
+                        <table class="classement-table">
+                            <thead>
+                                <tr><th>Caractéristique</th><th>Coefficient</th><th>Particularité</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>Forme</td><td>1</td><td>Non prise en compte sur les points importants, les tie-breaks, les balles de break/set/match</td></tr>
+                                <tr><td>Énergie</td><td>1 (5 si mise)</td><td>Les points mis en jeu sont retirés à la fin du tournoi</td></tr>
+                                <tr><td>Mental</td><td>1</td><td>Pris en compte uniquement sur les points importants, les tie-breaks, les balles de break/set/match</td></tr>
+                                <tr><td>Automatismes</td><td>1</td><td>—</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
             <div class="tab-panel" id="tab-styles" style="display:none;">
                 <div class="regle-section">
+                    <div class="stats-header">Les styles de jeu</div>
                     <p class="regle-texte">
                         Une fois inscrit à un tournoi et le tableau tiré au sort, tu peux choisir la manière dont ton
-                        joueur abordera chacun de ses tours à venir — un style différent pour chaque tour si tu le
-                        souhaites, à définir avant que le tournoi ne commence.
+                        joueur abordera chacun de ses tours à venir.
                     </p>
                     <p class="regle-texte">
-                        Le Sprinter démarre pied au plancher, très fort sur les deux premiers sets, avant de
-                        s'essouffler en fin de match. Le Marathonien fait l'inverse : plus discret au début, il monte
-                        crescendo au fil des sets, pour être au sommet de sa forme dans les moments décisifs. Prudence
-                        sacrifie un peu de niveau de jeu pour préserver la forme de ton joueur plus longtemps, quand
-                        En Avant fait le pari inverse — plus de niveau, au prix d'une fatigue accrue. Repérage
-                        sacrifie lui aussi du niveau de jeu, mais accélère nettement la découverte des automatismes
-                        de la surface du jour. Mental d'acier change la façon dont les points importants sont
-                        résolus, et fait grandir le mental plus rapidement. Et si aucun de ces styles ne te tente
-                        pour un tour donné, tu peux toujours choisir Aucun — un match tout ce qu'il y a de plus
-                        classique, le seul style que tu peux d'ailleurs reprendre à des tours consécutifs.
+                        Durant le tournoi, tu peux utiliser un style unique ou plusieurs styles selon tes envies et
+                        ambitions.
+                    </p>
+                    <p class="regle-texte">
+                        Le style doit être indiqué la semaine précédente et est validé lors du changement de semaine
+                        du début de tournoi. Lors d'un tournoi de deux semaines, il est possible de changer les
+                        styles de jeu pour la fin du tournoi jusqu'au début des huitièmes de finale.
                     </p>
                     <div class="regle-table-wrap">
                         <table class="classement-table">
@@ -318,9 +352,44 @@
                             </tbody>
                         </table>
                     </div>
-                    <p class="regle-texte">
+                    <p class="regle-table-note">
                         Une seule limite existe : un style déjà utilisé lors du tournoi précédent ne peut pas être
                         réutilisé dans celui-ci — de quoi t'obliger à varier les plaisirs d'un tournoi à l'autre.
+                    </p>
+
+                    <div class="stats-header">Les dispositions</div>
+                    <p class="regle-texte">
+                        Chaque point investi dans une disposition ajoute un bonus immédiat au niveau de jeu dès que sa
+                        condition est remplie :
+                    </p>
+                    <div class="regle-table-wrap">
+                        <table class="classement-table regle-table-centree">
+                            <thead>
+                                <tr><th>Rang</th><th>0</th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th><th>6</th><th>7</th><th>8</th><th>9</th><th>10</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>Bonus</td><td>+0</td><td>+5</td><td>+10</td><td>+15</td><td>+20</td><td>+25</td><td>+29</td><td>+33</td><td>+36</td><td>+38</td><td>+40</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="regle-table-wrap">
+                        <table class="classement-table">
+                            <thead>
+                                <tr><th>Disposition</th><th>Condition de déclenchement</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>Adversité</td><td>À partir du 3ᵉ match contre le même adversaire au cours de la saison</td></tr>
+                                <tr><td>Coupeur de têtes</td><td>Le joueur n'est pas tête de série et affronte une tête de série</td></tr>
+                                <tr><td>Dernier carré</td><td>En demi-finale ou en finale</td></tr>
+                                <tr><td>Premiers tours</td><td>Lors des deux premiers tours du tournoi. Lors d'un tournoi en 2 semaines, lors des trois premiers tours du tournoi.</td></tr>
+                                <tr><td>Sang froid</td><td>Dans le set décisif (le 3ᵉ set, le jeu se jouant toujours en deux sets gagnants)</td></tr>
+                                <tr><td>Indoor</td><td>Pour tout match joué en indoor</td></tr>
+                                <tr><td>Rivalité</td><td>À partir du 12ᵉ match contre le même adversaire au cours de la carrière</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="regle-table-note">
+                        Elles sont actives uniquement en match simple.
                     </p>
                 </div>
             </div>
@@ -328,11 +397,11 @@
             <div class="tab-panel" id="tab-blessures" style="display:none;">
                 <div class="regle-section">
                     <p class="regle-texte">
-                        Un joueur de tennis n'est jamais à l'abri d'un coup de moins bien. Plus ton joueur est fatigué
-                        — forme basse, énergie épuisée — plus le risque grandit de le voir décliner en cours de match
-                        : d'abord fatigué, puis diminué, et si les choses tournent vraiment mal, blessé. Un joueur
-                        déjà bien affaibli peut même basculer directement à l'état blessé, sans passer par les étapes
-                        intermédiaires. Voici, à chaque jeu disputé, le risque qu'un coup de moins bien survienne :
+                        Un joueur de tennis n'est jamais à l'abri d'un coup de moins bien. Plus ton joueur est fatigué,
+                        plus le risque grandit de le voir décliner en cours de match : d'abord fatigué, puis diminué,
+                        et si les choses tournent vraiment mal, blessé. Un joueur déjà bien affaibli peut même
+                        basculer directement à l'état blessé, sans passer par les étapes intermédiaires. Voici, à
+                        chaque jeu disputé, le risque qu'un coup de moins bien survienne :
                     </p>
                     <div class="regle-table-wrap">
                         <table class="classement-table">
@@ -345,6 +414,21 @@
                             </tbody>
                         </table>
                     </div>
+                    <p class="regle-texte">
+                        Lorsqu'un joueur est en pleine forme, les règles normales s'appliquent :
+                    </p>
+                    <div class="regle-table-wrap">
+                        <table class="classement-table regle-table-centree">
+                            <thead>
+                                <tr><th>Condition</th><th>Malus de niveau de jeu</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr><td>En forme</td><td>Aucun</td></tr>
+                                <tr><td>Fatigué</td><td>−50</td></tr>
+                                <tr><td>Diminué</td><td>−100</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                     <p class="regle-table-note">
                         Les deux risques s'additionnent quand ils sont réunis. Si la dégradation survient alors que
                         la forme est sous 60, ton joueur bascule directement à l'état blessé, quel que soit son état
@@ -353,13 +437,22 @@
                     <p class="regle-texte">
                         La blessure n'est jamais anodine : impossible de s'inscrire à un nouveau tournoi tant que ton
                         joueur n'est pas revenu à une pleine forme physique, et s'il se blesse en plein tournoi, il
-                        déclare forfait sur tous ses matchs restants. Le seul vrai remède reste le repos — une semaine
-                        complète suffit à repartir sur des bases saines, quel que soit l'état de départ.
+                        déclare forfait sur tous ses matchs restants. Impossible aussi de faire un entraînement
+                        classique ou un entraînement de surface — seul un coaching mental reste possible.
                     </p>
                     <p class="regle-texte">
-                        Sur la fiche d'un adversaire, un petit badge « Kiné » signale les matchs où sa condition
-                        physique s'est réellement dégradée pendant la rencontre elle-même — et pas seulement parce
-                        qu'il était déjà diminué en arrivant sur le court.
+                        Un joueur blessé ne bénéficie d'aucun point d'expérience pour la semaine durant laquelle il
+                        s'est blessé. En cas de dégradation de sa condition, un joueur perd également 1 point de
+                        caractéristique, tiré au sort parmi ses 8 compétences techniques déjà entamées.
+                    </p>
+                    <p class="regle-texte">
+                        Le seul vrai remède reste le repos — une semaine complète suffit à repartir sur des bases
+                        saines, quel que soit l'état de départ.
+                    </p>
+                    <p class="regle-texte">
+                        Sur la fiche de ton joueur ou d'un adversaire, un petit badge « Kiné » signale les matchs où
+                        sa condition physique s'est réellement dégradée pendant la rencontre elle-même — et pas
+                        seulement parce qu'il était déjà diminué en arrivant sur le court.
                     </p>
                 </div>
             </div>
@@ -374,12 +467,12 @@
                     </p>
                     <p class="regle-texte">
                         La vie d'un tournoi se joue en trois temps : les inscriptions ouvrent cinq semaines à
-                        l'avance, le tableau est tiré au sort et figé une semaine avant le coup d'envoi — têtes de
-                        série et exemptions distribuées selon les usages du circuit —, puis les matchs se jouent
-                        progressivement, tour par tour, au fil de la semaine plutôt que d'un seul coup : plusieurs
-                        échéances rythment chaque semaine de tournoi, jusqu'à son dénouement. Les Grands Chelems et
-                        les plus gros Masters 1000 s'étalent même sur deux semaines complètes, avec une pause
-                        naturelle entre le troisième tour et les huitièmes de finale.
+                        l'avance, le tableau est tiré au sort et figé une semaine avant le début — têtes de série et
+                        exemptions distribuées selon les usages du circuit —, puis les matchs se jouent
+                        progressivement, tour par tour, au fil de la semaine plutôt que d'un seul coup jusqu'à son
+                        dénouement. Les Grands Chelems et les plus gros Masters 1000 s'étalent même sur deux semaines
+                        ingame complètes, avec une pause naturelle entre le troisième tour et les huitièmes de
+                        finale.
                     </p>
                     <p class="regle-texte">
                         Chaque semaine de jeu démarre un lundi ou un jeudi à 8h (heure française) et dure trois jours
@@ -407,7 +500,8 @@
                     </p>
                     <p class="regle-texte">
                         Chaque tournoi rapporte deux choses distinctes. D'abord des points de classement, qui
-                        alimentent le Live et le Race. Ensuite, une fois éliminé ou le tournoi remporté, des points
+                        alimentent le Live et le Race — crédités seulement une fois le tournoi entièrement terminé,
+                        jamais au fil des éliminations. Ensuite, une fois éliminé ou le tournoi remporté, des points
                         d'expérience — d'autant plus généreux que le parcours est allé loin — qui viennent grossir la
                         même réserve que celle de l'entraînement, à répartir avant que la semaine suivante ne les
                         efface :
@@ -457,14 +551,6 @@
                         semaines.
                     </p>
                     <p class="regle-texte">
-                        Chaque tournoi est aujourd'hui un événement partagé par tous les coachs qui y participent :
-                        plus une simulation isolée pour chacun, mais un vrai tableau commun, où ton joueur peut
-                        croiser la route d'un adversaire géré par un autre coach tout autant qu'un rival plus
-                        classique du circuit. Ces rivaux, justement, ne sont pas de simples figurants générés à la
-                        volée : ce sont des joueurs fictifs mais persistants, qui accumulent de vrais points au fil
-                        des tournois, exactement comme un vrai joueur.
-                    </p>
-                    <p class="regle-texte">
                         Les classements ATP et WTA se déclinent en deux versions : le classement Live, qui reflète les
                         cinquante-deux dernières semaines glissantes, et le classement Race, propre à la saison en
                         cours. Et si un adversaire croisé en tournoi t'intrigue, sa fiche personnelle t'attend d'un
@@ -477,25 +563,58 @@
                 <div class="regle-section">
                     <p class="regle-texte">
                         En parallèle du circuit individuel, ton joueur (Coupe Davis) et ta joueuse (Billie Jean King
-                        Cup, l'ex-Fed Cup) peuvent représenter leur pays au sein d'une équipe nationale — aux côtés
-                        d'autres vrais joueurs de la même nationalité s'il y en a, et des rivaux persistants du
-                        circuit pour compléter l'effectif. Seize nations par circuit forment le <strong>Groupe
-                        mondial</strong>, dans son format historique plutôt que la formule moderne en Finales
-                        groupées : 1er tour, quarts de finale, demi-finales, puis finale. Contrairement à un tirage
-                        entièrement refait chaque année, le Groupe mondial fonctionne par montée/descente : les huit
-                        nations qui gagnent leur 1er tour y restent automatiquement la saison suivante, quel que soit
-                        leur parcours ensuite en quarts/demies/finale (qui ne déterminent que le vainqueur sportif de
-                        la saison). Les huit nations éliminées au 1er tour jouent en septembre, en même temps que les
+                        Cup, l'ex-Fed Cup) peuvent représenter leur pays au sein d'une équipe nationale aux côtés
+                        d'autres joueurs de la même nationalité.
+                    </p>
+                    <p class="regle-texte">
+                        Seize nations par circuit forment le <strong>Groupe mondial</strong>, dans son format
+                        historique plutôt que la formule moderne en Finales groupées : 1er tour, quarts de finale,
+                        demi-finales, puis finale.
+                    </p>
+                    <p class="regle-texte">
+                        Contrairement à un tirage entièrement refait chaque année, le Groupe mondial fonctionne par
+                        montée/descente : les huit nations qui gagnent leur 1er tour y restent automatiquement la
+                        saison suivante, quel que soit leur parcours ensuite en quarts/demies/finale (qui ne
+                        déterminent que le vainqueur sportif de la saison).
+                    </p>
+                    <p class="regle-texte">
+                        Les huit nations éliminées au 1er tour jouent en septembre, en même temps que les
                         demi-finales, un <strong>barrage de maintien</strong> contre les huit meilleures nations hors
                         Groupe mondial au classement Live du moment ; les huit vainqueurs de ce barrage complètent le
-                        Groupe mondial à seize pour la saison suivante. Une nation qui n'a jamais eu de rencontre
-                        programmée à temps pour désigner son capitaine (cas des nations qui accèdent au barrage,
-                        connu trop tard dans la saison pour organiser une candidature/vote) se voit désigner
-                        automatiquement son meilleur joueur réel comme capitaine, ou reste entièrement pilotée par le
-                        jeu si elle n'en compte aucun. Absent de la toute première saison du jeu, le temps que
-                        suffisamment de vrais coachs aient rejoint la partie ; la première édition (constitution du
-                        Groupe mondial initial par classement Live) a lieu en Saison 2.
+                        Groupe mondial à seize pour la saison suivante.
                     </p>
+                    <div class="stats-header">Le capitaine</div>
+                    <p class="regle-texte">
+                        À la tête de chaque nation, un capitaine. Le poste se pourvoit une fois par saison : la
+                        candidature est ouverte pendant la Pré-saison et la Semaine 0, puis les coachs de la nation
+                        votent en Semaine 1 parmi les candidats. Si personne ne se présente, le joueur le mieux
+                        classé de la nation prend le poste par défaut. En cas d'égalité entre deux coachs s'étant
+                        présentés, le mieux classé sera désigné capitaine. Une nation ne se retrouve jamais sans
+                        personne aux commandes.
+                    </p>
+                    <p class="regle-texte">
+                        Le capitaine choisit la surface de la rencontre (avantage réservé à la nation qui reçoit), la
+                        composition d'équipe (qui joue quel simple, qui forme la paire de double), et chaque coach
+                        impliqué choisit ensuite son propre style de jeu pour la rencontre. En double, chaque
+                        partenaire garde son style individuel — il n'existe pas de style d'équipe.
+                    </p>
+                    <p class="regle-texte">
+                        Une nation qui ne compte aucun vrai joueur reste entièrement pilotée par le jeu : surface
+                        tirée au sort et composition formée avec ses deux meilleurs joueurs disponibles, sans qu'un
+                        capitaine humain n'ait à intervenir.
+                    </p>
+                    <p class="regle-table-note">
+                        Peu importe le classement de la nation en début de saison, qu'elle fasse partie du Groupe
+                        mondial ou non, un capitaine doit être désigné en début de saison, pour d'éventuels matchs de
+                        barrage.
+                    </p>
+                    <p class="regle-texte">
+                        Absente de la toute première saison du jeu, le temps que suffisamment de vrais coachs aient
+                        rejoint la partie ; la première édition (constitution du Groupe mondial initial par
+                        classement Live) a lieu en Saison 2.
+                    </p>
+
+                    <div class="stats-header">La rencontre</div>
                     <p class="regle-texte">
                         Chaque rencontre se joue en cinq matchs, comme au bon vieux temps : deux simples, un double,
                         puis deux simples retour où les deux mêmes joueurs échangent d'adversaire. La première nation
@@ -521,21 +640,8 @@
                         d'un tournoi individuel classique — jamais les cinq d'un coup. Mêmes horaires qu'un tournoi
                         250/500 (voir l'onglet Tournois &amp; classements) : J1 8h - 17h, J2 8h - 17h, J3 8h.
                     </p>
-                    <p class="regle-texte">
-                        À la tête de chaque nation, un capitaine. Le poste se pourvoit une fois par saison : la
-                        candidature est ouverte pendant la Pré-saison et la Semaine 0, puis les coachs de la nation
-                        votent en Semaine 1 parmi les candidats. Si personne ne se présente ou ne vote, le joueur le
-                        mieux classé de la nation prend le poste par défaut — une nation ne se retrouve jamais sans
-                        personne aux commandes. Le capitaine choisit la surface de la rencontre (avantage réservé à
-                        la nation qui reçoit), la composition d'équipe (qui joue quel simple, qui forme la paire de
-                        double), et chaque coach impliqué choisit ensuite son propre style de jeu pour la rencontre.
-                        En double, chaque partenaire garde son style individuel — il n'existe pas de style d'équipe.
-                    </p>
-                    <p class="regle-texte">
-                        Une nation qui ne compte aucun vrai joueur reste entièrement pilotée par le jeu : surface
-                        tirée au sort et composition formée avec ses deux meilleurs joueurs disponibles, sans qu'un
-                        capitaine humain n'ait à intervenir.
-                    </p>
+
+                    <div class="stats-header">Points d'expérience et classement</div>
                     <p class="regle-texte">
                         À l'issue de la rencontre, chaque joueur impliqué reçoit des points d'expérience selon un
                         barème qui croise deux éléments : a-t-il gagné au moins un de ses matchs, et sa nation
@@ -552,6 +658,10 @@
                             </tbody>
                         </table>
                     </div>
+                    <p class="regle-table-note">
+                        Le classement mondial d'une nation, lui, se calcule ainsi : cumul des points Live de ses 4
+                        meilleurs joueurs.
+                    </p>
                 </div>
             </div>
 
@@ -559,27 +669,47 @@
                 <div class="regle-section">
                     <p class="regle-texte">
                         Une saison ne démarre pas directement à la Semaine 1 des tournois. Elle est précédée de deux
-                        semaines de mise en place : une Pré-saison, semaine calme sans le moindre tournoi ni
-                        entraînement à mener, puis une Semaine 0, pendant laquelle le tableau de la toute première
-                        semaine de tournois est déjà tiré au sort — les pronostics et le choix des styles de jeu
-                        s'ouvrent pour ces premiers matchs dès maintenant. Une fois la Semaine 0 passée, la saison
-                        démarre vraiment avec la Semaine 1, et se poursuit jusqu'à la Semaine 52.
+                        semaines de mise en place :
+                    </p>
+                    <ul class="regle-liste">
+                        <li><strong>Pré-saison</strong> : semaine calme sans le moindre tournoi ni entraînement à
+                            mener. Sélection éventuelle des tournois qui auront lieu en S1.</li>
+                        <li><strong>Semaine 0</strong> : le tableau de la S1 des tournois est déjà tiré au sort — les
+                            pronostics et le choix des styles de jeu s'ouvrent pour ces premiers matchs dès
+                            maintenant.</li>
+                    </ul>
+                    <p class="regle-texte">
+                        Une fois la Semaine 0 passée, la saison démarre vraiment avec la Semaine 1, et se poursuit
+                        jusqu'à la Semaine 48.
                     </p>
                     <p class="regle-texte">
-                        Après la Semaine 52 vient un moment particulier : le changement de saison. Il s'accompagne
-                        d'une remise à zéro sur plusieurs points. L'usure accumulée disparaît entièrement. Les
-                        automatismes acquis sur chaque surface retombent à zéro et devront se reconstruire sur la
-                        nouvelle saison. Le mental maximal revient à sa valeur de départ, 100 (le mental du moment
-                        est ramené à ce plafond s'il le dépassait), et l'énergie retombe elle aussi à zéro.
+                        Semaine 48 : le changement de saison. Il s'accompagne d'une remise à zéro sur plusieurs
+                        points. L'usure accumulée disparaît entièrement. Les automatismes acquis sur chaque surface
+                        retombent à zéro et devront se reconstruire sur la nouvelle saison. Le mental maximal revient
+                        à sa valeur de départ, 100 (le mental du moment est ramené à ce plafond s'il le dépassait),
+                        et l'énergie retombe elle aussi à zéro.
                     </p>
                     <p class="regle-texte">
-                        Ce même changement de saison applique aussi ce qu'on appelle la moulinette : une procédure
-                        qui resserre l'écart entre les joueurs les plus développés et les petits nouveaux, en
+                        Ce même changement de saison applique aussi ce qu'on appelle <strong>la moulinette</strong> :
+                        une procédure qui resserre l'écart entre les joueurs les plus développés et les nouveaux, en
                         rabotant les compétences des joueurs les plus avancés — plus un joueur a accumulé de points
                         techniques, plus la réduction se fait sentir ; en dessous d'un certain total, elle ne change
-                        rien du tout. Elle s'applique automatiquement à chaque changement de saison, sans que tu
-                        aies quoi que ce soit à faire.
+                        rien du tout.
                     </p>
+                    <p class="regle-table-note">
+                        Calcul de la moulinette : (((XP total fin de saison) − 200) / 2,5) + 100.
+                    </p>
+                    <p class="regle-texte">
+                        À ce moment s'ouvre une fenêtre sur la fiche de ton joueur te donnant le nombre de points que
+                        tu auras pour le début de la saison prochaine. Tu devras alors répartir ces points comme lors
+                        de ton inscription, sauf que tu devras respecter ces deux conditions :
+                    </p>
+                    <ul class="regle-liste">
+                        <li>Mettre les points uniquement dans les compétences techniques que tu avais remplies en
+                            fin de saison.</li>
+                        <li>Ne pas dépasser le nombre de points maximum que tu avais en fin de saison dans chaque
+                            compétence technique.</li>
+                    </ul>
                     <p class="regle-texte">
                         Le changement de saison fait aussi évoluer le budget de dispositions de ton joueur, année de
                         carrière après année de carrière :
