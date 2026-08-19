@@ -6361,6 +6361,32 @@ app.get('/api/_debug/etat-s1', (req, res) => {
     res.json({ saisonAffichee: saison, tournois: resultats });
 });
 
+// TEMPORAIRE - regenere retroactivement la composition (plus de bots) et le tirage
+// au sort (tetes de serie par classement) des tournois crees avant ces correctifs,
+// tant qu'aucun tour n'a encore ete simule (tour_actuel = 0). Ne touche jamais un
+// tournoi deja en cours ou termine (donc jamais les tournois de la Saison 0). A
+// retirer une fois termine.
+app.post('/api/_debug/regenerer-tournois', (req, res) => {
+    if (!estAdmin(req.userId)) return res.status(403).json({ error: 'Admin uniquement.' });
+    const candidats = db.prepare("SELECT * FROM tournois WHERE tour_actuel = 0 AND statut != 'termine'").all();
+    const resultats = candidats.map(function (tournoi) {
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
+        if (!entree) return { id: tournoi.id, nom: tournoi.nom, action: 'ignore (hors calendrier, ex: Finals)' };
+
+        rebalancerTournoi(tournoi.id, entree, tournoi.semaine);
+
+        if (tournoi.statut === 'a_venir') {
+            db.prepare("UPDATE tournoi_joueurs SET position_tableau = -1, tete_de_serie = NULL WHERE tournoi_id = ? AND nom != 'BYE'").run(tournoi.id);
+            db.prepare("DELETE FROM tournoi_joueurs WHERE tournoi_id = ? AND nom = 'BYE'").run(tournoi.id);
+            tirerAuSort(tournoi.id, entree);
+        }
+
+        const bots = db.prepare("SELECT COUNT(*) AS n FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 0 AND rival_id IS NULL AND nom != 'BYE'").get(tournoi.id).n;
+        return { id: tournoi.id, nom: tournoi.nom, semaine: tournoi.semaine, statut: tournoi.statut, botsRestants: bots };
+    });
+    res.json({ resultats });
+});
+
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
 });
