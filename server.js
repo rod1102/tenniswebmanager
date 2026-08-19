@@ -646,7 +646,19 @@ app.post('/api/admin/decision', (req, res) => {
             return res.status(400).json({ error: 'Decision invalide.' });
         }
 
-        db.prepare('UPDATE players SET statut = ? WHERE id = ?').run(decision, playerId);
+        if (decision === 'refuse') {
+            const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(playerId);
+            if (!player) {
+                return res.status(404).json({ error: 'Joueur introuvable.' });
+            }
+            // Un refus supprime le personnage refuse (et son eventuel binome encore en
+            // attente) pour renvoyer le coach vers la creation de personnages plutot que
+            // de le laisser bloque sur un statut "Refuse" sans issue. Un personnage deja
+            // valide n'est jamais touche.
+            db.prepare("DELETE FROM players WHERE user_id = ? AND statut != 'valide'").run(player.user_id);
+        } else {
+            db.prepare('UPDATE players SET statut = ? WHERE id = ?').run(decision, playerId);
+        }
 
         res.json({ success: true });
     } catch (err) {
