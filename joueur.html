@@ -1040,13 +1040,18 @@ async function afficherJoueurCourant() {
             }
             fermerEcranIntersaison();
 
-            await chargerSemaineInfo(player);
-            await chargerPlanification(player);
-            await chargerStyleEnAttente(player);
-            const rangs = await chargerRangs(player);
-            afficherCarteJoueur(player, rangs);
-            await chargerHistorique(player);
-            await chargerJournal(player);
+            // Chaque section se charge independamment : une erreur dans l'une (ex.
+            // reponse serveur inattendue) ne doit plus bloquer le rendu des sections
+            // suivantes de la page (bug signale par l'utilisateur, 2026-08-20 -
+            // "Resultats en tournoi" restait vide des qu'une section precedente
+            // echouait silencieusement, faute de try/catch sur cette sequence).
+            await chargerSemaineInfo(player).catch(function (e) { console.error(e); });
+            await chargerPlanification(player).catch(function (e) { console.error(e); });
+            await chargerStyleEnAttente(player).catch(function (e) { console.error(e); });
+            const rangs = await chargerRangs(player).catch(function (e) { console.error(e); return null; });
+            try { afficherCarteJoueur(player, rangs); } catch (e) { console.error(e); }
+            await chargerHistorique(player).catch(function (e) { console.error(e); });
+            await chargerJournal(player).catch(function (e) { console.error(e); });
         }
 
         async function chargerOnglets() {
