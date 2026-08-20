@@ -1556,6 +1556,31 @@ app.post('/api/admin/corriger-energie-reset', (req, res) => {
     }
 });
 
+// Route temporaire (2026-08-20) : nettoie les lignes de journal_semaine_joueur
+// devenues incoherentes suite au changement de LONGUEUR_SAISON (54 -> 48
+// semaines) - une ligne ecrite quand une semaine donnee etait encore un tournoi
+// (ex. "Tournoi : Open d'Australie") peut se retrouver, sous le nouveau calcul,
+// a une semaine que phaseDeSemaine considere desormais comme Pre-saison/Semaine
+// 0 (l'action et la vraie nature de la semaine ne concordent plus). Cible
+// precisement cette contradiction, sans toucher au reste de la partie en cours -
+// contrairement au reset complet, inutilisable ici puisque plusieurs coachs
+// testent en parallele et perdraient leur progression.
+app.post('/api/admin/nettoyer-journal-perime', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const lignes = db.prepare("SELECT id, semaine FROM journal_semaine_joueur WHERE action_prevue = 'tournoi'").all();
+        const aSupprimer = lignes.filter(function (l) { return phaseDeSemaine(l.semaine).type !== 'tournoi'; });
+        const supprimer = db.prepare('DELETE FROM journal_semaine_joueur WHERE id = ?');
+        aSupprimer.forEach(function (l) { supprimer.run(l.id); });
+        res.json({ success: true, lignesSupprimees: aSupprimer.length });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Avancement automatique : fidele au PDF ("chaque semaine reelle equivaut a deux
 // semaines ingame"), rythme fixe a lundi et jeudi 8h00 heure locale.
 const JOURS_ECHEANCE_AUTO = [1, 4]; // lundi, jeudi (Date.getDay())
@@ -2548,6 +2573,24 @@ function ordreSeeds(n) {
     return resultat;
 }
 
+// ordreSeeds() brut place le seed 2 en tete de la seconde moitie (position n/2),
+// pas a la toute derniere position (n-1) comme l'exige la convention reelle du
+// tennis - un simple deplacement ponctuel de la seule TDS 2 (essaye avant,
+// corrige ici) cassait le rangement des autres etages en la faisant atterrir
+// dans la zone d'un autre seed (bug signale par l'utilisateur, 2026-08-20 : TDS
+// 2 et 4 pouvaient se rencontrer des les 1/4). La bonne correction est
+// d'inverser l'ORDRE COMPLET de la seconde moitie (pas juste un seed) : ca
+// deplace bien le seed 2 en derniere position tout en preservant la separation
+// en quarts/huitiemes/etc. de tous les autres etages a l'interieur de cette
+// moitie, puisque l'inversion est un simple miroir qui ne fait jamais
+// chevaucher deux zones.
+function ordreSeedsReel(n) {
+    if (n === 1) return [1];
+    const brut = ordreSeeds(n);
+    const milieu = n / 2;
+    return brut.slice(0, milieu).concat(brut.slice(milieu).reverse());
+}
+
 // Etages de tirage au sort des tetes de serie, convention reelle du tennis :
 // TDS 1 seule, TDS 2 seule, 3-4 ensemble, 5-8 ensemble, 9-16, 17-32, 33-64...
 // A l'interieur d'un etage, le tirage decide QUELLE tete de serie va dans QUELLE
@@ -2599,14 +2642,7 @@ function tirerAuSort(tournoiId, entreeCalendrier) {
     // seed 1 et le seed 2 restent sur des moities opposees, 3-4 dans les deux
     // quarts restants, etc. - la convention standard des tableaux de tennis).
     const positionDeSeed = {};
-    ordreSeeds(taillePuissance2).forEach(function (seed, position) { positionDeSeed[seed] = position; });
-
-    // Convention reelle des tableaux de tennis : la tete de serie 2 est toujours a
-    // l'extremite opposee du tableau (tout en bas), pas juste "quelque part dans
-    // l'autre moitie" comme le produit l'algorithme recursif seul.
-    if (nbTetes >= 2) {
-        positionDeSeed[2] = taillePuissance2 - 1;
-    }
+    ordreSeedsReel(taillePuissance2).forEach(function (seed, position) { positionDeSeed[seed] = position; });
 
     // Tirage au sort proprement dit : a l'interieur d'un etage (3-4, 5-8, 9-16...),
     // les zones canoniques de l'etage sont melangees avant d'y affecter les tetes
