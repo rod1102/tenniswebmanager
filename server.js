@@ -4336,37 +4336,15 @@ function classementCoachSomme(circuits, semaineMin, semaineActuelle, monUserId) 
         });
 }
 
-app.get('/api/classement/:userId', (req, res) => {
-    try {
-        const userId = req.userId;
-        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
-        const semaineActuelle = etat.semaine_actuelle;
-        // Debut de saison = fin de la Semaine 0 en cours (borne exclue : la Race ne
-        // compte que les points marques a partir de S1). Pendant la Pre-saison/S0
-        // elle-meme, cette borne tombe dans le futur -> Race a 0 partout, voulu.
-        const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
-        const debutSaison = semaineActuelle - positionSaisonBrute + 2;
-
-        res.json({
-            success: true,
-            atp: { live: classementPartage('ATP', semaineActuelle - FENETRE_LIVE, semaineActuelle, userId), race: classementPartage('ATP', debutSaison, semaineActuelle, userId) },
-            wta: { live: classementPartage('WTA', semaineActuelle - FENETRE_LIVE, semaineActuelle, userId), race: classementPartage('WTA', debutSaison, semaineActuelle, userId) },
-            coach: {
-                live: classementCoachSomme(['ATP', 'WTA'], semaineActuelle - FENETRE_LIVE, semaineActuelle, userId),
-                race: classementCoachSomme(['ATP', 'WTA'], debutSaison, semaineActuelle, userId)
-            }
-        });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
 // Detail tournoi par tournoi des points comptes pour une ligne de classement
 // (Live ou Race), affiche derriere le "?" a cote du total sur classements.html.
 // Deux facons d'identifier la ligne : `cle` (rival:X ou joueur:X, pour les
 // onglets ATP/WTA individuels) ou `userId` (pour l'onglet Coach, qui cumule le
-// joueur ATP et la joueuse WTA d'un meme compte).
+// joueur ATP et la joueuse WTA d'un meme compte). DOIT rester declaree AVANT
+// /api/classement/:userId ci-dessous : Express matche dans l'ordre de
+// declaration, un ":userId" plus haut aurait intercepte "/detail" en le prenant
+// pour une valeur d'userId (bug trouve en prod, la fenetre restait bloquee sur
+// "Chargement..." indefiniment).
 app.get('/api/classement/detail', (req, res) => {
     try {
         const { cle, userId: userIdParam, type } = req.query;
@@ -4407,6 +4385,32 @@ app.get('/api/classement/detail', (req, res) => {
         const total = lignes.reduce(function (s, l) { return s + (l.points_gagnes || 0); }, 0);
 
         res.json({ success: true, detail: lignes, total });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/classement/:userId', (req, res) => {
+    try {
+        const userId = req.userId;
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+        // Debut de saison = fin de la Semaine 0 en cours (borne exclue : la Race ne
+        // compte que les points marques a partir de S1). Pendant la Pre-saison/S0
+        // elle-meme, cette borne tombe dans le futur -> Race a 0 partout, voulu.
+        const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+        const debutSaison = semaineActuelle - positionSaisonBrute + 2;
+
+        res.json({
+            success: true,
+            atp: { live: classementPartage('ATP', semaineActuelle - FENETRE_LIVE, semaineActuelle, userId), race: classementPartage('ATP', debutSaison, semaineActuelle, userId) },
+            wta: { live: classementPartage('WTA', semaineActuelle - FENETRE_LIVE, semaineActuelle, userId), race: classementPartage('WTA', debutSaison, semaineActuelle, userId) },
+            coach: {
+                live: classementCoachSomme(['ATP', 'WTA'], semaineActuelle - FENETRE_LIVE, semaineActuelle, userId),
+                race: classementCoachSomme(['ATP', 'WTA'], debutSaison, semaineActuelle, userId)
+            }
+        });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
