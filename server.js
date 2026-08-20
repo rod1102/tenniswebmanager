@@ -5464,12 +5464,13 @@ app.get('/api/matchs/:userId', (req, res) => {
                    matchs.vainqueur, matchs.score, matchs.niveau_joueur, matchs.niveau_adversaire, matchs.date_creation,
                    matchs.tournoi_id, matchs.numero_tour, matchs.coupe_equipe_id, tournois.nom AS tournoi_nom, tournois.calendrier_id AS tournoi_calendrier_id,
                    players.prenom, players.nom, players.type, players.nationalite,
+                   tm.match_id AS tm_match_id,
                    tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite, tj1.est_reel AS tj1_est_reel,
                    tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite, tj2.est_reel AS tj2_est_reel
             FROM matchs
             JOIN players ON players.id = matchs.player_id
             LEFT JOIN tournois ON tournois.id = matchs.tournoi_id
-            LEFT JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id
+            LEFT JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id OR tm.match_id_j2 = matchs.id
             LEFT JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
             LEFT JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
             WHERE matchs.user_id = ?
@@ -5494,9 +5495,16 @@ app.get('/api/matchs/:userId', (req, res) => {
                 : (phaseM.type === 'presaison' ? 'Pré-saison' : 'Semaine 0');
             m.joueur_drapeau = drapeau(m.nationalite);
             if (m.tournoi_id) {
-                const adversaireEstTj1 = m.tj1_est_reel === 0;
-                m.adversaire_nom = adversaireEstTj1 ? m.tj1_nom : m.tj2_nom;
-                m.adversaire_nationalite = adversaireEstTj1 ? m.tj1_nationalite : m.tj2_nationalite;
+                // Un match reel-vs-reel a 2 lignes matchs distinctes (une par coach),
+                // reliees respectivement par match_id ET match_id_j2 - se fier a
+                // est_reel pour deviner qui est l'adversaire (comme avant) rate
+                // systematiquement ce cas puisque tj1 ET tj2 sont tous les deux reels ;
+                // on determine desormais directement quel cote je suis via la colonne
+                // qui a effectivement matche cette ligne (bug signale par l'utilisateur,
+                // 2026-08-20 : adversaire reel affiche comme "Adversaire" au lieu de son nom).
+                const jeSuisTj1 = m.tm_match_id === m.id;
+                m.adversaire_nom = jeSuisTj1 ? m.tj2_nom : m.tj1_nom;
+                m.adversaire_nationalite = jeSuisTj1 ? m.tj2_nationalite : m.tj1_nationalite;
                 m.adversaire_drapeau = drapeau(m.adversaire_nationalite);
             } else if (m.difficulte === 'coupe' && m.coupe_equipe_id) {
                 const tieCoupe = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(m.coupe_equipe_id);
@@ -5547,12 +5555,13 @@ app.get('/api/matchs/detail/:matchId', (req, res) => {
         // coach qui les a joues.
         const match = db.prepare(`
             SELECT matchs.*, tournois.nom AS tournoi_nom, players.prenom, players.nom, players.type,
+                   tm.match_id AS tm_match_id,
                    tj1.nom AS tj1_nom, tj1.est_reel AS tj1_est_reel,
                    tj2.nom AS tj2_nom, tj2.est_reel AS tj2_est_reel
             FROM matchs
             JOIN players ON players.id = matchs.player_id
             LEFT JOIN tournois ON tournois.id = matchs.tournoi_id
-            LEFT JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id
+            LEFT JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id OR tm.match_id_j2 = matchs.id
             LEFT JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
             LEFT JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
             WHERE matchs.id = ? AND (matchs.user_id = ? OR matchs.tournoi_id IS NOT NULL)
@@ -5563,11 +5572,14 @@ app.get('/api/matchs/detail/:matchId', (req, res) => {
         }
 
         // Nom de l'adversaire, pour que le Live/Teletexte puisse afficher les vrais
-        // noms au lieu de "Toi"/"Adversaire" (demande utilisateur, 2026-08-20) - meme
-        // logique que /api/matchs/:userId (tj1 = pas moi => c'est l'adversaire).
+        // noms au lieu de "Toi"/"Adversaire" (demande utilisateur, 2026-08-20) - un
+        // match reel-vs-reel a 2 lignes matchs (une par coach), reliees par match_id
+        // ET match_id_j2 respectivement : se fier a est_reel pour deviner qui est
+        // l'adversaire ratait ce cas (tj1 ET tj2 tous les deux reels) - on determine
+        // desormais directement quel cote je suis via la colonne qui a matche.
         if (match.tournoi_id) {
-            const adversaireEstTj1 = match.tj1_est_reel === 0;
-            match.adversaire_nom = adversaireEstTj1 ? match.tj1_nom : match.tj2_nom;
+            const jeSuisTj1 = match.tm_match_id === match.id;
+            match.adversaire_nom = jeSuisTj1 ? match.tj2_nom : match.tj1_nom;
         } else if (match.difficulte === 'coupe' && match.coupe_equipe_id) {
             const rubber = db.prepare(`
                 SELECT * FROM coupe_rubbers WHERE coupe_equipe_id = ?
@@ -5584,7 +5596,7 @@ app.get('/api/matchs/detail/:matchId', (req, res) => {
                 match.adversaire_nom = adv2 ? (adv1.nom + ' / ' + adv2.nom) : (adv1 ? adv1.nom : null);
             }
         }
-        delete match.tj1_nom; delete match.tj1_est_reel; delete match.tj2_nom; delete match.tj2_est_reel;
+        delete match.tm_match_id; delete match.tj1_nom; delete match.tj1_est_reel; delete match.tj2_nom; delete match.tj2_est_reel;
 
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         match.evenements = JSON.parse(match.evenements);
