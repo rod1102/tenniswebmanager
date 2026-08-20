@@ -305,7 +305,7 @@
             data.tournois.forEach(function (t, i) {
                 const bouton = document.createElement('button');
                 bouton.className = 'tab-btn' + (i === 0 ? ' active' : '');
-                bouton.textContent = t.nom + (t.dejaPronostique ? ' ✓' : '');
+                bouton.textContent = t.nom + ' (' + t.circuit + ')' + (t.dejaPronostique ? ' ✓' : '');
                 bouton.title = LABELS_CATEGORIE[t.categorie] || t.categorie;
                 nav.appendChild(bouton);
 
