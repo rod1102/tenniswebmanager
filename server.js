@@ -324,6 +324,15 @@ app.post('/api/joueurs', (req, res) => {
             return res.status(400).json({ error: 'Le total des dispositions de la joueuse doit faire exactement ' + BUDGET_DISPOSITIONS + ' points.' });
         }
 
+        // Garde-fou anti-doublon : rien n'empechait un double-clic/double-soumission
+        // du formulaire de creation de personnages de creer 2 fois la paire
+        // joueur+joueuse pour le meme compte, silencieusement (bug signale par
+        // l'utilisateur, 2026-08-20 - doublon visible dans l'annuaire).
+        const dejaCree = db.prepare('SELECT COUNT(*) AS n FROM players WHERE user_id = ?').get(userId).n;
+        if (dejaCree > 0) {
+            return res.status(400).json({ error: 'Ce compte a deja des personnages crees.' });
+        }
+
         const insert = db.prepare(`
             INSERT INTO players (
                 user_id, type, prenom, nom, age, taille, nationalite, main_forte, statut,
@@ -1636,6 +1645,42 @@ app.post('/api/admin/nettoyer-journal-perime', (req, res) => {
         const supprimer = db.prepare('DELETE FROM journal_semaine_joueur WHERE id = ?');
         aSupprimer.forEach(function (l) { supprimer.run(l.id); });
         res.json({ success: true, lignesSupprimees: aSupprimer.length });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Route temporaire (2026-08-20) : diagnostique les doublons de personnages
+// (aucune contrainte d'unicite sur (user_id, type) avant le garde-fou ajoute sur
+// /api/joueurs - un double-clic/double-soumission du formulaire de creation
+// pouvait creer 2 fois la paire joueur+joueuse pour le meme compte, silencieusement,
+// bug signale par l'utilisateur via un doublon visible dans l'annuaire). Renvoie
+// chaque paire en double avec assez de contexte (nb de matchs/tournois lies) pour
+// decider en toute securite laquelle des 2 lignes supprimer - a retirer une fois
+// le/les doublon(s) trouve(s) et nettoye(s) manuellement.
+app.get('/api/admin/diagnostiquer-doublons-joueurs', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const groupes = db.prepare(`
+            SELECT user_id, type, COUNT(*) AS n
+            FROM players
+            GROUP BY user_id, type
+            HAVING n > 1
+        `).all();
+
+        const resultat = groupes.map(function (g) {
+            const lignes = db.prepare('SELECT * FROM players WHERE user_id = ? AND type = ? ORDER BY id').all(g.user_id, g.type);
+            lignes.forEach(function (l) {
+                l.nbMatchs = db.prepare('SELECT COUNT(*) AS n FROM matchs WHERE player_id = ?').get(l.id).n;
+                l.nbTournois = db.prepare('SELECT COUNT(*) AS n FROM tournoi_joueurs WHERE player_id = ? AND est_reel = 1').get(l.id).n;
+            });
+            return { userId: g.user_id, coachNom: nomCoach(g.user_id), type: g.type, joueurs: lignes };
+        });
+
+        res.json({ success: true, doublons: resultat });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
