@@ -3902,7 +3902,7 @@ app.get('/api/tournois/style-en-attente/:playerId', (req, res) => {
 
         res.json({
             success: true,
-            tournoi: { id: tournoi.id, nom: tournoi.nom, calendrierId: tournoi.calendrier_id, semaine: tournoi.semaine, tour_actuel: tournoi.tour_actuel },
+            tournoi: { id: tournoi.id, nom: tournoi.nom, calendrierId: tournoi.calendrier_id, semaine: tournoi.semaine, positionSemaine: positionSemaineAffichee(tournoi.semaine), tour_actuel: tournoi.tour_actuel },
             labelsTours,
             stylesActuels,
             stylesInterdits,

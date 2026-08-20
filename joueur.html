@@ -546,7 +546,7 @@
                 : '';
 
             container.innerHTML = `
-                <div class="match-hint">${data.tournoi.nom} (semaine ${data.tournoi.semaine}) — à choisir avant le début du tournoi. Le même style peut être gardé sur plusieurs tours d'affilée.${texteInterdits}</div>
+                <div class="match-hint">${data.tournoi.nom} (semaine ${data.tournoi.positionSemaine}) — à choisir avant le début du tournoi. Le même style peut être gardé sur plusieurs tours d'affilée.${texteInterdits}</div>
                 ${miseHtml}
                 <div class="style-tour-grid">${toursHtml}</div>
                 <button class="cta cta-primary style-valider-btn" style="padding:12px 24px; font-size:0.85rem;">Valider les styles</button>
