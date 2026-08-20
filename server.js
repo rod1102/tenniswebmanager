@@ -511,32 +511,6 @@ function estAdmin(adminId) {
     return user && user.role === 'admin';
 }
 
-// Route de debug temporaire (2026-08-20) : etat brut d'un joueur (plannings en
-// attente, journal recent, semaine actuelle) pour diagnostiquer un ecart entre
-// "ce qui a ete planifie" et "ce qui a ete credite" sans avoir besoin d'un acces
-// direct a la base de production. A retirer une fois le probleme resolu.
-app.get('/api/admin/debug-joueur/:playerId', (req, res) => {
-    try {
-        if (!estAdmin(req.userId)) {
-            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
-        }
-        const { playerId } = req.params;
-        const etat = db.prepare('SELECT * FROM jeu_etat WHERE id = 1').get();
-        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
-        if (!player) {
-            return res.status(404).json({ error: 'Joueur introuvable.' });
-        }
-        const plannings = db.prepare('SELECT * FROM plannings WHERE player_id = ? ORDER BY semaine').all(playerId);
-        const journal = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine DESC LIMIT 10').all(playerId);
-        const phaseActuelle = phaseDeSemaine(etat.semaine_actuelle);
-        const phaseSuivante = phaseDeSemaine(etat.semaine_actuelle + 1);
-        res.json({ success: true, etat, phaseActuelle, phaseSuivante, player, plannings, journal });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
 app.get('/api/admin/en-attente', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
@@ -1248,12 +1222,18 @@ function executerAvancementSemaine() {
         joueurs.forEach(function (player) {
             // Un tournoi peut deborder sur plusieurs semaines ingame (les 7-tours) :
             // un joueur reste "engage" tant que son tournoi n'est pas termine, quelle
-            // que soit la semaine ou ce tournoi a ete cree.
+            // que soit la semaine ou ce tournoi a ete cree. Uniquement une fois le
+            // tableau REELLEMENT tire (statut='a_venir') - une simple inscription
+            // (statut='inscriptions', pool ouvert des S-5 mais tournoi pas encore
+            // commence) ne doit jamais compter comme "engage cette semaine" : sinon
+            // un joueur inscrit a un tournoi futur voit sa planification de la
+            // semaine en cours silencieusement annulee, une semaine trop tot (bug
+            // signale par l'utilisateur, 2026-08-20 - confirme via /api/admin/debug-joueur).
             const tournoiEngage = db.prepare(`
                 SELECT t.nom, t.surface
                 FROM tournoi_joueurs tj
                 JOIN tournois t ON t.id = tj.tournoi_id
-                WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut != 'termine'
+                WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut = 'a_venir'
                 LIMIT 1
             `).get(player.id);
             const joueurEngageCetteSemaine = !!tournoiEngage;
