@@ -61,6 +61,14 @@
         const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
         const LABELS_DIFFICULTE = { faible: 'Adversaire faible', equilibre: 'Adversaire équilibré', fort: 'Adversaire fort' };
 
+        // Ordre chronologique des tours (du plus tot au plus tard) - sert a trier les
+        // matchs d'un meme tournoi avec le tour le plus recemment joue en haut.
+        const ORDRE_TOURS_MATCHS = ['Poules', '64e de finale', '32e de finale', '16e de finale', '8e de finale', '1/4 finale', 'Demi-finale', '1/2 finale', 'Finale'];
+        function rangTour(label) {
+            const i = ORDRE_TOURS_MATCHS.indexOf(label);
+            return i === -1 ? -1 : i;
+        }
+
         function flagImg(code) {
             if (!code) return '';
             return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
@@ -359,7 +367,9 @@
                 }
             });
             groupes.forEach(function (g) {
-                if (g.tournoi_id || g.coupe_equipe_id) g.matchs.reverse();
+                if (g.tournoi_id || g.coupe_equipe_id) {
+                    g.matchs.sort(function (a, b) { return rangTour(b.numero_tour) - rangTour(a.numero_tour); });
+                }
             });
             return groupes;
         }
@@ -472,6 +482,7 @@
             }
 
             data.tournois.forEach(function (tournoi) {
+                tournoi.matchs.sort(function (a, b) { return rangTour(b.numero_tour) - rangTour(a.numero_tour); });
                 const bloc = document.createElement('div');
                 bloc.className = 'match-tournoi-group match-tournoi-group-' + tournoi.surface;
                 bloc.innerHTML = `
