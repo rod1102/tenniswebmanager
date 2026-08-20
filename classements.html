@@ -166,7 +166,7 @@
                 }
             } else if (j.cle) {
                 if (j.cle.indexOf('rival:') === 0) {
-                    nomHtml = `<a class="lien-adversaire" href="adversaire.html?type=rival&id=${j.cle.slice(6)}">${nomAffiche}</a>`;
+                    nomHtml = `<a class="lien-adversaire classement-bot" href="adversaire.html?type=rival&id=${j.cle.slice(6)}">${nomAffiche}</a>`;
                 } else if (j.cle.indexOf('joueur:') === 0) {
                     nomHtml = `<a class="lien-adversaire" href="adversaire.html?type=reel&id=${j.cle.slice(7)}">${nomAffiche}</a>`;
                 }

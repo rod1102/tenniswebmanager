@@ -1461,6 +1461,12 @@ h1 {
 .lien-adversaire.tournoi-name-atp { color: #5FA8E8; }
 .lien-adversaire.tournoi-name-wta { color: #E87CC2; }
 
+/* Meme bleu fonce que les bots dans le tableau de tournoi (bracket-bot),
+   reutilise sur classements.html - specificite superieure a .lien-adversaire
+   pour la meme raison que ci-dessus. */
+.classement-bot { color: #3E6B99; }
+.lien-adversaire.classement-bot { color: #3E6B99; }
+
 .lien-adversaire {
     color: inherit;
     text-decoration: none;

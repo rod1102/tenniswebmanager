@@ -4217,16 +4217,18 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
                 // On ne renvoie au client que celle qui appartient au joueur consulte (ou
                 // rien s'il n'est implique dans ce match precis) - meme contrat qu'avant
                 // pour le frontend (un seul champ m.match_id), aucun changement JS requis.
+                const estMonMatch = m.joueur1_player_id === Number(playerId) || m.joueur2_player_id === Number(playerId);
+                const aUnDeroulePublic = !!m.evenements || !!m.match_id || !!m.match_id_j2;
                 if (m.joueur2_player_id === Number(playerId)) {
                     m.match_id = m.match_id_j2;
                 } else if (m.joueur1_player_id !== Number(playerId)) {
                     m.match_id = null;
                 }
-                // Deroule complet des matchs 100% bots (evenements) : jamais envoye tel
-                // quel ici (spoilerait le score des l'ouverture de l'onglet), seulement un
-                // indicateur - le vrai contenu se recupere a la demande via
+                // Deroule complet (bots ou vrai joueur d'un AUTRE coach) : jamais envoye
+                // tel quel ici (spoilerait le score des l'ouverture de l'onglet), seulement
+                // un indicateur - le vrai contenu se recupere a la demande via
                 // /api/tournois/match-bot/:id quand le coach clique un mode de visionnage.
-                m.aReplayBot = !m.match_id && !!m.evenements;
+                m.aReplayBot = !estMonMatch && aUnDeroulePublic;
                 delete m.evenements;
             });
             instance.matchs = matchs;
@@ -5355,7 +5357,7 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
             // matchs qui m'appartiennent VRAIMENT (matchs.user_id = moi, cote j1 ou j2).
             const matchs = db.prepare(`
                 SELECT tournoi_matchs.id, tournoi_matchs.numero_tour, tournoi_matchs.ordre, tournoi_matchs.score,
-                       tournoi_matchs.evenements,
+                       tournoi_matchs.evenements, tournoi_matchs.match_id, tournoi_matchs.match_id_j2,
                        j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite,
                        j2.nom AS joueur2_nom, j2.nationalite AS joueur2_nationalite
                 FROM tournoi_matchs
@@ -5374,8 +5376,10 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
                 m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
                 // Deroule complet jamais envoye ici (spoilerait le score des l'ouverture
                 // de la page) - juste un indicateur, le vrai contenu se recupere via
-                // /api/tournois/match-bot/:id au clic sur un mode de visionnage.
-                m.aReplayBot = !!m.evenements;
+                // /api/tournois/match-bot/:id au clic sur un mode de visionnage. La ligne
+                // a deja ete exclue plus haut si elle m'appartenait, donc match_id/
+                // match_id_j2 non nuls ici signifient toujours "un AUTRE coach".
+                m.aReplayBot = !!m.evenements || !!m.match_id || !!m.match_id_j2;
                 delete m.evenements;
             });
             return {
@@ -5516,18 +5520,21 @@ app.get('/api/matchs/detail/:matchId', (req, res) => {
     }
 });
 
-// Deroule complet d'un match 100% bots (aucune ligne matchs, evenements stockes
-// directement sur tournoi_matchs - voir enregistrerMatchTournoi/resoudreMatchAdversaire).
-// Public comme le reste d'un tableau de tournoi deja tire, pas de verification de
-// proprietaire (pas de notion de "mon match" pour un match entre deux bots).
+// Deroule complet d'un match "public" (pas le mien) affiche derriere un mode de
+// visionnage sur un match ou je ne suis pas implique : soit 100% bots (evenements
+// stockes directement sur tournoi_matchs), soit un vrai joueur d'un AUTRE coach
+// (le deroule vit alors dans sa propre ligne `matchs`, ecrit de SON point de vue -
+// "Toi"/"Adversaire" remplaces ici par les vrais noms des 2 entrants pour un
+// spectateur neutre). Public comme le reste d'un tableau de tournoi deja tire,
+// pas de verification de proprietaire.
 app.get('/api/tournois/match-bot/:tournoiMatchId', (req, res) => {
     try {
         const { tournoiMatchId } = req.params;
 
         const match = db.prepare(`
-            SELECT tournoi_matchs.score, tournoi_matchs.evenements, tournois.semaine,
-                   j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite,
-                   j2.nom AS joueur2_nom, j2.nationalite AS joueur2_nationalite,
+            SELECT tournoi_matchs.score, tournoi_matchs.evenements, tournoi_matchs.match_id, tournoi_matchs.match_id_j2, tournois.semaine,
+                   j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite, j1.player_id AS joueur1_player_id,
+                   j2.nom AS joueur2_nom, j2.nationalite AS joueur2_nationalite, j2.player_id AS joueur2_player_id,
                    vj.nom AS vainqueur_nom
             FROM tournoi_matchs
             JOIN tournois ON tournois.id = tournoi_matchs.tournoi_id
@@ -5537,14 +5544,37 @@ app.get('/api/tournois/match-bot/:tournoiMatchId', (req, res) => {
             WHERE tournoi_matchs.id = ?
         `).get(tournoiMatchId);
 
-        if (!match || !match.evenements) {
+        if (!match) {
+            return res.status(404).json({ error: 'Match introuvable.' });
+        }
+
+        let evenements;
+        if (match.evenements) {
+            evenements = JSON.parse(match.evenements);
+        } else if (match.match_id || match.match_id_j2) {
+            const ligne = db.prepare('SELECT player_id, evenements FROM matchs WHERE id = ?').get(match.match_id || match.match_id_j2);
+            if (!ligne) {
+                return res.status(404).json({ error: 'Match introuvable.' });
+            }
+            // match_id (cote "j1") n'appartient PAS toujours au joueur1 : pour un match
+            // reel-vs-lambda, match_id pointe simplement vers l'unique vrai joueur,
+            // quelle que soit sa position dans le tableau (contrairement au reel-vs-reel
+            // ou match_id/match_id_j2 correspondent bien a j1/j2). Comparer matchs.player_id
+            // aux 2 cotes plutot que de deviner via quelle colonne est renseignee.
+            const proprietaireEstJ1 = ligne.player_id === match.joueur1_player_id;
+            const nomProprietaire = proprietaireEstJ1 ? match.joueur1_nom : match.joueur2_nom;
+            const nomAdversaire = proprietaireEstJ1 ? match.joueur2_nom : match.joueur1_nom;
+            evenements = JSON.parse(ligne.evenements).map(function (evt) {
+                return evt.texte ? Object.assign({}, evt, { texte: evt.texte.replace(/\bToi\b/g, nomProprietaire).replace(/\bAdversaire\b/g, nomAdversaire) }) : evt;
+            });
+        } else {
             return res.status(404).json({ error: 'Match introuvable.' });
         }
 
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         match.joueur1_drapeau = drapeau(match.joueur1_nationalite);
         match.joueur2_drapeau = drapeau(match.joueur2_nationalite);
-        match.evenements = JSON.parse(match.evenements);
+        match.evenements = evenements;
         match.estSemaineActuelle = etat.semaine_actuelle - match.semaine <= 1;
 
         res.json({ success: true, match });
