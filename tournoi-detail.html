@@ -360,9 +360,11 @@
                 function nomJoueurCase(j) {
                     if (!j) return '<span class="bracket-joueur bracket-tbd">?</span>';
                     if (j.nom === 'BYE') return '<span class="bracket-joueur bracket-bye">BYE</span>';
+                    const estMoi = j.est_reel && j.player_id === Number(playerId);
+                    const classe = estMoi ? ' bracket-moi' : (!j.est_reel ? ' bracket-bot' : '');
                     const rangTxt = j.rang ? ` <span class="bracket-rang">(${j.rang})</span>` : '';
                     const nomHtml = lienAdversaire(`${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}${rangTxt}`, j.est_reel, j.player_id, j.rival_id);
-                    return `<span class="bracket-joueur${j.est_reel ? ' bracket-moi' : ''}">${nomHtml}</span><span class="bracket-seed">${j.tete_de_serie ? '[' + j.tete_de_serie + ']' : ''}</span>`;
+                    return `<span class="bracket-joueur${classe}">${nomHtml}</span><span class="bracket-seed">${j.tete_de_serie ? '[' + j.tete_de_serie + ']' : ''}</span>`;
                 }
 
                 const colonnes = [];
@@ -440,7 +442,8 @@
                 const rId = cote === 1 ? m.joueur1_rival_id : m.joueur2_rival_id;
                 if (!nom) return '<span class="bracket-joueur bracket-bye">BYE</span>';
                 const estVainqueur = m.vainqueur_nom === nom;
-                const classes = (estVainqueur ? ' bracket-vainqueur' : '') + (estReel ? ' bracket-moi' : '');
+                const estMoi = estReel && pId === Number(playerId);
+                const classes = (estVainqueur ? ' bracket-vainqueur' : '') + (estMoi ? ' bracket-moi' : (!estReel ? ' bracket-bot' : ''));
                 const rangTxt = rang ? ` <span class="bracket-rang">(${rang})</span>` : '';
                 const nomHtml = lienAdversaire(`${flagImg(drap)} ${formaterNomComplet(nom)}${rangTxt}`, estReel, pId, rId);
                 return `<span class="bracket-joueur${classes}">${nomHtml}</span><span class="bracket-seed">${seed ? '[' + seed + ']' : ''}</span>`;

@@ -1929,6 +1929,10 @@ table.points td.pts {
     font-weight: 700;
 }
 
+.bracket-bot {
+    font-style: italic;
+}
+
 .bracket-bye {
     color: #57697A;
     font-style: italic;
