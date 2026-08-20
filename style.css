@@ -502,6 +502,28 @@ h1 {
     font-weight: 600;
 }
 
+.pts-detail-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    margin-left: 6px;
+    border-radius: 50%;
+    border: 1px solid rgba(212, 240, 0, 0.5);
+    background: transparent;
+    color: #D4F000;
+    font-size: 0.65rem;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    vertical-align: middle;
+}
+
+.pts-detail-btn:hover {
+    background: rgba(212, 240, 0, 0.15);
+}
+
 /* ---------- Statut de validation ---------- */
 
 .status-badge {

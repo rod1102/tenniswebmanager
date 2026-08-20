@@ -3449,11 +3449,13 @@ app.get('/api/tournois/passes/:playerId', (req, res) => {
         // Reellement termines uniquement (statut de la ligne tournois elle-meme, pas
         // seulement "la semaine du calendrier est atteinte") - un tournoi de la
         // semaine en cours, pas encore joue ou encore en cours, ne doit jamais
-        // apparaitre ici tant que son dernier tour n'est pas simule.
-        const tournoisTermines = new Set(
-            db.prepare("SELECT calendrier_id, semaine FROM tournois WHERE circuit = ? AND statut = 'termine' AND semaine BETWEEN ? AND ?")
+        // apparaitre ici tant que son dernier tour n'est pas simule. Map (pas
+        // simplement un Set) pour retrouver l'id reel de chaque tournoi et pouvoir
+        // afficher son vainqueur meme quand ce joueur n'y a pas participe.
+        const tournoisTerminesMap = new Map(
+            db.prepare("SELECT id, calendrier_id, semaine FROM tournois WHERE circuit = ? AND statut = 'termine' AND semaine BETWEEN ? AND ?")
                 .all(circuit, etat.semaine_actuelle - cycleLongueur, etat.semaine_actuelle)
-                .map(function (t) { return t.calendrier_id + '-' + t.semaine; })
+                .map(function (t) { return [t.calendrier_id + '-' + t.semaine, t.id]; })
         );
 
         // Uniquement le passage en cours dans le cycle (saison en cours) : les tournois
@@ -3466,7 +3468,7 @@ app.get('/api/tournois/passes/:playerId', (req, res) => {
                     const semaine = etat.semaine_actuelle - (phaseActuelle.positionSemaine - t.semaine_debut);
                     return Object.assign({}, t, { semaine, positionSemaine: t.semaine_debut });
                 })
-                .filter(function (t) { return tournoisTermines.has(t.id + '-' + t.semaine); })
+                .filter(function (t) { return tournoisTerminesMap.has(t.id + '-' + t.semaine); })
             : [];
 
         // Mes inscriptions reelles (le tournoi lui-meme est partage, l'appartenance vit
@@ -3484,14 +3486,20 @@ app.get('/api/tournois/passes/:playerId', (req, res) => {
         passes.forEach(function (t) {
             const reg = regMap.get(t.id + '-' + t.semaine);
             if (reg && reg.statut === 'termine') {
-                const vainqueur = db.prepare("SELECT nom FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine = 'Vainqueur'").get(reg.id);
                 t.participe = true;
                 t.tourElimineJoueur = reg.tour_elimine_joueur;
                 t.pointsGagnesJoueur = reg.points_gagnes_joueur;
-                t.nomVainqueur = vainqueur ? vainqueur.nom : null;
             } else {
                 t.participe = false;
             }
+
+            // Vainqueur affiche dans tous les cas (participation ou non) - demande
+            // explicite de l'utilisateur : "Tournois passes" doit montrer TOUS les
+            // tournois du circuit, avec le nom et le drapeau du vainqueur.
+            const tournoiId = tournoisTerminesMap.get(t.id + '-' + t.semaine);
+            const vainqueur = db.prepare("SELECT nom, nationalite FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine = 'Vainqueur'").get(tournoiId);
+            t.nomVainqueur = vainqueur ? vainqueur.nom : null;
+            t.drapeauVainqueur = vainqueur ? drapeau(vainqueur.nationalite) : null;
         });
 
         passes.sort(function (a, b) { return b.semaine - a.semaine; });
@@ -4348,6 +4356,57 @@ app.get('/api/classement/:userId', (req, res) => {
                 race: classementCoachSomme(['ATP', 'WTA'], debutSaison, semaineActuelle, userId)
             }
         });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Detail tournoi par tournoi des points comptes pour une ligne de classement
+// (Live ou Race), affiche derriere le "?" a cote du total sur classements.html.
+// Deux facons d'identifier la ligne : `cle` (rival:X ou joueur:X, pour les
+// onglets ATP/WTA individuels) ou `userId` (pour l'onglet Coach, qui cumule le
+// joueur ATP et la joueuse WTA d'un meme compte).
+app.get('/api/classement/detail', (req, res) => {
+    try {
+        const { cle, userId: userIdParam, type } = req.query;
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+        const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+        const debutSaison = semaineActuelle - positionSaisonBrute + 2;
+        const semaineMin = type === 'race' ? debutSaison : semaineActuelle - FENETRE_LIVE;
+
+        let condition, params;
+        if (cle && cle.indexOf('rival:') === 0) {
+            condition = 'tj.rival_id = ?';
+            params = [cle.slice(6)];
+        } else if (cle && cle.indexOf('joueur:') === 0) {
+            condition = '(tj.player_id = ? AND tj.est_reel = 1)';
+            params = [cle.slice(7)];
+        } else if (userIdParam) {
+            const joueurs = db.prepare("SELECT id FROM players WHERE user_id = ? AND statut = 'valide'").all(userIdParam);
+            if (joueurs.length === 0) {
+                return res.json({ success: true, detail: [], total: 0 });
+            }
+            const placeholders = joueurs.map(function () { return '?'; }).join(',');
+            condition = '(tj.player_id IN (' + placeholders + ') AND tj.est_reel = 1)';
+            params = joueurs.map(function (j) { return j.id; });
+        } else {
+            return res.status(400).json({ error: 'Parametre cle ou userId requis.' });
+        }
+
+        const lignes = db.prepare(`
+            SELECT tournois.nom, tournois.circuit, tournois.semaine, tj.tour_elimine, tj.points_gagnes
+            FROM tournoi_joueurs tj
+            JOIN tournois ON tournois.id = tj.tournoi_id
+            WHERE ${condition} AND tournois.semaine > ? AND tournois.semaine <= ? AND tournois.statut = 'termine'
+            ORDER BY tournois.semaine DESC
+        `).all(...params, semaineMin, semaineActuelle);
+
+        lignes.forEach(function (l) { l.positionSemaine = positionSemaineAffichee(l.semaine); });
+        const total = lignes.reduce(function (s, l) { return s + (l.points_gagnes || 0); }, 0);
+
+        res.json({ success: true, detail: lignes, total });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });

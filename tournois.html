@@ -81,6 +81,11 @@
             return LABELS_SURFACE[t.surface] + (t.indoor ? ' (intérieur)' : '');
         }
 
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
         function formaterNomComplet(nomComplet) {
             if (!nomComplet) return nomComplet;
             const i = nomComplet.lastIndexOf(' ');
@@ -203,7 +208,10 @@
                 let resultatHtml;
                 if (t.participe) {
                     const cestToi = t.nomVainqueur === nomJoueur;
-                    resultatHtml = `Vainqueur : ${cestToi ? 'Toi !' : (formaterNomComplet(t.nomVainqueur) || '-')} · Ton résultat : ${t.tourElimineJoueur || '-'} (${t.pointsGagnesJoueur || 0} points)`;
+                    const vainqueurTxt = cestToi ? 'Toi !' : `${flagImg(t.drapeauVainqueur)} ${formaterNomComplet(t.nomVainqueur) || '-'}`;
+                    resultatHtml = `Vainqueur : ${vainqueurTxt} · Ton résultat : ${t.tourElimineJoueur || '-'} (${t.pointsGagnesJoueur || 0} points)`;
+                } else if (t.nomVainqueur) {
+                    resultatHtml = `Vainqueur : ${flagImg(t.drapeauVainqueur)} ${formaterNomComplet(t.nomVainqueur)} · Tu n'y as pas participé`;
                 } else {
                     resultatHtml = 'Non disputé';
                 }
