@@ -1229,11 +1229,20 @@ function executerAvancementSemaine() {
             // un joueur inscrit a un tournoi futur voit sa planification de la
             // semaine en cours silencieusement annulee, une semaine trop tot (bug
             // signale par l'utilisateur, 2026-08-20 - confirme via /api/admin/debug-joueur).
+            // Un joueur peut avoir 2 tournois 'a_venir' simultanement : celui qu'il est
+            // en train de jouer ET le suivant, deja tire au sort a S-1 (ex. un Grand
+            // Chelem sur 2 semaines) - sans tri, LIMIT 1 pouvait piocher le mauvais des
+            // deux (tournoi_nom errone dans le journal, mauvaise surface protegee de
+            // l'erosion). Le tournoi qui commence le plus tot est toujours celui
+            // reellement en cours (un tournoi futur ne peut jamais avoir demarre avant
+            // lui), donc trier par semaine croissante resout l'ambiguite (bug signale
+            // par l'utilisateur, 2026-08-20).
             const tournoiEngage = db.prepare(`
                 SELECT t.nom, t.surface
                 FROM tournoi_joueurs tj
                 JOIN tournois t ON t.id = tj.tournoi_id
                 WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut = 'a_venir'
+                ORDER BY t.semaine ASC
                 LIMIT 1
             `).get(player.id);
             const joueurEngageCetteSemaine = !!tournoiEngage;
