@@ -8,7 +8,7 @@ const multer = require('multer');
 const cookieParser = require('cookie-parser');
 const { Resend } = require('resend');
 const db = require('./database');
-const { BAREME_POINTS, CALENDRIER_TOURNOIS, SEMAINES_COUPES_EQUIPE, genererJoueurLambda, drapeau, phaseDeSemaine, LONGUEUR_SAISON } = require('./calendrier-tournois');
+const { BAREME_POINTS, CALENDRIER_TOURNOIS, SEMAINES_COUPES_EQUIPE, genererJoueurLambda, drapeau, normaliserPays, phaseDeSemaine, LONGUEUR_SAISON } = require('./calendrier-tournois');
 
 // Fenetre du classement Live (52 dernieres semaines glissantes) : un nombre fixe,
 // independant de LONGUEUR_SAISON (duree du cycle de saison ingame, cf.
@@ -3968,28 +3968,14 @@ app.post('/api/tournois/style', (req, res) => {
         if (ligneReelle.style_choisi) {
             const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
 
-            if (labelsAttendus.length !== 7) {
-                // Tournois classiques (1 semaine) : librement modifiables tant que la
-                // semaine en cours n'a pas atteint celle du tournoi - des que la semaine
-                // change (executerAvancementSemaine) pour entrer dans celle du tournoi,
-                // c'est verrouille, meme si le premier tour n'a pas encore ete simule.
-                if (semaineActuelle >= tournoi.semaine) {
-                    return res.status(400).json({ error: 'Les styles de ce tournoi ne sont plus modifiables une fois sa semaine commencee.' });
-                }
-            } else {
-                // Tournois 2 semaines (7 tours, GC/M1000 96) : meme principe applique
-                // tour par tour - les tours 0-2 se jouent la semaine tournoi.semaine, les
-                // tours 3-6 la semaine tournoi.semaine + 1 (cf. semaineTour dans
-                // executerAvancementTour). Chaque tour reste modifiable tant que SA
-                // semaine n'a pas commence, verrouille des qu'elle commence.
-                let stylesActuels = [];
-                try { stylesActuels = JSON.parse(ligneReelle.style_choisi); } catch (e) { stylesActuels = []; }
-                for (let i = 0; i < styles.length; i++) {
-                    const semaineTour = i >= 3 ? tournoi.semaine + 1 : tournoi.semaine;
-                    if (semaineActuelle >= semaineTour && styles[i] !== stylesActuels[i]) {
-                        return res.status(400).json({ error: 'Les styles de cette semaine du tournoi ne sont plus modifiables.' });
-                    }
-                }
+            // Verrouille des que la semaine de DEBUT du tournoi commence, y compris pour
+            // les tournois 2 semaines (7 tours, GC/M1000 96) : avant, leurs tours de la
+            // 2e semaine (3-6) restaient modifiables jusqu'a leur propre semaine, permettant
+            // de changer le style en cours de route une fois le tournoi deja entame -
+            // desormais un seul verrou global, comme les tournois classiques (demande
+            // explicite de l'utilisateur, 2026-08-20).
+            if (semaineActuelle >= tournoi.semaine) {
+                return res.status(400).json({ error: 'Les styles de ce tournoi ne sont plus modifiables une fois sa semaine commencee.' });
             }
         }
 
@@ -4012,43 +3998,50 @@ app.get('/api/tournois/style-en-attente/:playerId', (req, res) => {
         }
 
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
 
-        // La semaine >= semaine_actuelle exclut toute ligne orpheline restee bloquee en
-        // 'a_venir' tres loin dans le passe (ne devrait jamais arriver en temps normal,
-        // mais protege contre une donnee corrompue plutot que de choisir la mauvaise ligne).
-        const tournoi = db.prepare(`
+        // TOUS les tournois "a_venir" (tableau deja tire) ou ce joueur est engage, pas
+        // seulement le premier : le tableau du PROCHAIN tournoi peut deja etre tire
+        // (S-1) alors que le joueur est encore engage dans le tournoi en cours, et les
+        // 2 doivent pouvoir etre planifies en meme temps (demande explicite de
+        // l'utilisateur, 2026-08-20 - avant, le 2e restait invisible jusqu'a la fin du
+        // 1er). La semaine >= semaine_actuelle exclut toute ligne orpheline restee
+        // bloquee en 'a_venir' tres loin dans le passe.
+        const tournois = db.prepare(`
             SELECT tournois.*
             FROM tournois
             JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
             WHERE tournois.statut = 'a_venir' AND tournois.semaine >= ?
               AND tournoi_joueurs.player_id = ? AND tournoi_joueurs.est_reel = 1
             ORDER BY tournois.semaine ASC
-            LIMIT 1
-        `).get(etat.semaine_actuelle, playerId);
+        `).all(semaineActuelle, playerId);
 
-        if (!tournoi) {
-            return res.json({ success: true, tournoi: null });
-        }
+        const resultat = tournois.map(function (tournoi) {
+            const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
+            const labelsTours = calculerLabelsTours(entree.taille_tableau, tournoi.format);
 
-        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
-        const labelsTours = calculerLabelsTours(entree.taille_tableau, tournoi.format);
+            const ligneReelle = db.prepare('SELECT style_choisi, energie_misee FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoi.id, playerId);
+            let stylesActuels = [];
+            try { stylesActuels = JSON.parse(ligneReelle.style_choisi || '[]'); } catch (e) { stylesActuels = []; }
 
-        const ligneReelle = db.prepare('SELECT style_choisi, energie_misee FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoi.id, playerId);
-        let stylesActuels = [];
-        try { stylesActuels = JSON.parse(ligneReelle.style_choisi || '[]'); } catch (e) { stylesActuels = []; }
+            const stylesInterdits = stylesInterditsDuTournoiPrecedent(playerId, tournoi.semaine);
 
-        const stylesInterdits = stylesInterditsDuTournoiPrecedent(playerId, tournoi.semaine);
-
-        res.json({
-            success: true,
-            tournoi: { id: tournoi.id, nom: tournoi.nom, calendrierId: tournoi.calendrier_id, semaine: tournoi.semaine, positionSemaine: positionSemaineAffichee(tournoi.semaine), tour_actuel: tournoi.tour_actuel },
-            labelsTours,
-            stylesActuels,
-            stylesInterdits,
-            energieMiseeActuelle: ligneReelle.energie_misee || 0,
-            plafondMiseEnergie: PLAFOND_MISE_ENERGIE[String(entree.categorie)] || 0,
-            pointsEnergieDisponibles: player.points_energie
+            return {
+                tournoi: { id: tournoi.id, nom: tournoi.nom, calendrierId: tournoi.calendrier_id, semaine: tournoi.semaine, positionSemaine: positionSemaineAffichee(tournoi.semaine), tour_actuel: tournoi.tour_actuel },
+                // Verrouille des que la semaine de DEBUT du tournoi commence (meme regle
+                // que /api/tournois/style, cf. juste en dessous) - remplace tour_actuel > 0
+                // cote frontend, qui restait faux tant qu'aucun tour n'avait encore ete
+                // simule cette semaine-la.
+                verrouille: semaineActuelle >= tournoi.semaine,
+                labelsTours,
+                stylesActuels,
+                stylesInterdits,
+                energieMiseeActuelle: ligneReelle.energie_misee || 0,
+                plafondMiseEnergie: PLAFOND_MISE_ENERGIE[String(entree.categorie)] || 0
+            };
         });
+
+        res.json({ success: true, tournois: resultat, pointsEnergieDisponibles: player.points_energie });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
@@ -4365,15 +4358,22 @@ app.get('/api/public/classement', (req, res) => {
 // 4 meilleurs joueurs de la nation, calcule circuit par circuit puis additionne.
 // circuits = ['ATP'], ['WTA'] ou ['ATP','WTA'] pour la version combinee (onglet Coach).
 function classementNationsSomme(circuits) {
+    // Meme precaution que dans classementNationsTop4 : fusionner ATP et WTA sur une
+    // cle normalisee, sinon "Coree du Sud" (cote ATP) et "Corée du Sud" (cote WTA)
+    // resteraient deux lignes distinctes au lieu de s'additionner.
     const parNation = new Map();
     circuits.forEach(function (circuit) {
         classementNationsTop4(circuit).forEach(function (points, nation) {
-            parNation.set(nation, (parNation.get(nation) || 0) + points);
+            const cle = normaliserPays(nation);
+            const existant = parNation.get(cle) || { total: 0, libelle: nation };
+            existant.total += points;
+            parNation.set(cle, existant);
         });
     });
-    const nations = Array.from(parNation.keys()).sort(function (a, b) { return parNation.get(b) - parNation.get(a); });
-    return nations.map(function (nation, i) {
-        return { rang: i + 1, nation: nation, drapeau: drapeau(nation), points: parNation.get(nation) };
+    const cles = Array.from(parNation.keys()).sort(function (a, b) { return parNation.get(b).total - parNation.get(a).total; });
+    return cles.map(function (cle, i) {
+        const v = parNation.get(cle);
+        return { rang: i + 1, nation: v.libelle, drapeau: drapeau(v.libelle), points: v.total };
     });
 }
 
@@ -6294,15 +6294,20 @@ function classementNationsTop4(circuit) {
     const parNation = new Map();
     classement.forEach(function (c) {
         if (!c.nationalite) return;
-        const compte = parNation.get(c.nationalite) || { total: 0, n: 0 };
+        // Cle normalisee (sans accents/casse) car un meme pays peut etre orthographie
+        // differemment selon la source du joueur (rivaux/lambdas non-accentues vs
+        // formulaire de creation accentue) - voir normaliserPays(). Le libelle affiche
+        // reste la premiere graphie rencontree.
+        const cle = normaliserPays(c.nationalite);
+        const compte = parNation.get(cle) || { total: 0, n: 0, libelle: c.nationalite };
         if (compte.n < 4) {
             compte.total += c.points;
             compte.n += 1;
-            parNation.set(c.nationalite, compte);
+            parNation.set(cle, compte);
         }
     });
     const totaux = new Map();
-    parNation.forEach(function (v, nation) { totaux.set(nation, v.total); });
+    parNation.forEach(function (v) { totaux.set(v.libelle, v.total); });
     return totaux;
 }
 

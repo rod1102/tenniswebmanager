@@ -506,87 +506,101 @@
                 return;
             }
 
-            if (!data.tournoi) {
+            if (!data.tournois || data.tournois.length === 0) {
                 container.innerHTML = '<div class="match-hint">Aucun tournoi en attente de style pour le moment — reviens ici une fois le tableau tiré (à S-1).</div>';
                 return;
             }
 
-            const stylesInterdits = data.stylesInterdits || [];
-            const tourActuel = data.tournoi.tour_actuel || 0;
-            const tournoiDemarre = tourActuel > 0;
-            const plafondMise = data.plafondMiseEnergie || 0;
-            const maxMise = Math.min(plafondMise, data.pointsEnergieDisponibles || 0);
-            const miseHtml = plafondMise > 0 ? `
-                <div class="xp-pool-panel">
-                    <div class="xp-pool-title">Mise de points d'énergie (plafond ${plafondMise}, énergie disponible ${data.pointsEnergieDisponibles})</div>
-                    <div class="planning-alerte-texte" style="margin-bottom:8px;">S'ajoute au niveau de jeu pendant tout le tournoi, mais définitivement perdue à l'élimination ou à la victoire. ${tournoiDemarre ? 'Le tournoi a déjà commencé, la mise ne peut plus être modifiée.' : 'Modifiable librement jusqu\'au début du tournoi.'}</div>
-                    <div class="training-row">
-                        <input type="number" min="0" max="${maxMise}" value="${data.energieMiseeActuelle || 0}" class="mise-energie-input" style="width:70px;" ${tournoiDemarre ? 'disabled' : ''}>
-                        <button class="cta cta-primary mise-energie-btn" style="padding:10px 16px; font-size:0.8rem;" ${tournoiDemarre ? 'disabled' : ''}>Valider la mise</button>
+            // Un joueur peut avoir plusieurs tournois "a_venir" en meme temps (celui en
+            // cours + le suivant deja tire a S-1) - un panneau independant par tournoi,
+            // chacun avec ses propres selecteurs/boutons scopes par tournoi.id pour ne
+            // jamais se marcher dessus (demande explicite de l'utilisateur, 2026-08-20).
+            container.innerHTML = data.tournois.map(function (bloc) {
+                const stylesInterdits = bloc.stylesInterdits || [];
+                const tournoiDemarre = bloc.verrouille;
+                const plafondMise = bloc.plafondMiseEnergie || 0;
+                const maxMise = Math.min(plafondMise, data.pointsEnergieDisponibles || 0);
+                const miseHtml = plafondMise > 0 ? `
+                    <div class="xp-pool-panel">
+                        <div class="xp-pool-title">Mise de points d'énergie (plafond ${plafondMise}, énergie disponible ${data.pointsEnergieDisponibles})</div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">S'ajoute au niveau de jeu pendant tout le tournoi, mais définitivement perdue à l'élimination ou à la victoire. ${tournoiDemarre ? 'Le tournoi a déjà commencé, la mise ne peut plus être modifiée.' : 'Modifiable librement jusqu\'au début du tournoi.'}</div>
+                        <div class="training-row">
+                            <input type="number" min="0" max="${maxMise}" value="${bloc.energieMiseeActuelle || 0}" class="mise-energie-input" style="width:70px;" ${tournoiDemarre ? 'disabled' : ''}>
+                            <button class="cta cta-primary mise-energie-btn" style="padding:10px 16px; font-size:0.8rem;" ${tournoiDemarre ? 'disabled' : ''}>Valider la mise</button>
+                        </div>
                     </div>
-                </div>
-            ` : '';
-            const toursHtml = data.labelsTours.map(function (label, i) {
-                const valeurActuelle = data.stylesActuels[i] || 'aucun';
-                const dejaJoue = i < tourActuel;
-                const optionsHtml = Object.keys(STYLES_JEU_LABELS).map(function (cle) {
-                    const interdit = stylesInterdits.includes(cle);
-                    return `<option value="${cle}" ${cle === valeurActuelle ? 'selected' : ''} ${interdit ? 'disabled' : ''}>${STYLES_JEU_LABELS[cle]}${interdit ? ' (déjà utilisé au tournoi précédent)' : ''}</option>`;
+                ` : '';
+                const tourActuel = bloc.tournoi.tour_actuel || 0;
+                const toursHtml = bloc.labelsTours.map(function (label, i) {
+                    const valeurActuelle = bloc.stylesActuels[i] || 'aucun';
+                    const dejaJoue = i < tourActuel;
+                    const optionsHtml = Object.keys(STYLES_JEU_LABELS).map(function (cle) {
+                        const interdit = stylesInterdits.includes(cle);
+                        return `<option value="${cle}" ${cle === valeurActuelle ? 'selected' : ''} ${interdit ? 'disabled' : ''}>${STYLES_JEU_LABELS[cle]}${interdit ? ' (déjà utilisé au tournoi précédent)' : ''}</option>`;
+                    }).join('');
+                    return `
+                        <div class="style-tour-card">
+                            <label>${label}${dejaJoue ? ' (déjà joué)' : ''}</label>
+                            <select class="style-tour-select" data-index="${i}" ${tournoiDemarre ? 'disabled' : ''}>${optionsHtml}</select>
+                        </div>
+                    `;
                 }).join('');
+
+                const texteInterdits = stylesInterdits.length > 0
+                    ? ' Interdit(s) car déjà utilisé(s) au tournoi précédent : ' + stylesInterdits.map(function (s) { return STYLES_JEU_LABELS[s] || s; }).join(', ') + '.'
+                    : '';
+
                 return `
-                    <div class="style-tour-card">
-                        <label>${label}${dejaJoue ? ' (déjà joué)' : ''}</label>
-                        <select class="style-tour-select" data-index="${i}" ${dejaJoue ? 'disabled' : ''}>${optionsHtml}</select>
+                    <div class="style-tournoi-bloc" data-tournoi-id="${bloc.tournoi.id}" style="margin-bottom:20px;">
+                        <div class="match-hint">${bloc.tournoi.nom} (semaine ${bloc.tournoi.positionSemaine}) — à choisir avant le début du tournoi. Le même style peut être gardé sur plusieurs tours d'affilée.${tournoiDemarre ? ' Le tournoi a déjà commencé, les styles ne sont plus modifiables.' : ''}${texteInterdits}</div>
+                        ${miseHtml}
+                        <div class="style-tour-grid">${toursHtml}</div>
+                        <button class="cta cta-primary style-valider-btn" style="padding:12px 24px; font-size:0.85rem;" ${tournoiDemarre ? 'disabled' : ''}>Valider les styles</button>
                     </div>
                 `;
             }).join('');
 
-            const texteInterdits = stylesInterdits.length > 0
-                ? ' Interdit(s) car déjà utilisé(s) au tournoi précédent : ' + stylesInterdits.map(function (s) { return STYLES_JEU_LABELS[s] || s; }).join(', ') + '.'
-                : '';
+            data.tournois.forEach(function (bloc) {
+                const panneau = container.querySelector('.style-tournoi-bloc[data-tournoi-id="' + bloc.tournoi.id + '"]');
 
-            container.innerHTML = `
-                <div class="match-hint">${data.tournoi.nom} (semaine ${data.tournoi.positionSemaine}) — à choisir avant le début du tournoi. Le même style peut être gardé sur plusieurs tours d'affilée.${texteInterdits}</div>
-                ${miseHtml}
-                <div class="style-tour-grid">${toursHtml}</div>
-                <button class="cta cta-primary style-valider-btn" style="padding:12px 24px; font-size:0.85rem;">Valider les styles</button>
-            `;
+                if (!bloc.verrouille && bloc.plafondMiseEnergie > 0) {
+                    panneau.querySelector('.mise-energie-btn').addEventListener('click', async function () {
+                        const inputMise = panneau.querySelector('.mise-energie-input');
+                        const energieMisee = Number(inputMise.value) || 0;
 
-            if (!tournoiDemarre && plafondMise > 0) {
-                document.querySelector('.mise-energie-btn').addEventListener('click', async function () {
-                    const inputMise = document.querySelector('.mise-energie-input');
-                    const energieMisee = Number(inputMise.value) || 0;
-
-                    const responseMise = await fetch('/api/tournois/mise-energie', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ userId, playerId: player.id, tournoiId: data.tournoi.id, energieMisee })
+                        const responseMise = await fetch('/api/tournois/mise-energie', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ userId, playerId: player.id, tournoiId: bloc.tournoi.id, energieMisee })
+                        });
+                        const dataMise = await responseMise.json();
+                        if (!responseMise.ok) {
+                            alert(dataMise.error);
+                            return;
+                        }
+                        alert('Mise d\'énergie enregistrée.');
+                        chargerStyleEnAttente(player);
                     });
-                    const dataMise = await responseMise.json();
-                    if (!responseMise.ok) {
-                        alert(dataMise.error);
-                        return;
-                    }
-                    alert('Mise d\'énergie enregistrée.');
-                    chargerStyleEnAttente(player);
-                });
-            }
-
-            document.querySelector('.style-valider-btn').addEventListener('click', async function () {
-                const styles = Array.from(document.querySelectorAll('.style-tour-select')).map(function (s) { return s.value; });
-
-                const responseValider = await fetch('/api/tournois/style', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ userId, playerId: player.id, tournoiId: data.tournoi.id, styles })
-                });
-                const dataValider = await responseValider.json();
-                if (!responseValider.ok) {
-                    alert(dataValider.error);
-                    return;
                 }
-                alert('Styles de jeu enregistrés.');
-                chargerStyleEnAttente(player);
+
+                if (!bloc.verrouille) {
+                    panneau.querySelector('.style-valider-btn').addEventListener('click', async function () {
+                        const styles = Array.from(panneau.querySelectorAll('.style-tour-select')).map(function (s) { return s.value; });
+
+                        const responseValider = await fetch('/api/tournois/style', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ userId, playerId: player.id, tournoiId: bloc.tournoi.id, styles })
+                        });
+                        const dataValider = await responseValider.json();
+                        if (!responseValider.ok) {
+                            alert(dataValider.error);
+                            return;
+                        }
+                        alert('Styles de jeu enregistrés.');
+                        chargerStyleEnAttente(player);
+                    });
+                }
             });
         }
 

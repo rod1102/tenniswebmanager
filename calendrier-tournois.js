@@ -324,4 +324,4 @@ function phaseDeSemaine(semaine) {
     return { type: 'tournoi', positionSemaine: positionSaison - 2, numeroSaison };
 }
 
-module.exports = { BAREME_POINTS, CALENDRIER_TOURNOIS, SEMAINES_COUPES_EQUIPE, genererJoueurLambda, drapeau, phaseDeSemaine, LONGUEUR_SAISON };
+module.exports = { BAREME_POINTS, CALENDRIER_TOURNOIS, SEMAINES_COUPES_EQUIPE, genererJoueurLambda, drapeau, normaliserPays, phaseDeSemaine, LONGUEUR_SAISON };
