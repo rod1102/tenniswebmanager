@@ -2401,6 +2401,20 @@ function calculerRangsLiveGlobal(circuit) {
     return rangs;
 }
 
+// Meme principe que calculerRangsLiveGlobal, fenetre Race (depuis le debut de la
+// saison en cours) au lieu de la fenetre Live glissante - reutilise la meme
+// formule de debut de saison que /api/classement/:userId.
+function calculerRangsRaceGlobal(circuit) {
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const semaineActuelle = etat.semaine_actuelle;
+    const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+    const debutSaison = semaineActuelle - positionSaisonBrute + 2;
+    const liste = calculerClassementGlobal(circuit, debutSaison, semaineActuelle);
+    const rangs = new Map();
+    liste.forEach(function (j, i) { rangs.set(j.cle, i + 1); });
+    return rangs;
+}
+
 // Meilleur classement Live jamais atteint par un participant (rival ou joueur reel)
 // + le nombre de semaines passees a ce rang exact, d'apres classement_historique
 // (alimente semaine par semaine dans executerAvancementSemaine, pas d'historique
@@ -2500,6 +2514,23 @@ function ordreSeeds(n) {
     return resultat;
 }
 
+// Etages de tirage au sort des tetes de serie, convention reelle du tennis :
+// TDS 1 seule, TDS 2 seule, 3-4 ensemble, 5-8 ensemble, 9-16, 17-32, 33-64...
+// A l'interieur d'un etage, le tirage decide QUELLE tete de serie va dans QUELLE
+// zone du tableau parmi celles reservees a cet etage (ex : la TDS 3 a autant de
+// chances de tomber dans la moitie de la TDS 1 que dans celle de la TDS 2 - ce
+// n'est jamais automatiquement l'une ou l'autre).
+function etagesSeeds(nbTetes) {
+    const bornes = [1, 2, 4, 8, 16, 32, 64, 128];
+    const etages = [];
+    for (let i = 0; i < bornes.length; i++) {
+        const debut = i === 0 ? 1 : bornes[i - 1] + 1;
+        if (debut > nbTetes) break;
+        etages.push([debut, Math.min(bornes[i], nbTetes)]);
+    }
+    return etages;
+}
+
 // Tirage au sort : fige les tetes de serie et les positions dans le tableau (avec
 // exemptions/byes pour les tailles non-puissance-de-2) a partir des entrants deja
 // connus (crees a l'ouverture des inscriptions, S-5). Appele a S-1.
@@ -2530,9 +2561,9 @@ function tirerAuSort(tournoiId, entreeCalendrier) {
         majTeteDeSerie.run(e.tete_de_serie, e.id);
     });
 
-    // Positions canoniques des tetes de serie (au lieu d'un tirage totalement
-    // aleatoire qui pouvait faire se rencontrer 2 grosses tetes de serie des le
-    // 1er tour) : seed i place a la position ou l'ordre canonique vaut i.
+    // Zones canoniques reservees a chaque numero de tete de serie (garantit que le
+    // seed 1 et le seed 2 restent sur des moities opposees, 3-4 dans les deux
+    // quarts restants, etc. - la convention standard des tableaux de tennis).
     const positionDeSeed = {};
     ordreSeeds(taillePuissance2).forEach(function (seed, position) { positionDeSeed[seed] = position; });
 
@@ -2543,16 +2574,27 @@ function tirerAuSort(tournoiId, entreeCalendrier) {
         positionDeSeed[2] = taillePuissance2 - 1;
     }
 
+    // Tirage au sort proprement dit : a l'interieur d'un etage (3-4, 5-8, 9-16...),
+    // les zones canoniques de l'etage sont melangees avant d'y affecter les tetes
+    // de serie dans l'ordre du classement - la TDS 3 peut donc atterrir dans la
+    // zone canonique du 3 ou celle du 4, au hasard, jamais toujours la meme.
     const slots = new Array(taillePuissance2).fill(undefined);
-    for (let i = 0; i < nbTetes; i++) {
-        slots[positionDeSeed[i + 1]] = parRangAsc[i];
-    }
+    const positionParIndexSeed = {};
+    etagesSeeds(nbTetes).forEach(function (etage) {
+        const indices = [];
+        for (let i = etage[0] - 1; i <= etage[1] - 1; i++) indices.push(i);
+        const positionsMelangees = melanger(indices.map(function (i) { return positionDeSeed[i + 1]; }));
+        indices.forEach(function (i, k) {
+            slots[positionsMelangees[k]] = parRangAsc[i];
+            positionParIndexSeed[i] = positionsMelangees[k];
+        });
+    });
 
     // Exemptions (byes) donnees en priorite aux meilleures tetes de serie, placees
     // dans la case adverse du round 1 de leur beneficiaire (comme en vrai : un
     // joueur exempte n'a simplement personne en face au 1er tour).
     for (let i = 0; i < nbByes; i++) {
-        const positionSeed = positionDeSeed[i + 1];
+        const positionSeed = positionParIndexSeed[i];
         const positionAdverse = positionSeed % 2 === 0 ? positionSeed + 1 : positionSeed - 1;
         slots[positionAdverse] = 'BYE';
     }
@@ -3930,9 +3972,10 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
         let instance = null;
         if (instanceRow) {
             const rangs = calculerRangsLiveGlobal(entree.circuit);
-            function rangDe(rivalId, estReel, playerId) {
-                if (rivalId) return rangs.get('rival:' + rivalId) || null;
-                if (estReel) return rangs.get('joueur:' + playerId) || null;
+            const rangsRace = calculerRangsRaceGlobal(entree.circuit);
+            function rangDe(table, rivalId, estReel, playerId) {
+                if (rivalId) return table.get('rival:' + rivalId) || null;
+                if (estReel) return table.get('joueur:' + playerId) || null;
                 return null;
             }
 
@@ -3945,7 +3988,8 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
             `).all(instanceRow.id);
             joueurs.forEach(function (j) {
                 j.drapeau = drapeau(j.nationalite);
-                j.rang = rangDe(j.rival_id, j.est_reel, j.player_id);
+                j.rang = rangDe(rangs, j.rival_id, j.est_reel, j.player_id);
+                j.rangRace = rangDe(rangsRace, j.rival_id, j.est_reel, j.player_id);
                 j.coachNom = j.est_reel ? nomCoach(j.coach_user_id) : null;
             });
             // Niveau confidentiel : reste utilise pour le tri (tete de serie puis niveau,
@@ -3979,7 +4023,8 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
                         nom: w.prenom + ' ' + w.nom, nationalite: w.nationalite, drapeau: drapeau(w.nationalite),
                         coachNom: nomCoach(w.user_id), player_id: w.id, est_reel: 1,
                         niveau: estMoi ? Math.round(niveauNormal(w, entree.surface)) : null,
-                        rang: rangs.get('joueur:' + w.id) || null
+                        rang: rangs.get('joueur:' + w.id) || null,
+                        rangRace: rangsRace.get('joueur:' + w.id) || null
                     };
                 })
                 .sort(function (a, b) { return (a.rang || Infinity) - (b.rang || Infinity); });

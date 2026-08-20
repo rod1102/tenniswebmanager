@@ -166,7 +166,7 @@
                 carte.innerHTML = `
                     <div class="tournoi-card-head">
                         <div>
-                            <a class="tournoi-card-name" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>
+                            <a class="tournoi-card-name" href="${lienFiche(t.calendrier_id, t.semaine, player.id)}">${t.nom}</a>
                             <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Semaine ${t.positionSemaine}</div>
                         </div>
                         <div class="tournoi-status-badge tournoi-status-${t.statut}">${traduireStatutTournoi(t.statut)}</div>

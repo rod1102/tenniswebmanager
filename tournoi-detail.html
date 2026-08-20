@@ -284,6 +284,7 @@
                 const meta = [];
                 if (j.coachNom) meta.push('Coach : ' + j.coachNom);
                 if (j.nationalite) meta.push(j.nationalite);
+                if (j.rangRace) meta.push('Race #' + j.rangRace);
                 if (j.tour_elimine) meta.push(j.tour_elimine);
                 if (enAttente) meta.push('En liste d\'attente — des joueurs mieux classés sont déjà retenus');
                 const classeFond = enAttente ? 'tournoi-card-attente' : 'tournoi-card-highlight';
