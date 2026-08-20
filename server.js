@@ -4085,8 +4085,8 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
             matchs.forEach(function (m) {
                 m.joueur1_drapeau = drapeau(m.joueur1_nationalite);
                 m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
-                m.joueur1_rang = rangDe(m.joueur1_rival_id, m.joueur1_est_reel, m.joueur1_player_id);
-                m.joueur2_rang = rangDe(m.joueur2_rival_id, m.joueur2_est_reel, m.joueur2_player_id);
+                m.joueur1_rang = rangDe(rangs, m.joueur1_rival_id, m.joueur1_est_reel, m.joueur1_player_id);
+                m.joueur2_rang = rangDe(rangs, m.joueur2_rival_id, m.joueur2_est_reel, m.joueur2_player_id);
                 // Match reel-contre-reel : 2 lignes matchs distinctes existent (une par
                 // coach), tournoi_matchs.match_id/match_id_j2 les relient toutes les deux.
                 // On ne renvoie au client que celle qui appartient au joueur consulte (ou
