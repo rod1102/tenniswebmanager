@@ -1167,11 +1167,16 @@ function executerAvancementSemaine() {
         const semaine = etat.semaine_actuelle;
         const nouvelleSemaine = semaine + 1;
 
-        // Ancre temps reel de cette semaine ingame : seule source de verite pour
-        // calculer a quelle heure reelle chaque tour des tournois qui s'y deroulent
-        // doit etre joue (executerAvancementTour). Enregistree inconditionnellement,
-        // meme en Pre-saison/Semaine 0 (sans effet, juste par simplicite).
-        db.prepare('INSERT OR IGNORE INTO semaines_reelles (semaine, debut_reel) VALUES (?, ?)').run(semaine, new Date().toISOString());
+        // Ancre temps reel de la semaine qu'on s'apprete a commencer (nouvelleSemaine) :
+        // seule source de verite pour calculer a quelle heure reelle chaque tour des
+        // tournois qui s'y deroulent doit etre joue (executerAvancementTour). Doit
+        // etre postee la, au moment ou cette semaine debute reellement - postee sous
+        // l'ancien numero de semaine (bug corrige ici), l'ancre de la semaine en cours
+        // n'existait jamais tant qu'on n'avait pas deja avance a la semaine suivante,
+        // donc "Avancer un tour" ne trouvait jamais rien a simuler avant qu'il ne soit
+        // trop tard. Enregistree inconditionnellement, meme en Pre-saison/Semaine 0
+        // (sans effet, juste par simplicite).
+        db.prepare('INSERT OR IGNORE INTO semaines_reelles (semaine, debut_reel) VALUES (?, ?)').run(nouvelleSemaine, new Date().toISOString());
 
         const joueurs = db.prepare("SELECT * FROM players WHERE statut = 'valide'").all();
 
@@ -1630,6 +1635,15 @@ const CRENEAUX_TOUR_2_SEMAINES_S2 = [0, 9, 28, 52];            // huitieme/quart
 // Retourne true si au moins un tour a ete simule.
 function executerAvancementTour(force) {
     let quelqueChoseSimule = false;
+
+    // Filet de securite : la semaine en cours doit toujours avoir une ancre (postee
+    // normalement par executerAvancementSemaine des qu'elle debute). Comble un trou
+    // residuel si une transition anterieure a tourne avant la correction du bug
+    // d'ancre decalee d'une semaine (2026-08-20), sans quoi le tournoi de la semaine
+    // en cours ne trouverait jamais d'ancre et resterait bloque a "rien a simuler".
+    const etatCourant = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    db.prepare('INSERT OR IGNORE INTO semaines_reelles (semaine, debut_reel) VALUES (?, ?)').run(etatCourant.semaine_actuelle, new Date().toISOString());
+
     const idsTournoisActifs = db.prepare("SELECT id FROM tournois WHERE statut = 'a_venir'").all().map(function (r) { return r.id; });
 
     idsTournoisActifs.forEach(function (tournoiId) {
