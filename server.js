@@ -1560,9 +1560,12 @@ app.post('/api/admin/corriger-energie-reset', (req, res) => {
 // devenues incoherentes suite au changement de LONGUEUR_SAISON (54 -> 48
 // semaines) - une ligne ecrite quand une semaine donnee etait encore un tournoi
 // (ex. "Tournoi : Open d'Australie") peut se retrouver, sous le nouveau calcul,
-// a une semaine que phaseDeSemaine considere desormais comme Pre-saison/Semaine
-// 0 (l'action et la vraie nature de la semaine ne concordent plus). Cible
-// precisement cette contradiction, sans toucher au reste de la partie en cours -
+// a une semaine qui n'a plus rien a voir avec ce tournoi (semaine redevenue
+// Pre-saison/Semaine 0, OU redevenue un tournoi mais un AUTRE que celui note -
+// la premiere version de cette route ne detectait que le 1er cas). Verifie
+// desormais qu'une vraie ligne tournois avec ce nom exact existe encore a cette
+// semaine precise (la reinitialisation les a toutes effacees) ; sinon la ligne
+// de journal est orpheline. Sans toucher au reste de la partie en cours -
 // contrairement au reset complet, inutilisable ici puisque plusieurs coachs
 // testent en parallele et perdraient leur progression.
 app.post('/api/admin/nettoyer-journal-perime', (req, res) => {
@@ -1570,8 +1573,9 @@ app.post('/api/admin/nettoyer-journal-perime', (req, res) => {
         if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
-        const lignes = db.prepare("SELECT id, semaine FROM journal_semaine_joueur WHERE action_prevue = 'tournoi'").all();
-        const aSupprimer = lignes.filter(function (l) { return phaseDeSemaine(l.semaine).type !== 'tournoi'; });
+        const lignes = db.prepare("SELECT id, semaine, tournoi_nom FROM journal_semaine_joueur WHERE action_prevue = 'tournoi'").all();
+        const existeTournoi = db.prepare('SELECT 1 FROM tournois WHERE nom = ? AND semaine = ?');
+        const aSupprimer = lignes.filter(function (l) { return !existeTournoi.get(l.tournoi_nom, l.semaine); });
         const supprimer = db.prepare('DELETE FROM journal_semaine_joueur WHERE id = ?');
         aSupprimer.forEach(function (l) { supprimer.run(l.id); });
         res.json({ success: true, lignesSupprimees: aSupprimer.length });
