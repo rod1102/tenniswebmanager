@@ -3460,6 +3460,14 @@ function simulerUnTourPoules(tournoiId) {
     }
 }
 
+// Un tournoi peut compter des dizaines de joueurs (souvent des bots) qui continuent
+// a jouer bien apres que CE joueur ait ete elimine ou ait remporte le titre -
+// tournois.statut ne repasse a 'termine' qu'une fois TOUT le monde fini, donc s'y
+// fier laissait "Resultats en tournoi" vide tant que le tournoi entier n'etait pas
+// bouclé, meme si le parcours du joueur etait deja termine depuis longtemps (bug
+// signale par l'utilisateur, 2026-08-20). tj.tour_elimine est lui pose des que ce
+// joueur precis est elimine/vainqueur (simulerUnTour), independamment du reste du
+// tableau - c'est la bonne condition.
 app.get('/api/tournois/historique/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
@@ -3478,7 +3486,7 @@ app.get('/api/tournois/historique/:playerId', (req, res) => {
                    ) AS kine_intervenu
             FROM tournois
             JOIN tournoi_joueurs tj ON tj.tournoi_id = tournois.id AND tj.player_id = ? AND tj.est_reel = 1
-            WHERE tournois.statut = 'termine'
+            WHERE tj.tour_elimine IS NOT NULL
             ORDER BY tournois.semaine DESC
         `).all(playerId);
 
