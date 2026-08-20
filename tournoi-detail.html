@@ -540,7 +540,7 @@
             const vainqueur = match.vainqueur === 'joueur';
             viewer.innerHTML = `
                 <div class="match-result ${vainqueur ? 'victoire' : 'defaite'}" style="display:block;">
-                    ${vainqueur ? 'Victoire' : 'Défaite'} ${match.score} (niveau ${match.niveau_joueur} vs ${match.niveau_adversaire})
+                    ${vainqueur ? 'Victoire' : 'Défaite'} ${match.score}
                 </div>
             `;
         }

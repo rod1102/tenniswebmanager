@@ -5320,6 +5320,16 @@ app.get('/api/matchs/detail/:matchId', (req, res) => {
         match.evenements = JSON.parse(match.evenements);
         match.estSemaineActuelle = etat.semaine_actuelle - match.semaine <= 1;
 
+        // Niveau confidentiel (meme principe que le tableau de tournoi, cf. fiche
+        // adversaire) : le niveau adverse n'est jamais envoye, quel que soit le
+        // spectateur - et le niveau du joueur lui-meme seulement au coach proprietaire
+        // de ce match (un tiers qui consulte un match public d'un autre coach ne doit
+        // voir le niveau d'aucun des deux).
+        delete match.niveau_adversaire;
+        if (Number(match.user_id) !== Number(userId)) {
+            delete match.niveau_joueur;
+        }
+
         res.json({ success: true, match });
     } catch (err) {
         console.error(err);
