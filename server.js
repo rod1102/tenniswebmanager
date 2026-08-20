@@ -1054,6 +1054,12 @@ app.post('/api/planification', (req, res) => {
     }
 });
 
+// Ne repartit plus les points d'XP immediatement : enregistre le choix du coach
+// (ecrase un choix precedent non encore applique), applique seulement au prochain
+// changement de semaine, apres l'erosion (meme ordre "changement de semaine ->
+// erosion -> xp -> 1er tour" que l'XP d'entrainement) - avant ce correctif, valider
+// la repartition modifiait service/retour/etc. sur-le-champ, incoherent avec cette
+// regle (bug signale par l'utilisateur, 2026-08-20).
 app.post('/api/repartir-xp', (req, res) => {
     try {
         const { playerId, repartition } = req.body;
@@ -1070,6 +1076,7 @@ app.post('/api/repartir-xp', (req, res) => {
         }
 
         let total = 0;
+        const valeurs = {};
         for (const cle of COMPETENCES) {
             const valeur = Number((repartition && repartition[cle]) || 0);
             if (!Number.isFinite(valeur) || valeur < 0) {
@@ -1078,29 +1085,17 @@ app.post('/api/repartir-xp', (req, res) => {
             if (player[cle] + valeur > 100) {
                 return res.status(400).json({ error: 'Impossible de depasser 100 en ' + cle + '.' });
             }
+            valeurs[cle] = valeur;
             total += valeur;
         }
         if (total > player.points_experience) {
             return res.status(400).json({ error: 'Pas assez de points d experience disponibles.' });
         }
+        if (total === 0) {
+            return res.status(400).json({ error: 'Indique au moins un point a repartir.' });
+        }
 
-        const nouvelles = {};
-        COMPETENCES.forEach(function (cle) {
-            nouvelles[cle] = player[cle] + Number((repartition && repartition[cle]) || 0);
-        });
-        const nouveauNiveau = COMPETENCES.reduce(function (s, c) { return s + nouvelles[c]; }, 0) / COMPETENCES.length;
-
-        db.prepare(`
-            UPDATE players SET
-                service = ?, retour = ?, coup_droit_revers = ?, effet = ?, volee = ?, deplacement = ?, puissance = ?, resistance = ?,
-                points_experience = ?, niveau = ?
-            WHERE id = ?
-        `).run(
-            nouvelles.service, nouvelles.retour, nouvelles.coup_droit_revers, nouvelles.effet,
-            nouvelles.volee, nouvelles.deplacement, nouvelles.puissance, nouvelles.resistance,
-            player.points_experience - total, Math.round(nouveauNiveau * 10) / 10,
-            playerId
-        );
+        db.prepare('UPDATE players SET xp_repartition_en_attente = ? WHERE id = ?').run(JSON.stringify(valeurs), playerId);
 
         res.json({ success: true });
     } catch (err) {
@@ -1364,6 +1359,23 @@ function executerAvancementSemaine() {
                 }
             }
 
+            // Repartition d'XP programmee par le coach (via /api/repartir-xp) : appliquee
+            // ICI, apres l'erosion mais avant l'ecriture finale - ordre exact demande par
+            // l'utilisateur ("changement de semaine -> erosion -> xp -> 1er tour"),
+            // 2026-08-20. S'ajoute aux valeurs DEJA erodees, jamais aux valeurs d'avant
+            // erosion.
+            if (player.xp_repartition_en_attente) {
+                try {
+                    const enAttente = JSON.parse(player.xp_repartition_en_attente);
+                    COMPETENCES.forEach(function (cle) {
+                        const valeur = Number(enAttente[cle]) || 0;
+                        if (valeur > 0) {
+                            competencesErodees[cle] = Math.min(100, competencesErodees[cle] + valeur);
+                        }
+                    });
+                } catch (e) { /* JSON invalide, ignore */ }
+            }
+
             const nouveauNiveau = COMPETENCES.reduce(function (s, c) { return s + competencesErodees[c]; }, 0) / COMPETENCES.length;
 
             db.prepare(`
@@ -1371,7 +1383,8 @@ function executerAvancementSemaine() {
                     service = ?, retour = ?, coup_droit_revers = ?, effet = ?, volee = ?, deplacement = ?, puissance = ?, resistance = ?,
                     forme = ?, mental_courant = ?, points_experience = ?, points_energie = ?,
                     surface_dur_automatismes = ?, surface_terre_automatismes = ?, surface_herbe_automatismes = ?,
-                    niveau = ?, condition = ?, points_dispositions_a_gagner = ?, points_dispositions_a_deplacer = ?
+                    niveau = ?, condition = ?, points_dispositions_a_gagner = ?, points_dispositions_a_deplacer = ?,
+                    xp_repartition_en_attente = NULL
                 WHERE id = ?
             `).run(
                 competencesErodees.service, competencesErodees.retour, competencesErodees.coup_droit_revers, competencesErodees.effet,
@@ -5518,9 +5531,8 @@ app.get('/api/matchs/:userId', (req, res) => {
                    matchs.vainqueur, matchs.score, matchs.niveau_joueur, matchs.niveau_adversaire, matchs.date_creation,
                    matchs.tournoi_id, matchs.numero_tour, matchs.coupe_equipe_id, tournois.nom AS tournoi_nom, tournois.calendrier_id AS tournoi_calendrier_id,
                    players.prenom, players.nom, players.type, players.nationalite,
-                   tm.match_id AS tm_match_id,
-                   tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite, tj1.est_reel AS tj1_est_reel,
-                   tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite, tj2.est_reel AS tj2_est_reel
+                   tj1.player_id AS tj1_player_id, tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite,
+                   tj2.player_id AS tj2_player_id, tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite
             FROM matchs
             JOIN players ON players.id = matchs.player_id
             LEFT JOIN tournois ON tournois.id = matchs.tournoi_id
@@ -5551,12 +5563,15 @@ app.get('/api/matchs/:userId', (req, res) => {
             if (m.tournoi_id) {
                 // Un match reel-vs-reel a 2 lignes matchs distinctes (une par coach),
                 // reliees respectivement par match_id ET match_id_j2 - se fier a
-                // est_reel pour deviner qui est l'adversaire (comme avant) rate
-                // systematiquement ce cas puisque tj1 ET tj2 sont tous les deux reels ;
-                // on determine desormais directement quel cote je suis via la colonne
-                // qui a effectivement matche cette ligne (bug signale par l'utilisateur,
-                // 2026-08-20 : adversaire reel affiche comme "Adversaire" au lieu de son nom).
-                const jeSuisTj1 = m.tm_match_id === m.id;
+                // est_reel pour deviner qui est l'adversaire (comme avant) rate ce cas
+                // (tj1 ET tj2 tous les deux reels). Determiner "qui je suis" via QUELLE
+                // COLONNE a matche (match_id vs match_id_j2, tente brievement le
+                // 2026-08-20) est FAUX pour un simple reel-vs-lambda : la ligne
+                // tournoi_matchs.match_id pointe TOUJOURS vers l'unique vrai joueur,
+                // meme quand il est tire en position joueur2_id du tableau - la seule
+                // comparaison fiable est le player_id (le lambda a toujours
+                // tj_player_id = NULL, jamais egal au mien).
+                const jeSuisTj1 = m.tj1_player_id === m.player_id;
                 m.adversaire_nom = jeSuisTj1 ? m.tj2_nom : m.tj1_nom;
                 m.adversaire_nationalite = jeSuisTj1 ? m.tj2_nationalite : m.tj1_nationalite;
                 m.adversaire_drapeau = drapeau(m.adversaire_nationalite);
@@ -5609,9 +5624,8 @@ app.get('/api/matchs/detail/:matchId', (req, res) => {
         // coach qui les a joues.
         const match = db.prepare(`
             SELECT matchs.*, tournois.nom AS tournoi_nom, players.prenom, players.nom, players.type,
-                   tm.match_id AS tm_match_id,
-                   tj1.nom AS tj1_nom, tj1.est_reel AS tj1_est_reel,
-                   tj2.nom AS tj2_nom, tj2.est_reel AS tj2_est_reel
+                   tj1.player_id AS tj1_player_id, tj1.nom AS tj1_nom,
+                   tj2.player_id AS tj2_player_id, tj2.nom AS tj2_nom
             FROM matchs
             JOIN players ON players.id = matchs.player_id
             LEFT JOIN tournois ON tournois.id = matchs.tournoi_id
@@ -5628,11 +5642,14 @@ app.get('/api/matchs/detail/:matchId', (req, res) => {
         // Nom de l'adversaire, pour que le Live/Teletexte puisse afficher les vrais
         // noms au lieu de "Toi"/"Adversaire" (demande utilisateur, 2026-08-20) - un
         // match reel-vs-reel a 2 lignes matchs (une par coach), reliees par match_id
-        // ET match_id_j2 respectivement : se fier a est_reel pour deviner qui est
-        // l'adversaire ratait ce cas (tj1 ET tj2 tous les deux reels) - on determine
-        // desormais directement quel cote je suis via la colonne qui a matche.
+        // ET match_id_j2 respectivement, d'ou l'extension du JOIN ci-dessus. Determiner
+        // "qui je suis" via QUELLE COLONNE a matche (tente brievement le 2026-08-20)
+        // est FAUX pour un simple reel-vs-lambda : tournoi_matchs.match_id pointe
+        // TOUJOURS vers l'unique vrai joueur, meme tire en position joueur2_id du
+        // tableau - seule la comparaison par player_id est fiable (le lambda a
+        // toujours tj_player_id = NULL, jamais egal au mien).
         if (match.tournoi_id) {
-            const jeSuisTj1 = match.tm_match_id === match.id;
+            const jeSuisTj1 = match.tj1_player_id === match.player_id;
             match.adversaire_nom = jeSuisTj1 ? match.tj2_nom : match.tj1_nom;
         } else if (match.difficulte === 'coupe' && match.coupe_equipe_id) {
             const rubber = db.prepare(`
@@ -5650,7 +5667,7 @@ app.get('/api/matchs/detail/:matchId', (req, res) => {
                 match.adversaire_nom = adv2 ? (adv1.nom + ' / ' + adv2.nom) : (adv1 ? adv1.nom : null);
             }
         }
-        delete match.tm_match_id; delete match.tj1_nom; delete match.tj1_est_reel; delete match.tj2_nom; delete match.tj2_est_reel;
+        delete match.tj1_player_id; delete match.tj1_nom; delete match.tj2_player_id; delete match.tj2_nom;
 
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         match.evenements = JSON.parse(match.evenements);

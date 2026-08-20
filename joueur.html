@@ -259,21 +259,26 @@
 
             let xpHtml = '';
             if (player.points_experience > 0) {
+                let repartitionEnAttente = {};
+                try { repartitionEnAttente = JSON.parse(player.xp_repartition_en_attente || '{}'); } catch (e) { repartitionEnAttente = {}; }
+                const yADejaUneRepartitionEnAttente = Object.keys(repartitionEnAttente).some(function (cle) { return repartitionEnAttente[cle] > 0; });
+
                 let inputsHtml = '';
                 Object.keys(COMPETENCES_LABELS).forEach(function (cle) {
+                    const valeurEnAttente = repartitionEnAttente[cle] || 0;
                     inputsHtml += `
                         <div class="form-group">
                             <label>${COMPETENCES_LABELS[cle]} ${iconeInfo(COMPETENCES_TOOLTIPS[cle])} (actuel : ${player[cle]})</label>
-                            <input type="number" min="0" max="${100 - player[cle]}" value="0" class="xp-input" data-cle="${cle}">
+                            <input type="number" min="0" max="${100 - player[cle]}" value="${valeurEnAttente}" class="xp-input" data-cle="${cle}">
                         </div>
                     `;
                 });
                 xpHtml = `
                     <div class="xp-pool-panel">
                         <div class="xp-pool-title">Points d'expérience en réserve : <span id="xp-restant">${player.points_experience}</span></div>
-                        <div class="planning-alerte-texte" style="margin-bottom:8px;">À répartir cette semaine — non utilisés, ils seront perdus à la prochaine avancée de semaine.</div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">À programmer cette semaine — non utilisés, ils seront perdus à la prochaine avancée de semaine. La répartition choisie ne s'applique qu'au changement de semaine, une fois l'érosion passée${yADejaUneRepartitionEnAttente ? ' (une répartition est déjà programmée, modifiable ci-dessous)' : ''}.</div>
                         <div class="stats-grid">${inputsHtml}</div>
-                        <button class="cta cta-primary repartir-btn" data-pool="${player.points_experience}" style="padding:10px 20px; font-size:0.8rem;">Répartir ces points</button>
+                        <button class="cta cta-primary repartir-btn" data-pool="${player.points_experience}" style="padding:10px 20px; font-size:0.8rem;">Programmer cette répartition</button>
                     </div>
                 `;
             }
@@ -416,7 +421,7 @@
                         alert(data.error);
                         return;
                     }
-                    alert('Points répartis avec succès.');
+                    alert('Répartition programmée — elle s\'appliquera au prochain changement de semaine.');
                     chargerOnglets();
                 });
             }
