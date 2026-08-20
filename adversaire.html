@@ -208,11 +208,24 @@
 
         const detailsCache = {};
 
+        // Le journal d'un match stocke "Toi"/"Adversaire" du point de vue de son
+        // proprietaire - ici le spectateur n'est jamais ce proprietaire (on consulte
+        // toujours la fiche d'un AUTRE joueur), donc "Toi" serait trompeur sans
+        // substitution par le vrai nom (demande utilisateur, 2026-08-20).
+        function remplacerNomsEvenements(match) {
+            const nomMoi = formaterNom(match.prenom, match.nom);
+            const nomAdversaire = match.adversaire_nom ? formaterNomComplet(match.adversaire_nom) : 'Adversaire';
+            match.evenements.forEach(function (evt) {
+                evt.texte = evt.texte.replace(/\bToi\b/g, nomMoi).replace(/\bAdversaire\b/g, nomAdversaire);
+            });
+        }
+
         async function obtenirDetail(matchId) {
             if (detailsCache[matchId]) return detailsCache[matchId];
             const response = await fetch('/api/matchs/detail/' + matchId + '?userId=' + userId);
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Impossible de charger ce match.');
+            remplacerNomsEvenements(data.match);
             detailsCache[matchId] = data.match;
             return data.match;
         }

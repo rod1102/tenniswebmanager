@@ -510,11 +510,23 @@
         const detailsCache = {};
         const liveEnCours = {};
 
+        // Le journal d'un match stocke "Toi"/"Adversaire" (perspective figee du
+        // proprietaire) - on remplace ici par les vrais noms pour l'affichage Live/
+        // Teletexte, plus agreable a lire (demande utilisateur, 2026-08-20).
+        function remplacerNomsEvenements(match) {
+            const nomMoi = formaterNomComplet(match.prenom + ' ' + match.nom);
+            const nomAdversaire = match.adversaire_nom ? formaterNomComplet(match.adversaire_nom) : 'Adversaire';
+            match.evenements.forEach(function (evt) {
+                evt.texte = evt.texte.replace(/\bToi\b/g, nomMoi).replace(/\bAdversaire\b/g, nomAdversaire);
+            });
+        }
+
         async function obtenirDetail(matchId) {
             if (detailsCache[matchId]) return detailsCache[matchId];
             const response = await fetch('/api/matchs/detail/' + matchId + '?userId=' + userId);
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Impossible de charger ce match.');
+            remplacerNomsEvenements(data.match);
             detailsCache[matchId] = data.match;
             return data.match;
         }

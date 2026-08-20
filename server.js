@@ -1903,19 +1903,17 @@ function nomJoueur(cle) {
     return cle === 'A' ? 'Toi' : 'Adversaire';
 }
 
-function resoudreJeu(serveur, niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, pointImportant, libelleAnnonce, motResolution, menacant, stats, evenements) {
-    const premierTirage = tirage(niveauA_normal, niveauB_normal);
-    if (premierTirage === serveur && !pointImportant) {
-        return { vainqueur: serveur, libelleUtilise: null };
+// Resout UN point : tirage technique simple si ce point n'a rien de decisif
+// (menacant = null), sinon on l'annonce puis on le rejoue jusqu'a ce que technique
+// et mental s'accordent (meme mecanique que resoudrePointTB pour le tie-break).
+function resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacant, libelle, mot, stats, evenements) {
+    if (!menacant) {
+        return tirage(niveauA_normal, niveauB_normal);
     }
 
-    // A partir d'ici la balle est contestee (menace de break/set/match) : etape 1, on l'annonce,
-    // puis on la rejoue jusqu'a ce que technique et mental s'accordent (etape 2, la resolution).
-    const libelle = libelleAnnonce || 'Balle de break';
-    const mot = motResolution || 'break';
     evenements.push({ type: 'point_important', texte: libelle + ' pour ' + nomJoueur(menacant) });
 
-    let vainqueurT1 = premierTirage;
+    let vainqueurT1 = tirage(niveauA_normal, niveauB_normal);
     let iterations = 0;
     while (iterations < 50) {
         iterations++;
@@ -1927,12 +1925,63 @@ function resoudreJeu(serveur, niveauA_normal, niveauB_normal, niveauA_mental, ni
                 ? motMajuscule + ' ' + nomJoueur(vainqueurT1)
                 : motMajuscule + ' sauve par ' + nomJoueur(vainqueurT1);
             evenements.push({ type: 'point_important', texte: texteResolution });
-            return { vainqueur: vainqueurT1, libelleUtilise: libelle };
+            return vainqueurT1;
         }
         // technique et mental se contredisent : on rejoue le point silencieusement
         vainqueurT1 = tirage(niveauA_normal, niveauB_normal);
     }
-    return { vainqueur: serveur, libelleUtilise: libelle };
+    return vainqueurT1;
+}
+
+// Simule un jeu (service) point par point (0-15-30-40, egalite/avantage) plutot
+// qu'en un seul tirage global pour tout le jeu : chaque point ordinaire est un
+// tirage technique simple, SAUF le ou les points qui menacent reellement de
+// conclure le jeu ALORS que cette conclusion est deja classee decisive pour le
+// match (balle de break/set/match, determinee une fois pour tout le jeu par
+// l'appelant via pointImportant/menacant) - ceux-la seuls beneficient du double
+// tirage technique+mental, et peuvent se repeter plusieurs fois dans le meme jeu
+// si la balle est sauvee (retour a l'egalite, puis nouvelle balle) au lieu de
+// clore le jeu entier des la 1ere balle de break gagnee sans rejouer (bug signale
+// par l'utilisateur, 2026-08-20).
+function resoudreJeu(serveur, niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, pointImportant, libelleAnnonce, motResolution, menacant, stats, evenements) {
+    const libelle = libelleAnnonce || 'Balle de break';
+    const mot = motResolution || 'break';
+    const relanceur = serveur === 'A' ? 'B' : 'A';
+    let ptsA = 0, ptsB = 0;
+    let dernierPointAnnonce = false;
+
+    while (true) {
+        const completeraitPourServeur = serveur === 'A' ? (ptsA + 1 >= 4 && ptsA + 1 - ptsB >= 2) : (ptsB + 1 >= 4 && ptsB + 1 - ptsA >= 2);
+        const completeraitPourRelanceur = relanceur === 'A' ? (ptsA + 1 >= 4 && ptsA + 1 - ptsB >= 2) : (ptsB + 1 >= 4 && ptsB + 1 - ptsA >= 2);
+
+        // Une balle qui menace de faire gagner le jeu au relanceur est TOUJOURS une
+        // vraie balle de break, quels que soient les enjeux de set/match (jamais
+        // rien qu'un simple tirage technique) - seul le libelle change : celui,
+        // specifique, calcule par l'appelant si ce jeu est aussi classe decisif pour
+        // le relanceur, sinon le libelle generique par defaut.
+        let menacantPoint = null;
+        if (completeraitPourRelanceur) {
+            menacantPoint = relanceur;
+        } else if (completeraitPourServeur && pointImportant && menacant === serveur) {
+            menacantPoint = serveur;
+        }
+        dernierPointAnnonce = menacantPoint !== null;
+
+        const libelleUtilisePourCePoint = (menacantPoint === relanceur && !(pointImportant && menacant === relanceur))
+            ? 'Balle de break'
+            : libelle;
+        const motUtilisePourCePoint = (menacantPoint === relanceur && !(pointImportant && menacant === relanceur))
+            ? 'break'
+            : mot;
+
+        const vainqueurPoint = resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacantPoint, libelleUtilisePourCePoint, motUtilisePourCePoint, stats, evenements);
+        if (vainqueurPoint === 'A') ptsA++; else ptsB++;
+
+        if ((ptsA >= 4 || ptsB >= 4) && Math.abs(ptsA - ptsB) >= 2) break;
+    }
+
+    const vainqueur = ptsA > ptsB ? 'A' : 'B';
+    return { vainqueur, libelleUtilise: dernierPointAnnonce ? libelle : null };
 }
 
 function seraitDecisifTB(pts, autre, seuil) {
@@ -5497,16 +5546,45 @@ app.get('/api/matchs/detail/:matchId', (req, res) => {
         // adversaire) - seuls les matchs amicaux (tournoi_id NULL) restent prives au
         // coach qui les a joues.
         const match = db.prepare(`
-            SELECT matchs.*, tournois.nom AS tournoi_nom, players.prenom, players.nom, players.type
+            SELECT matchs.*, tournois.nom AS tournoi_nom, players.prenom, players.nom, players.type,
+                   tj1.nom AS tj1_nom, tj1.est_reel AS tj1_est_reel,
+                   tj2.nom AS tj2_nom, tj2.est_reel AS tj2_est_reel
             FROM matchs
             JOIN players ON players.id = matchs.player_id
             LEFT JOIN tournois ON tournois.id = matchs.tournoi_id
+            LEFT JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id
+            LEFT JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
+            LEFT JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
             WHERE matchs.id = ? AND (matchs.user_id = ? OR matchs.tournoi_id IS NOT NULL)
         `).get(matchId, userId);
 
         if (!match) {
             return res.status(404).json({ error: 'Match introuvable.' });
         }
+
+        // Nom de l'adversaire, pour que le Live/Teletexte puisse afficher les vrais
+        // noms au lieu de "Toi"/"Adversaire" (demande utilisateur, 2026-08-20) - meme
+        // logique que /api/matchs/:userId (tj1 = pas moi => c'est l'adversaire).
+        if (match.tournoi_id) {
+            const adversaireEstTj1 = match.tj1_est_reel === 0;
+            match.adversaire_nom = adversaireEstTj1 ? match.tj1_nom : match.tj2_nom;
+        } else if (match.difficulte === 'coupe' && match.coupe_equipe_id) {
+            const rubber = db.prepare(`
+                SELECT * FROM coupe_rubbers WHERE coupe_equipe_id = ?
+                AND ((domicile_est_reel = 1 AND (domicile_id = ? OR domicile_id2 = ?))
+                  OR (exterieur_est_reel = 1 AND (exterieur_id = ? OR exterieur_id2 = ?)))
+            `).all(match.coupe_equipe_id, match.player_id, match.player_id, match.player_id, match.player_id)
+                .find(function (r) { return libelleRubber(r.numero) === match.numero_tour; });
+            if (rubber) {
+                const jeSuisDomicile = rubber.domicile_est_reel === 1 && (rubber.domicile_id === match.player_id || rubber.domicile_id2 === match.player_id);
+                const advEstReel = jeSuisDomicile ? !!rubber.exterieur_est_reel : !!rubber.domicile_est_reel;
+                const adv1 = identiteJoueurOuRival(advEstReel, jeSuisDomicile ? rubber.exterieur_id : rubber.domicile_id);
+                const adv2Id = jeSuisDomicile ? rubber.exterieur_id2 : rubber.domicile_id2;
+                const adv2 = adv2Id ? identiteJoueurOuRival(advEstReel, adv2Id) : null;
+                match.adversaire_nom = adv2 ? (adv1.nom + ' / ' + adv2.nom) : (adv1 ? adv1.nom : null);
+            }
+        }
+        delete match.tj1_nom; delete match.tj1_est_reel; delete match.tj2_nom; delete match.tj2_est_reel;
 
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         match.evenements = JSON.parse(match.evenements);
