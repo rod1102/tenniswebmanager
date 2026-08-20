@@ -94,6 +94,12 @@
             return 'adversaire.html?type=' + type + '&id=' + id;
         }
 
+        // ATP en bleu clair, WTA en rose pale - memes couleurs que le reste du site
+        // (tournoi-name-atp/wta), pour que les noms restent lisibles sur fond sombre.
+        function classeCircuit(type) {
+            return type === 'joueur' ? 'tournoi-name-atp' : 'tournoi-name-wta';
+        }
+
         async function verifierAdmin() {
             const response = await fetch('/api/utilisateur/' + userId);
             const data = await response.json();
@@ -115,9 +121,9 @@
             return `
                 <div class="tournoi-card">
                     <div class="confrontation-row">
-                        <a class="lien-adversaire confrontation-joueur" href="${lienJoueur(c.joueur1.id, c.joueur1.type)}">${flagImg(c.joueur1.drapeau)} ${formaterNom(c.joueur1.prenom, c.joueur1.nom)}</a>
+                        <a class="lien-adversaire confrontation-joueur ${classeCircuit(c.joueur1.type)}" href="${lienJoueur(c.joueur1.id, c.joueur1.type)}">${flagImg(c.joueur1.drapeau)} ${formaterNom(c.joueur1.prenom, c.joueur1.nom)}</a>
                         <span class="confrontation-score">${c.victoires1} - ${c.victoires2}</span>
-                        <a class="lien-adversaire confrontation-joueur" href="${lienJoueur(c.joueur2.id, c.joueur2.type)}">${flagImg(c.joueur2.drapeau)} ${formaterNom(c.joueur2.prenom, c.joueur2.nom)}</a>
+                        <a class="lien-adversaire confrontation-joueur ${classeCircuit(c.joueur2.type)}" href="${lienJoueur(c.joueur2.id, c.joueur2.type)}">${flagImg(c.joueur2.drapeau)} ${formaterNom(c.joueur2.prenom, c.joueur2.nom)}</a>
                     </div>
                     <div class="tournoi-card-meta" style="text-align:center;">${c.nbMatchs} confrontation${c.nbMatchs > 1 ? 's' : ''}</div>
                 </div>
@@ -142,12 +148,12 @@
                 data.confrontations.map(carteConfrontation).join('');
         }
 
-        function panneauTop10(titre, liste) {
+        function panneauTop10(titre, liste, type) {
             if (liste.length === 0) {
                 return `<div class="classement-panneau"><div class="stats-header" style="margin-bottom:8px;">${titre}</div><p class="match-hint">Pas de classement disponible.</p></div>`;
             }
             const lignes = liste.map(function (j) {
-                return `<tr><td class="rang">${j.rang}</td><td>${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}</td><td class="pts">${j.points}</td></tr>`;
+                return `<tr><td class="rang">${j.rang}</td><td class="${classeCircuit(type)}">${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}</td><td class="pts">${j.points}</td></tr>`;
             }).join('');
             return `
                 <div class="classement-panneau">
@@ -160,7 +166,7 @@
         function carteSaison(s) {
             const tournoisHtml = s.tournois.map(function (t) {
                 const vainqueurHtml = t.vainqueur
-                    ? `<a class="lien-adversaire" href="${lienJoueur(t.vainqueur.id, t.vainqueur.type)}">${flagImg(t.vainqueur.drapeau)} ${formaterNomComplet(t.vainqueur.nom)}</a>`
+                    ? `<a class="lien-adversaire ${classeCircuit(t.vainqueur.type)}" href="${lienJoueur(t.vainqueur.id, t.vainqueur.type)}">${flagImg(t.vainqueur.drapeau)} ${formaterNomComplet(t.vainqueur.nom)}</a>`
                     : '<span class="match-hint">Vainqueur inconnu</span>';
                 return `
                     <div class="stat-row">
@@ -175,8 +181,8 @@
                     <div class="stats-header">Saison ${s.numeroSaison}</div>
                     ${tournoisHtml}
                     <div class="creation-grid" style="margin-top:16px;">
-                        ${panneauTop10('ATP — Top 10 fin de saison', s.topAtp)}
-                        ${panneauTop10('WTA — Top 10 fin de saison', s.topWta)}
+                        ${panneauTop10('ATP — Top 10 fin de saison', s.topAtp, 'joueur')}
+                        ${panneauTop10('WTA — Top 10 fin de saison', s.topWta, 'joueuse')}
                     </div>
                 </div>
             `;
@@ -218,7 +224,7 @@
                 return `<a class="lien-adversaire" href="coach.html?id=${resultat.coach.userId}">${resultat.coach.pseudo}</a>`;
             }
             const j = resultat.joueur;
-            return `<a class="lien-adversaire" href="${lienJoueur(j.id, j.type)}">${flagImg(j.drapeau)} ${formaterNom(j.prenom, j.nom)}</a>`;
+            return `<a class="lien-adversaire ${classeCircuit(j.type)}" href="${lienJoueur(j.id, j.type)}">${flagImg(j.drapeau)} ${formaterNom(j.prenom, j.nom)}</a>`;
         }
 
         function carteRecord(def, resultat, vue, surface) {
@@ -233,12 +239,14 @@
                 const nomB = vue === 'coachs' ? resultat.coach2.pseudo : (flagImg(resultat.joueur2.drapeau) + ' ' + formaterNom(resultat.joueur2.prenom, resultat.joueur2.nom));
                 const lienA = vue === 'coachs' ? ('coach.html?id=' + resultat.coach1.userId) : lienJoueur(resultat.joueur1.id, resultat.joueur1.type);
                 const lienB = vue === 'coachs' ? ('coach.html?id=' + resultat.coach2.userId) : lienJoueur(resultat.joueur2.id, resultat.joueur2.type);
+                const classeA = vue === 'coachs' ? '' : classeCircuit(resultat.joueur1.type);
+                const classeB = vue === 'coachs' ? '' : classeCircuit(resultat.joueur2.type);
                 const score = vue === 'coachs' ? String(resultat.nbMatchs) : (resultat.victoires1 + ' - ' + resultat.victoires2);
                 corps = `
                     <div class="confrontation-row">
-                        <a class="lien-adversaire confrontation-joueur" href="${lienA}">${nomA}</a>
+                        <a class="lien-adversaire confrontation-joueur ${classeA}" href="${lienA}">${nomA}</a>
                         <span class="confrontation-score">${score}</span>
-                        <a class="lien-adversaire confrontation-joueur" href="${lienB}">${nomB}</a>
+                        <a class="lien-adversaire confrontation-joueur ${classeB}" href="${lienB}">${nomB}</a>
                     </div>
                     <div class="tournoi-card-meta" style="text-align:center;">${resultat.nbMatchs} confrontation${resultat.nbMatchs > 1 ? 's' : ''}${vue === 'coachs' ? ' cumulées (ATP + WTA)' : ''}</div>
                 `;

@@ -1286,12 +1286,27 @@ function executerAvancementSemaine() {
                 }
             }
 
-            // Un joueur engage en tournoi cette semaine protege aussi l'automatisme de
-            // la surface jouee (pas seulement une semaine d'entrainement de surface
-            // dediee) - regle exacte du PDF : exclusion de "la surface ou le joueur a
-            // joue durant la semaine en simple".
+            // Protection contre l'erosion : ce qui s'est REELLEMENT passe pendant la
+            // semaine qu'on quitte (phaseActuelle), jamais le plan de la semaine qu'on
+            // s'apprete a commencer (surfaceProtegee ci-dessus, qui sert uniquement a
+            // crediter le bonus d'automatismes/XP DE CETTE semaine-la) - sinon un
+            // automatisme tout juste monte par un entrainement de surface se faisait
+            // immediatement raboter de 5 au changement suivant, a moins de planifier
+            // encore la meme surface la semaine d'apres, ce qui n'a aucun sens (bug
+            // signale par l'utilisateur, 2026-08-20). Un joueur engage en tournoi
+            // protege la surface jouee (regle exacte du PDF : exclusion de "la surface
+            // ou le joueur a joue durant la semaine en simple") ; sinon on relit le
+            // journal de la semaine qu'on quitte (ecrit lors de la transition
+            // precedente) pour savoir si un entrainement de surface y avait ete credite.
+            let surfaceProtegeeErosion = null;
             if (joueurEngageCetteSemaine && tournoiEngage.surface && SURFACES.includes(tournoiEngage.surface)) {
-                surfaceProtegee = tournoiEngage.surface;
+                surfaceProtegeeErosion = tournoiEngage.surface;
+            } else {
+                const journalSemaineQuittee = db.prepare('SELECT action_prevue FROM journal_semaine_joueur WHERE player_id = ? AND semaine = ?').get(player.id, semaine);
+                if (journalSemaineQuittee && journalSemaineQuittee.action_prevue && journalSemaineQuittee.action_prevue.indexOf('surface_') === 0) {
+                    const surfQuittee = journalSemaineQuittee.action_prevue.replace('surface_', '');
+                    if (SURFACES.includes(surfQuittee)) surfaceProtegeeErosion = surfQuittee;
+                }
             }
 
             // Erosion des competences et decroissance des automatismes : uniquement
@@ -1302,7 +1317,7 @@ function executerAvancementSemaine() {
             COMPETENCES.forEach(function (cle) { competencesErodees[cle] = player[cle]; });
             if (phaseActuelle.type === 'tournoi') {
                 SURFACES.forEach(function (surf) {
-                    if (surf !== surfaceProtegee) {
+                    if (surf !== surfaceProtegeeErosion) {
                         automatismes[surf] = Math.max(0, automatismes[surf] - 5);
                     }
                 });
@@ -2512,9 +2527,25 @@ function classementALaSemaine(circuit, cle, semaine) {
 // n'importe quel tableau. Les rivaux retenus sont les mieux classes au Live (pas
 // juste le meilleur niveau brut) - coherent avec le tri des tetes de serie dans
 // tirerAuSort, qui utilise le meme classement.
-function genererEntrants(entreeCalendrier, rivauxUtilises) {
+function genererEntrants(entreeCalendrier, semaine, rivauxUtilises) {
     const tailleReelle = entreeCalendrier.taille_tableau;
     const utilises = rivauxUtilises || new Set();
+
+    // Filet de securite contre un rival deja engage cette semaine-la dans un AUTRE
+    // tournoi du meme circuit : rivauxUtilises ne survit jamais au-dela d'un seul
+    // appel de executerAvancementSemaine, donc si 2 tournois de la meme semaine
+    // sont crees lors d'appels separes (ex. l'un via l'ouverture S-5, l'autre via
+    // le filet de securite d'un appel ulterieur), rien ne les empechait de piocher
+    // le meme rival - source de verite = la base plutot que ce Set en memoire (bug
+    // trouve en prod : meme rival a la fois a Brisbane et Hong Kong Open, tous
+    // deux ATP S1).
+    db.prepare(`
+        SELECT DISTINCT tj.rival_id
+        FROM tournoi_joueurs tj
+        JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE t.semaine = ? AND t.circuit = ? AND tj.rival_id IS NOT NULL
+    `).all(semaine, entreeCalendrier.circuit).forEach(function (r) { utilises.add(r.rival_id); });
+
     const entrants = [];
 
     assurerRoster(entreeCalendrier.circuit);
@@ -3544,7 +3575,7 @@ function creerTournoi(entree, semaine, rivauxUtilises) {
     const tournoiId = insertionTournoi.lastInsertRowid;
     const entrants = entree.categorie === 'finals'
         ? genererEntrantsFinals(entree, semaine)
-        : genererEntrants(entree, rivauxUtilises);
+        : genererEntrants(entree, semaine, rivauxUtilises);
 
     const insertJoueur = db.prepare(`
         INSERT INTO tournoi_joueurs (tournoi_id, nom, nationalite, niveau, est_reel, player_id, rival_id, position_tableau, tete_de_serie)
