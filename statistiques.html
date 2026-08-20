@@ -94,10 +94,21 @@
             return 'adversaire.html?type=' + type + '&id=' + id;
         }
 
+        // Confrontations et Records ne portent jamais que sur de vrais joueurs (jamais
+        // de rivaux) - adversaire.html attend litteralement 'reel'/'rival', pas
+        // players.type ('joueur'/'joueuse') que ces 2 onglets exposent par ailleurs
+        // pour la couleur ATP/WTA (classeCircuit ci-dessous) - les confondre envoyait
+        // vers index.html au clic (bug signale par l'utilisateur, 2026-08-20).
+        function lienJoueurReel(id) {
+            return lienJoueur(id, 'reel');
+        }
+
         // ATP en bleu clair, WTA en rose pale - memes couleurs que le reste du site
         // (tournoi-name-atp/wta), pour que les noms restent lisibles sur fond sombre.
+        // Accepte soit players.type ('joueur'/'joueuse'), soit un circuit direct
+        // ('ATP'/'WTA') selon ce que la source de donnees expose.
         function classeCircuit(type) {
-            return type === 'joueur' ? 'tournoi-name-atp' : 'tournoi-name-wta';
+            return (type === 'joueur' || type === 'ATP') ? 'tournoi-name-atp' : 'tournoi-name-wta';
         }
 
         async function verifierAdmin() {
@@ -121,9 +132,9 @@
             return `
                 <div class="tournoi-card">
                     <div class="confrontation-row">
-                        <a class="lien-adversaire confrontation-joueur ${classeCircuit(c.joueur1.type)}" href="${lienJoueur(c.joueur1.id, c.joueur1.type)}">${flagImg(c.joueur1.drapeau)} ${formaterNom(c.joueur1.prenom, c.joueur1.nom)}</a>
+                        <a class="lien-adversaire confrontation-joueur ${classeCircuit(c.joueur1.type)}" href="${lienJoueurReel(c.joueur1.id)}">${flagImg(c.joueur1.drapeau)} ${formaterNom(c.joueur1.prenom, c.joueur1.nom)}</a>
                         <span class="confrontation-score">${c.victoires1} - ${c.victoires2}</span>
-                        <a class="lien-adversaire confrontation-joueur ${classeCircuit(c.joueur2.type)}" href="${lienJoueur(c.joueur2.id, c.joueur2.type)}">${flagImg(c.joueur2.drapeau)} ${formaterNom(c.joueur2.prenom, c.joueur2.nom)}</a>
+                        <a class="lien-adversaire confrontation-joueur ${classeCircuit(c.joueur2.type)}" href="${lienJoueurReel(c.joueur2.id)}">${flagImg(c.joueur2.drapeau)} ${formaterNom(c.joueur2.prenom, c.joueur2.nom)}</a>
                     </div>
                     <div class="tournoi-card-meta" style="text-align:center;">${c.nbMatchs} confrontation${c.nbMatchs > 1 ? 's' : ''}</div>
                 </div>
@@ -166,7 +177,7 @@
         function carteSaison(s) {
             const tournoisHtml = s.tournois.map(function (t) {
                 const vainqueurHtml = t.vainqueur
-                    ? `<a class="lien-adversaire ${classeCircuit(t.vainqueur.type)}" href="${lienJoueur(t.vainqueur.id, t.vainqueur.type)}">${flagImg(t.vainqueur.drapeau)} ${formaterNomComplet(t.vainqueur.nom)}</a>`
+                    ? `<a class="lien-adversaire ${classeCircuit(t.circuit)}" href="${lienJoueur(t.vainqueur.id, t.vainqueur.type)}">${flagImg(t.vainqueur.drapeau)} ${formaterNomComplet(t.vainqueur.nom)}</a>`
                     : '<span class="match-hint">Vainqueur inconnu</span>';
                 return `
                     <div class="stat-row">
@@ -224,7 +235,7 @@
                 return `<a class="lien-adversaire" href="coach.html?id=${resultat.coach.userId}">${resultat.coach.pseudo}</a>`;
             }
             const j = resultat.joueur;
-            return `<a class="lien-adversaire ${classeCircuit(j.type)}" href="${lienJoueur(j.id, j.type)}">${flagImg(j.drapeau)} ${formaterNom(j.prenom, j.nom)}</a>`;
+            return `<a class="lien-adversaire ${classeCircuit(j.type)}" href="${lienJoueurReel(j.id)}">${flagImg(j.drapeau)} ${formaterNom(j.prenom, j.nom)}</a>`;
         }
 
         function carteRecord(def, resultat, vue, surface) {
@@ -237,8 +248,8 @@
             if (def.type === 'rivalite') {
                 const nomA = vue === 'coachs' ? resultat.coach1.pseudo : (flagImg(resultat.joueur1.drapeau) + ' ' + formaterNom(resultat.joueur1.prenom, resultat.joueur1.nom));
                 const nomB = vue === 'coachs' ? resultat.coach2.pseudo : (flagImg(resultat.joueur2.drapeau) + ' ' + formaterNom(resultat.joueur2.prenom, resultat.joueur2.nom));
-                const lienA = vue === 'coachs' ? ('coach.html?id=' + resultat.coach1.userId) : lienJoueur(resultat.joueur1.id, resultat.joueur1.type);
-                const lienB = vue === 'coachs' ? ('coach.html?id=' + resultat.coach2.userId) : lienJoueur(resultat.joueur2.id, resultat.joueur2.type);
+                const lienA = vue === 'coachs' ? ('coach.html?id=' + resultat.coach1.userId) : lienJoueurReel(resultat.joueur1.id);
+                const lienB = vue === 'coachs' ? ('coach.html?id=' + resultat.coach2.userId) : lienJoueurReel(resultat.joueur2.id);
                 const classeA = vue === 'coachs' ? '' : classeCircuit(resultat.joueur1.type);
                 const classeB = vue === 'coachs' ? '' : classeCircuit(resultat.joueur2.type);
                 const score = vue === 'coachs' ? String(resultat.nbMatchs) : (resultat.victoires1 + ' - ' + resultat.victoires2);

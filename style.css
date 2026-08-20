@@ -1454,6 +1454,13 @@ h1 {
 .tournoi-name-atp { color: #5FA8E8; }
 .tournoi-name-wta { color: #E87CC2; }
 
+/* Specificite superieure a .lien-adversaire (color: inherit) ci-dessous, qui
+   sinon l'emporte a specificite egale par ordre de declaration - sinon
+   tournoi-name-atp/wta n'a aucun effet visible combine a lien-adversaire
+   (statistiques.html notamment). */
+.lien-adversaire.tournoi-name-atp { color: #5FA8E8; }
+.lien-adversaire.tournoi-name-wta { color: #E87CC2; }
+
 .lien-adversaire {
     color: inherit;
     text-decoration: none;

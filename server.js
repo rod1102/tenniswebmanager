@@ -5312,6 +5312,14 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
 
         const resultat = tournois.map(function (t) {
             t.player_id = joueurParCircuit[t.circuit];
+            // "Autres matchs" = tout ce qui n'est pas deja affiche dans "mes matchs"
+            // (donc pas MES matchs a moi), PAS "tout match sans aucun vrai joueur" -
+            // exclure purement match_id IS NOT NULL faisait disparaitre les tours
+            // (souvent la demi-finale/la finale) ou un AUTRE coach avait un vrai
+            // joueur engage : ce tour n'appartenait ni a "mes matchs" (pas mon joueur)
+            // ni a "autres matchs" (exclu a tort), donc invisible pour moi (bug
+            // signale par l'utilisateur, 2026-08-20). N'exclut desormais que les
+            // matchs qui m'appartiennent VRAIMENT (matchs.user_id = moi, cote j1 ou j2).
             const matchs = db.prepare(`
                 SELECT tournoi_matchs.id, tournoi_matchs.numero_tour, tournoi_matchs.ordre, tournoi_matchs.score,
                        tournoi_matchs.evenements,
@@ -5320,10 +5328,14 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
                 FROM tournoi_matchs
                 JOIN tournoi_joueurs AS j1 ON j1.id = tournoi_matchs.joueur1_id
                 LEFT JOIN tournoi_joueurs AS j2 ON j2.id = tournoi_matchs.joueur2_id
-                WHERE tournoi_matchs.tournoi_id = ? AND tournoi_matchs.match_id IS NULL
+                LEFT JOIN matchs AS m1 ON m1.id = tournoi_matchs.match_id
+                LEFT JOIN matchs AS m2 ON m2.id = tournoi_matchs.match_id_j2
+                WHERE tournoi_matchs.tournoi_id = ?
                   AND j1.nom != 'BYE' AND (j2.nom IS NULL OR j2.nom != 'BYE')
+                  AND (m1.id IS NULL OR m1.user_id != ?)
+                  AND (m2.id IS NULL OR m2.user_id != ?)
                 ORDER BY tournoi_matchs.ordre
-            `).all(t.id);
+            `).all(t.id, userId, userId);
             matchs.forEach(function (m) {
                 m.joueur1_drapeau = drapeau(m.joueur1_nationalite);
                 m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
