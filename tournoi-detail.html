@@ -771,11 +771,12 @@
             // au moment ou le coach le consulte la semaine courante a deja avance d'un cran.
             const liveDisponible = semaineActuelleCourante - instance.semaine <= 1;
 
-            // Tour le plus recemment joue en haut (demande explicite de l'utilisateur,
-            // 2026-08-20), pas l'ordre d'insertion brut - ordre.forEach garde l'ordre
-            // "ordre" (ascendant) a l'interieur d'un meme tour, tri stable.
+            // Ordre chronologique (1er tour en haut) plutot que le tour le plus avance
+            // en premier - ce 2nd ordre spoilait le resultat d'un tour precedent des
+            // qu'un tour suivant apparaissait au-dessus (demande explicite de
+            // l'utilisateur, 2026-08-20, en revenant sur un choix precedent).
             const matchsTries = instance.matchs.slice().sort(function (a, b) {
-                return ORDRE_TOURS_MATCHS.indexOf(b.numero_tour) - ORDRE_TOURS_MATCHS.indexOf(a.numero_tour);
+                return ORDRE_TOURS_MATCHS.indexOf(a.numero_tour) - ORDRE_TOURS_MATCHS.indexOf(b.numero_tour);
             });
 
             panneau.innerHTML = '<div class="match-list" id="resultats-match-list"></div>';

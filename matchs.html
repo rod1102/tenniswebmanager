@@ -380,7 +380,10 @@
             });
             groupes.forEach(function (g) {
                 if (g.tournoi_id || g.coupe_equipe_id) {
-                    g.matchs.sort(function (a, b) { return rangTour(b.numero_tour) - rangTour(a.numero_tour); });
+                    // Ordre chronologique (1er tour en haut) - le tour le plus avance en
+                    // premier spoilait le resultat d'un tour precedent des qu'un tour
+                    // suivant apparaissait au-dessus (demande utilisateur, 2026-08-20).
+                    g.matchs.sort(function (a, b) { return rangTour(a.numero_tour) - rangTour(b.numero_tour); });
                 }
             });
             return groupes;
@@ -494,7 +497,7 @@
             }
 
             data.tournois.forEach(function (tournoi) {
-                tournoi.matchs.sort(function (a, b) { return rangTour(b.numero_tour) - rangTour(a.numero_tour); });
+                tournoi.matchs.sort(function (a, b) { return rangTour(a.numero_tour) - rangTour(b.numero_tour); });
                 const bloc = document.createElement('div');
                 bloc.className = 'match-tournoi-group match-tournoi-group-' + tournoi.surface;
                 bloc.innerHTML = `
