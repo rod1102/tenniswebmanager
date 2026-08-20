@@ -4730,9 +4730,15 @@ app.get('/api/pronostics/tournoi/:tournoiId', (req, res) => {
             }
         }
 
+        // Meme regle que /api/pronostics (POST) : verrouille des que la semaine du
+        // tournoi a commence, pas seulement une fois entierement termine.
+        const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
+        const verrouille = tournoi.statut !== 'a_venir' || semaineActuelle >= tournoi.semaine;
+
         res.json({
             success: true,
             tournoi: { id: tournoi.id, nom: tournoi.nom, circuit: tournoi.circuit, categorie: tournoi.categorie, statut: tournoi.statut, semaine: tournoi.semaine },
+            verrouille,
             type,
             entrants: type === 'simple' ? entrants.filter(function (e) { return e.nom !== 'BYE'; }) : null,
             tranchesHuitiemes: type === 'cascade' ? trancheHuitiemes(entrants, taillePuissance2) : null,
@@ -4753,7 +4759,15 @@ app.post('/api/pronostics', (req, res) => {
         if (!tournoi) {
             return res.status(404).json({ error: 'Tournoi introuvable.' });
         }
-        if (tournoi.statut !== 'a_venir') {
+        // tournois.statut ne repasse a 'termine' qu'une fois TOUS les tours joues -
+        // il reste 'a_venir' pendant toute la duree du tournoi (tour_actuel avance
+        // de 0 a la fin sans jamais changer le statut), donc se fier uniquement au
+        // statut laissait les pronostics modifiables jusqu'a la toute fin du
+        // tournoi au lieu de son debut (bug signale par l'utilisateur, 2026-08-20).
+        // Bloque desormais des que la semaine du tournoi a commence, meme regle que
+        // les styles de jeu.
+        const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
+        if (tournoi.statut !== 'a_venir' || semaineActuelle >= tournoi.semaine) {
             return res.status(400).json({ error: 'Les pronostics ne sont plus modifiables pour ce tournoi (tableau pas encore tire, ou tournoi deja commence).' });
         }
 

@@ -104,7 +104,7 @@
         }
 
         function construireSimpleUI(panneau, data, tournoiId) {
-            const verrouille = data.tournoi.statut !== 'a_venir';
+            const verrouille = data.verrouille;
             const existant = data.pronosticActuel && data.pronosticActuel.predictions ? data.pronosticActuel.predictions.vainqueur : null;
 
             const options = data.entrants.map(function (e) {
@@ -141,7 +141,7 @@
         }
 
         function construireCascadeUI(panneau, data, tournoiId) {
-            const verrouille = data.tournoi.statut !== 'a_venir';
+            const verrouille = data.verrouille;
             const existant = data.pronosticActuel && data.pronosticActuel.predictions ? data.pronosticActuel.predictions : null;
 
             const entrantParId = {};
