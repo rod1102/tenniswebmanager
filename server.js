@@ -1511,7 +1511,7 @@ app.post('/api/admin/reset-saison-48-semaines', (req, res) => {
 
             db.prepare(`
                 UPDATE players SET
-                    usure = 0, points_energie = 0, points_experience = 0,
+                    usure = 0, points_energie = 50, points_experience = 0,
                     surface_dur_automatismes = 0, surface_terre_automatismes = 0, surface_herbe_automatismes = 0,
                     mental_max = 100, mental_courant = 100, forme = 100,
                     points_dispositions_a_gagner = 0, points_dispositions_a_retirer = 0,
@@ -1525,6 +1525,26 @@ app.post('/api/admin/reset-saison-48-semaines', (req, res) => {
         });
         reinitialiser();
         res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Route temporaire (2026-08-20) : correction ponctuelle d'un bug de la route
+// reset-saison-48-semaines ci-dessus, qui remettait points_energie a 0 au lieu de
+// 50 (valeur de sortie de creation, cf. database.js). Ne touche que les joueurs
+// dont l'energie vaut encore exactement 0 - sans risque une fois la saison
+// relancee, une vraie partie de plusieurs semaines pourrait legitimement amener un
+// joueur a 0 (mises/participations), donc a n'utiliser qu'une seule fois juste
+// apres la reinitialisation.
+app.post('/api/admin/corriger-energie-reset', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const info = db.prepare("UPDATE players SET points_energie = 50 WHERE statut = 'valide' AND points_energie = 0").run();
+        res.json({ success: true, joueursCorriges: info.changes });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
@@ -3625,6 +3645,9 @@ app.post('/api/tournois/inscription', (req, res) => {
         if (aDesCompetencesARepartir(playerId)) {
             return res.status(400).json({ error: 'Il faut d abord repartir les points de competences de la moulinette.' });
         }
+        if (player.points_energie < 1) {
+            return res.status(400).json({ error: 'Ce joueur n a plus de points d energie : impossible de s inscrire (cout fixe de 1 PE par participation).' });
+        }
 
         const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === calendrierId; });
         if (!entree) {
@@ -4073,7 +4096,8 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
             && semaineNum <= etat.semaine_actuelle + 5
             && (!instanceRow || instanceRow.statut === 'inscriptions')
             && !autreTournoiCetteSemaine
-            && player.condition !== 'blesse';
+            && player.condition !== 'blesse'
+            && player.points_energie >= 1;
 
         const palmares = db.prepare(`
             SELECT tournois.*, vainqueur_j.nom AS nom_vainqueur
@@ -4094,6 +4118,7 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
             estInscrit,
             peutInscrire,
             joueurCondition: player.condition,
+            joueurPointsEnergie: player.points_energie,
             instance,
             palmares
         });

@@ -325,6 +325,8 @@
                         actionHtml = `<div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Tableau déjà tiré</div>`;
                     } else if (t.inscrit) {
                         actionHtml = `<button class="cta cta-secondary tournoi-desinscription-btn" style="padding:8px 14px; font-size:0.75rem;">Se désinscrire</button>`;
+                    } else if (peutEncoreInscrire && player.points_energie < 1) {
+                        actionHtml = `<div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Plus de points d'énergie — inscription impossible</div>`;
                     } else if (peutEncoreInscrire) {
                         actionHtml = `<button class="cta cta-primary tournoi-inscription-btn" style="padding:8px 14px; font-size:0.75rem;">S'inscrire</button>`;
                     } else {
@@ -345,6 +347,8 @@
                         carte.querySelector('.tournoi-desinscription-btn').addEventListener('click', function () {
                             desinscrire(player.id, t.tournoiId, this);
                         });
+                    } else if (peutEncoreInscrire && player.points_energie < 1) {
+                        // Aucun bouton rendu (message informatif uniquement), rien a ecouter.
                     } else if (peutEncoreInscrire) {
                         carte.querySelector('.tournoi-inscription-btn').addEventListener('click', function () {
                             inscrire(player.id, t.id, t.semaine, this);

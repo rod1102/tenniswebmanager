@@ -210,6 +210,8 @@
                 boutonHtml = `<button id="inscription-btn" class="cta cta-secondary" ${desactive ? 'disabled title="Tournoi deja termine"' : ''}>Se désinscrire</button>`;
             } else if (fiche.joueurCondition === 'blesse') {
                 boutonHtml = `<div class="match-hint">Joueur blessé — inscription impossible tant qu'il ne s'est pas reposé.</div>`;
+            } else if (fiche.joueurPointsEnergie < 1) {
+                boutonHtml = `<div class="match-hint">Plus de points d'énergie — inscription impossible.</div>`;
             } else if (fiche.peutInscrire) {
                 boutonHtml = `<button id="inscription-btn" class="cta cta-primary">S'inscrire</button>`;
             } else if (fiche.instance && fiche.instance.statut !== 'inscriptions') {
@@ -361,7 +363,7 @@
                     if (!j) return '<span class="bracket-joueur bracket-tbd">?</span>';
                     if (j.nom === 'BYE') return '<span class="bracket-joueur bracket-bye">BYE</span>';
                     const estMoi = j.est_reel && j.player_id === Number(playerId);
-                    const classe = estMoi ? ' bracket-moi' : (!j.est_reel ? ' bracket-bot' : '');
+                    const classe = estMoi ? ' bracket-moi' : (!j.est_reel ? ' bracket-bot' : ' bracket-autre-reel');
                     const rangTxt = j.rang ? ` <span class="bracket-rang">(${j.rang})</span>` : '';
                     const nomHtml = lienAdversaire(`${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}${rangTxt}`, j.est_reel, j.player_id, j.rival_id);
                     return `<span class="bracket-joueur${classe}">${nomHtml}</span><span class="bracket-seed">${j.tete_de_serie ? '[' + j.tete_de_serie + ']' : ''}</span>`;
@@ -443,7 +445,7 @@
                 if (!nom) return '<span class="bracket-joueur bracket-bye">BYE</span>';
                 const estVainqueur = m.vainqueur_nom === nom;
                 const estMoi = estReel && pId === Number(playerId);
-                const classes = (estVainqueur ? ' bracket-vainqueur' : '') + (estMoi ? ' bracket-moi' : (!estReel ? ' bracket-bot' : ''));
+                const classes = (estVainqueur ? ' bracket-vainqueur' : '') + (estMoi ? ' bracket-moi' : (!estReel ? ' bracket-bot' : ' bracket-autre-reel'));
                 const rangTxt = rang ? ` <span class="bracket-rang">(${rang})</span>` : '';
                 const nomHtml = lienAdversaire(`${flagImg(drap)} ${formaterNomComplet(nom)}${rangTxt}`, estReel, pId, rId);
                 return `<span class="bracket-joueur${classes}">${nomHtml}</span><span class="bracket-seed">${seed ? '[' + seed + ']' : ''}</span>`;
