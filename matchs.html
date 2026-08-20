@@ -225,6 +225,113 @@
             }
         }
 
+        // Matchs 100% bots ("Autres matchs de la semaine", aucun joueur du coach
+        // implique) : meme systeme Live/Resultat/Teletexte que ci-dessus, mais source
+        // des donnees a part (/api/tournois/match-bot/:id, pas de ligne matchs) - cle
+        // de cache/minuteur prefixee "bot-" pour ne jamais entrer en collision avec un
+        // vrai matchId.
+        async function obtenirDetailBot(tournoiMatchId) {
+            const cle = 'bot-' + tournoiMatchId;
+            if (detailsCache[cle]) return detailsCache[cle];
+            const response = await fetch('/api/tournois/match-bot/' + tournoiMatchId);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Impossible de charger ce match.');
+            detailsCache[cle] = data.match;
+            return data.match;
+        }
+
+        function afficherResultatBot(viewer, match) {
+            viewer.innerHTML = `
+                <div class="match-result" style="display:block;">
+                    Victoire de ${formaterNomComplet(match.vainqueur_nom)} ${match.score}
+                </div>
+            `;
+        }
+
+        function afficherTeletexteBot(viewer, match) {
+            const texte = match.evenements.map(function (evt) { return evt.texte; }).join('\n');
+            viewer.innerHTML = `<div class="match-journal" style="display:block;">${texte}</div>`;
+        }
+
+        function afficherLiveBot(viewer, match, tournoiMatchId) {
+            if (!match.estSemaineActuelle) {
+                viewer.innerHTML = `<div class="match-hint">Le direct n'est plus disponible pour ce match (semaine passée). Utilise Résultat direct ou Téletexte.</div>`;
+                return;
+            }
+
+            const cle = 'bot-' + tournoiMatchId;
+            arreterLive(cle);
+
+            viewer.innerHTML = `
+                <div class="live-score" id="live-score-${cle}">C'est parti...</div>
+                <div class="live-log" id="live-log-${cle}"></div>
+                <button class="cta cta-secondary live-skip-btn" id="live-skip-${cle}" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
+            `;
+
+            const scoreDiv = document.getElementById('live-score-' + cle);
+            const logDiv = document.getElementById('live-log-' + cle);
+            const skipBtn = document.getElementById('live-skip-' + cle);
+
+            let index = 0;
+
+            function jouerEvenement(evt) {
+                const ligne = document.createElement('div');
+                ligne.className = 'live-log-ligne live-log-' + evt.type;
+                ligne.textContent = evt.texte;
+                logDiv.appendChild(ligne);
+                logDiv.scrollTop = logDiv.scrollHeight;
+
+                const score = libelleScore(evt);
+                if (score) scoreDiv.textContent = score;
+                if (evt.type === 'match_fin') {
+                    scoreDiv.textContent = evt.texte;
+                    arreterLive(cle);
+                    skipBtn.style.display = 'none';
+                }
+            }
+
+            function avancer() {
+                if (index >= match.evenements.length) {
+                    arreterLive(cle);
+                    return;
+                }
+                jouerEvenement(match.evenements[index]);
+                index++;
+            }
+
+            avancer();
+            liveEnCours[cle] = setInterval(avancer, 3000);
+
+            skipBtn.addEventListener('click', function () {
+                arreterLive(cle);
+                while (index < match.evenements.length) {
+                    jouerEvenement(match.evenements[index]);
+                    index++;
+                }
+            });
+        }
+
+        async function activerModeBot(tournoiMatchId, mode, boutonClique) {
+            const carte = document.querySelector('.match-card[data-tournoi-match-id="' + tournoiMatchId + '"]');
+            const viewer = carte.querySelector('.match-viewer');
+
+            carte.querySelectorAll('.match-mode-btn').forEach(function (b) { b.classList.remove('active'); });
+            boutonClique.classList.add('active');
+
+            arreterLive('bot-' + tournoiMatchId);
+            viewer.style.display = 'block';
+            viewer.innerHTML = '<div class="match-viewer-loading">Chargement...</div>';
+
+            try {
+                const match = await obtenirDetailBot(tournoiMatchId);
+                if (mode === 'resultat') afficherResultatBot(viewer, match);
+                else if (mode === 'teletexte') afficherTeletexteBot(viewer, match);
+                else if (mode === 'live') afficherLiveBot(viewer, match, tournoiMatchId);
+            } catch (err) {
+                viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
+            }
+        }
+
         function grouperMatchs(matchs) {
             const groupes = [];
             matchs.forEach(function (m) {
@@ -246,6 +353,7 @@
                         semaine: m.semaine,
                         positionSemaine: m.positionSemaine,
                         surface: m.surface,
+                        circuit: m.type === 'joueur' ? 'ATP' : 'WTA',
                         matchs: [m]
                     });
                 }
@@ -326,7 +434,7 @@
                 bloc.className = 'match-tournoi-group match-tournoi-group-' + groupe.surface;
                 const enTete = groupe.tournoi_id
                     ? `<a href="tournoi-detail.html?calendrierId=${groupe.tournoi_calendrier_id}&semaine=${groupe.semaine}&playerId=${groupe.matchs[0].player_id}">${groupe.tournoi_nom}</a>
-                       <span class="match-tournoi-header-meta">Semaine ${groupe.positionSemaine} · ${LABELS_SURFACE[groupe.surface]}</span>`
+                       <span class="match-tournoi-header-meta">${groupe.circuit} · Semaine ${groupe.positionSemaine} · ${LABELS_SURFACE[groupe.surface]}</span>`
                     : `<a href="coupe.html?playerId=${groupe.matchs[0].player_id}&tieId=${groupe.coupe_equipe_id}">${groupe.coupe_nation_domicile} vs ${groupe.coupe_nation_exterieur}</a>
                        <span class="match-tournoi-header-meta">${groupe.coupe_manche}${groupe.coupe_division ? ' · Division ' + groupe.coupe_division : ''} · ${LABELS_SURFACE[groupe.surface]}</span>`;
                 bloc.innerHTML = `
@@ -369,7 +477,7 @@
                 bloc.innerHTML = `
                     <div class="match-tournoi-header">
                         <a href="tournoi-detail.html?calendrierId=${tournoi.calendrierId}&semaine=${tournoi.semaine}&playerId=${tournoi.playerId}">${tournoi.nom}</a>
-                        <span class="match-tournoi-header-meta">Semaine ${tournoi.positionSemaine} · ${LABELS_SURFACE[tournoi.surface]}</span>
+                        <span class="match-tournoi-header-meta">${tournoi.circuit} · Semaine ${tournoi.positionSemaine} · ${LABELS_SURFACE[tournoi.surface]}</span>
                     </div>
                     <div class="tournoi-list"></div>
                 `;
@@ -378,6 +486,31 @@
                     const nomJ1 = flagImg(m.joueur1_drapeau) + ' ' + formaterNomComplet(m.joueur1_nom);
                     const nomJ2 = flagImg(m.joueur2_drapeau) + ' ' + formaterNomComplet(m.joueur2_nom);
                     const carte = document.createElement('div');
+                    if (m.aReplayBot) {
+                        carte.className = 'match-card';
+                        carte.dataset.tournoiMatchId = m.id;
+                        carte.innerHTML = `
+                            <div class="match-card-head">
+                                <div class="match-card-info">
+                                    <div class="match-card-name">${nomJ1} vs ${nomJ2}</div>
+                                    <div class="match-card-meta">${m.numero_tour}</div>
+                                </div>
+                            </div>
+                            <div class="match-card-actions">
+                                <button class="match-mode-btn" data-mode="live">Live</button>
+                                <button class="match-mode-btn" data-mode="resultat">Résultat direct</button>
+                                <button class="match-mode-btn" data-mode="teletexte">Téletexte</button>
+                            </div>
+                            <div class="match-viewer"></div>
+                        `;
+                        conteneur.appendChild(carte);
+                        carte.querySelectorAll('.match-mode-btn').forEach(function (bouton) {
+                            bouton.addEventListener('click', function () {
+                                activerModeBot(m.id, bouton.dataset.mode, bouton);
+                            });
+                        });
+                        return;
+                    }
                     carte.className = 'tournoi-card';
                     carte.innerHTML = `
                         <div class="tournoi-card-name">${nomJ1} vs ${nomJ2}</div>

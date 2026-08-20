@@ -2934,16 +2934,28 @@ function resoudreMatchAdversaire(tournoi, label, j1, j2, tourIndex) {
     }
     // Meme les matchs 100% lambda jouent un vrai match (score plausible) plutot qu'un
     // simple tirage, pour que le tableau et les resultats du tournoi restent lisibles
-    // et consultables meme quand le joueur du coach n'est pas implique.
+    // et consultables meme quand le joueur du coach n'est pas implique. Le deroule
+    // complet (evenements) est conserve directement sur tournoi_matchs (pas de ligne
+    // matchs, qui exige un user_id/player_id reel) pour offrir Live/Resultat/Teletexte
+    // meme sur ces matchs-la (demande explicite de l'utilisateur, 2026-08-20).
     const resultat = simulerMatch(j1.niveau, j1.niveau + 100, j2.niveau, j2.niveau + 100);
-    return { vainqueur: resultat.vainqueur === 'A' ? j1 : j2, score: resultat.score, matchId: null, matchIdJ2: null };
+    // Le moteur etiquette toujours les 2 cotes "Toi"/"Adversaire" (perspective d'un
+    // coach) - sans le moindre sens pour un match 100% bots, remplace par les vrais
+    // noms des deux entrants avant stockage.
+    const evenementsNommes = resultat.evenements.map(function (evt) {
+        return evt.texte ? Object.assign({}, evt, { texte: evt.texte.replace(/\bToi\b/g, j1.nom).replace(/\bAdversaire\b/g, j2.nom) }) : evt;
+    });
+    return {
+        vainqueur: resultat.vainqueur === 'A' ? j1 : j2, score: resultat.score,
+        matchId: null, matchIdJ2: null, evenements: JSON.stringify(evenementsNommes)
+    };
 }
 
-function enregistrerMatchTournoi(tournoiId, label, ordre, j1, j2, vainqueur, score, matchId, matchIdJ2) {
+function enregistrerMatchTournoi(tournoiId, label, ordre, j1, j2, vainqueur, score, matchId, matchIdJ2, evenements) {
     db.prepare(`
-        INSERT INTO tournoi_matchs (tournoi_id, numero_tour, ordre, joueur1_id, joueur2_id, vainqueur_id, score, match_id, match_id_j2)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(tournoiId, label, ordre, j1.id, j2 ? j2.id : null, vainqueur ? vainqueur.id : null, score || null, matchId || null, matchIdJ2 || null);
+        INSERT INTO tournoi_matchs (tournoi_id, numero_tour, ordre, joueur1_id, joueur2_id, vainqueur_id, score, match_id, match_id_j2, evenements)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(tournoiId, label, ordre, j1.id, j2 ? j2.id : null, vainqueur ? vainqueur.id : null, score || null, matchId || null, matchIdJ2 || null, evenements || null);
 }
 
 // XP verse en une fois a l'elimination/victoire, selon le nombre total de tours du
@@ -3041,7 +3053,7 @@ function simulerUnTour(tournoiId) {
         const j1 = vivants[i];
         const j2 = vivants[i + 1];
 
-        let vainqueur, score = null, matchId = null, matchIdJ2 = null;
+        let vainqueur, score = null, matchId = null, matchIdJ2 = null, evenements = null;
         if (j1.nom === 'BYE') {
             vainqueur = j2;
         } else if (j2.nom === 'BYE') {
@@ -3052,9 +3064,10 @@ function simulerUnTour(tournoiId) {
             score = resultat.score;
             matchId = resultat.matchId;
             matchIdJ2 = resultat.matchIdJ2;
+            evenements = resultat.evenements;
         }
 
-        enregistrerMatchTournoi(tournoiId, label, i / 2, j1, j2, vainqueur, score, matchId, matchIdJ2);
+        enregistrerMatchTournoi(tournoiId, label, i / 2, j1, j2, vainqueur, score, matchId, matchIdJ2, evenements);
 
         const perdant = vainqueur === j1 ? j2 : j1;
         if (perdant.nom !== 'BYE') {
@@ -3168,7 +3181,7 @@ function simulerUnTourPoules(tournoiId) {
                 const j1 = groupe[paire[0]];
                 const j2 = groupe[paire[1]];
                 const resultat = resoudreMatchAdversaire(tournoi, 'Phase de poules', j1, j2);
-                enregistrerMatchTournoi(tournoiId, 'Phase de poules', ordre++, j1, j2, resultat.vainqueur, resultat.score, resultat.matchId, resultat.matchIdJ2);
+                enregistrerMatchTournoi(tournoiId, 'Phase de poules', ordre++, j1, j2, resultat.vainqueur, resultat.score, resultat.matchId, resultat.matchIdJ2, resultat.evenements);
             });
         });
 
@@ -3185,17 +3198,17 @@ function simulerUnTourPoules(tournoiId) {
         const classementB = classementGroupe(tournoiId, groupes.B);
 
         const sf1 = resoudreMatchAdversaire(tournoi, 'Demi-finale', classementA[0], classementB[1]);
-        enregistrerMatchTournoi(tournoiId, 'Demi-finale', 100, classementA[0], classementB[1], sf1.vainqueur, sf1.score, sf1.matchId, sf1.matchIdJ2);
+        enregistrerMatchTournoi(tournoiId, 'Demi-finale', 100, classementA[0], classementB[1], sf1.vainqueur, sf1.score, sf1.matchId, sf1.matchIdJ2, sf1.evenements);
         eliminer('Demi-finale', 2, sf1.vainqueur === classementA[0] ? classementB[1] : classementA[0]);
 
         const sf2 = resoudreMatchAdversaire(tournoi, 'Demi-finale', classementB[0], classementA[1]);
-        enregistrerMatchTournoi(tournoiId, 'Demi-finale', 101, classementB[0], classementA[1], sf2.vainqueur, sf2.score, sf2.matchId, sf2.matchIdJ2);
+        enregistrerMatchTournoi(tournoiId, 'Demi-finale', 101, classementB[0], classementA[1], sf2.vainqueur, sf2.score, sf2.matchId, sf2.matchIdJ2, sf2.evenements);
         eliminer('Demi-finale', 2, sf2.vainqueur === classementB[0] ? classementA[1] : classementB[0]);
     } else if (tourIndex === 4) {
         // Finale : les 2 seuls joueurs encore en lice.
         const finalistes = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine IS NULL').all(tournoiId);
         const resultat = resoudreMatchAdversaire(tournoi, 'Finale', finalistes[0], finalistes[1]);
-        enregistrerMatchTournoi(tournoiId, 'Finale', 102, finalistes[0], finalistes[1], resultat.vainqueur, resultat.score, resultat.matchId, resultat.matchIdJ2);
+        enregistrerMatchTournoi(tournoiId, 'Finale', 102, finalistes[0], finalistes[1], resultat.vainqueur, resultat.score, resultat.matchId, resultat.matchIdJ2, resultat.evenements);
         const champion = resultat.vainqueur;
         const runnerUp = champion.id === finalistes[0].id ? finalistes[1] : finalistes[0];
         eliminer('Finale', 1, runnerUp);
@@ -4097,6 +4110,12 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
                 } else if (m.joueur1_player_id !== Number(playerId)) {
                     m.match_id = null;
                 }
+                // Deroule complet des matchs 100% bots (evenements) : jamais envoye tel
+                // quel ici (spoilerait le score des l'ouverture de l'onglet), seulement un
+                // indicateur - le vrai contenu se recupere a la demande via
+                // /api/tournois/match-bot/:id quand le coach clique un mode de visionnage.
+                m.aReplayBot = !m.match_id && !!m.evenements;
+                delete m.evenements;
             });
             instance.matchs = matchs;
         }
@@ -5160,7 +5179,8 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
         const resultat = tournois.map(function (t) {
             t.player_id = joueurParCircuit[t.circuit];
             const matchs = db.prepare(`
-                SELECT tournoi_matchs.numero_tour, tournoi_matchs.ordre, tournoi_matchs.score,
+                SELECT tournoi_matchs.id, tournoi_matchs.numero_tour, tournoi_matchs.ordre, tournoi_matchs.score,
+                       tournoi_matchs.evenements,
                        j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite,
                        j2.nom AS joueur2_nom, j2.nationalite AS joueur2_nationalite
                 FROM tournoi_matchs
@@ -5173,6 +5193,11 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
             matchs.forEach(function (m) {
                 m.joueur1_drapeau = drapeau(m.joueur1_nationalite);
                 m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
+                // Deroule complet jamais envoye ici (spoilerait le score des l'ouverture
+                // de la page) - juste un indicateur, le vrai contenu se recupere via
+                // /api/tournois/match-bot/:id au clic sur un mode de visionnage.
+                m.aReplayBot = !!m.evenements;
+                delete m.evenements;
             });
             return {
                 tournoiId: t.id, nom: t.nom, circuit: t.circuit, surface: t.surface,
@@ -5292,6 +5317,44 @@ app.get('/api/matchs/detail/:matchId', (req, res) => {
         }
 
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        match.evenements = JSON.parse(match.evenements);
+        match.estSemaineActuelle = etat.semaine_actuelle - match.semaine <= 1;
+
+        res.json({ success: true, match });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Deroule complet d'un match 100% bots (aucune ligne matchs, evenements stockes
+// directement sur tournoi_matchs - voir enregistrerMatchTournoi/resoudreMatchAdversaire).
+// Public comme le reste d'un tableau de tournoi deja tire, pas de verification de
+// proprietaire (pas de notion de "mon match" pour un match entre deux bots).
+app.get('/api/tournois/match-bot/:tournoiMatchId', (req, res) => {
+    try {
+        const { tournoiMatchId } = req.params;
+
+        const match = db.prepare(`
+            SELECT tournoi_matchs.score, tournoi_matchs.evenements, tournois.semaine,
+                   j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite,
+                   j2.nom AS joueur2_nom, j2.nationalite AS joueur2_nationalite,
+                   vj.nom AS vainqueur_nom
+            FROM tournoi_matchs
+            JOIN tournois ON tournois.id = tournoi_matchs.tournoi_id
+            JOIN tournoi_joueurs AS j1 ON j1.id = tournoi_matchs.joueur1_id
+            LEFT JOIN tournoi_joueurs AS j2 ON j2.id = tournoi_matchs.joueur2_id
+            LEFT JOIN tournoi_joueurs AS vj ON vj.id = tournoi_matchs.vainqueur_id
+            WHERE tournoi_matchs.id = ?
+        `).get(tournoiMatchId);
+
+        if (!match || !match.evenements) {
+            return res.status(404).json({ error: 'Match introuvable.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        match.joueur1_drapeau = drapeau(match.joueur1_nationalite);
+        match.joueur2_drapeau = drapeau(match.joueur2_nationalite);
         match.evenements = JSON.parse(match.evenements);
         match.estSemaineActuelle = etat.semaine_actuelle - match.semaine <= 1;
 

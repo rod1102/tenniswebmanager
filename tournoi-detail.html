@@ -354,85 +354,19 @@
                 return;
             }
 
-            if (!instance.matchs || instance.matchs.length === 0) {
-                const joueursTries = instance.joueurs
-                    .filter(function (j) { return j.position_tableau !== null && j.position_tableau >= 0; })
-                    .sort(function (a, b) { return a.position_tableau - b.position_tableau; });
-
-                function nomJoueurCase(j) {
-                    if (!j) return '<span class="bracket-joueur bracket-tbd">?</span>';
-                    if (j.nom === 'BYE') return '<span class="bracket-joueur bracket-bye">BYE</span>';
-                    const estMoi = j.est_reel && j.player_id === Number(playerId);
-                    const classe = estMoi ? ' bracket-moi' : (!j.est_reel ? ' bracket-bot' : ' bracket-autre-reel');
-                    const rangTxt = j.rang ? ` <span class="bracket-rang">(${j.rang})</span>` : '';
-                    const nomHtml = lienAdversaire(`${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}${rangTxt}`, j.est_reel, j.player_id, j.rival_id);
-                    return `<span class="bracket-joueur${classe}">${nomHtml}</span><span class="bracket-seed">${j.tete_de_serie ? '[' + j.tete_de_serie + ']' : ''}</span>`;
-                }
-
-                const colonnes = [];
-                const round1 = [];
-                for (let i = 0; i < joueursTries.length; i += 2) {
-                    round1.push({ j1: joueursTries[i], j2: joueursTries[i + 1] });
-                }
-                colonnes.push({ label: ROUND_LABELS_CLIENT[joueursTries.length] || (joueursTries.length + 'e de finale'), matchs: round1 });
-
-                let matchsPrecedents = round1.length;
-                while (matchsPrecedents > 1) {
-                    const entrantsTour = matchsPrecedents;
-                    const nbMatchsCeTour = matchsPrecedents / 2;
-                    const matchsVides = [];
-                    for (let i = 0; i < nbMatchsCeTour; i++) matchsVides.push({ j1: null, j2: null });
-                    colonnes.push({ label: ROUND_LABELS_CLIENT[entrantsTour] || (entrantsTour + 'e de finale'), matchs: matchsVides });
-                    matchsPrecedents = nbMatchsCeTour;
-                }
-
-                const estElimination = fiche.info.format !== 'poules';
-
-                panneau.innerHTML = `
-                    <div class="match-hint">Tableau tiré au sort, en attente du coup d'envoi.</div>
-                    <div class="bracket">
-                        ${colonnes.map(function (colonne, roundIndex) {
-                            return `
-                                <div class="bracket-round">
-                                    <div class="bracket-round-title">${colonne.label}</div>
-                                    ${colonne.matchs.map(function (m, ordre) {
-                                        return `
-                                            <div class="bracket-match-wrap" ${estElimination ? `data-round-index="${roundIndex}" data-ordre="${ordre}" data-key="${roundIndex}-${ordre}"` : ''}>
-                                                <div class="bracket-match">
-                                                    <div class="bracket-match-row">${nomJoueurCase(m.j1)}</div>
-                                                    <div class="bracket-match-row">${nomJoueurCase(m.j2)}</div>
-                                                </div>
-                                            </div>
-                                        `;
-                                    }).join('')}
-                                </div>
-                            `;
-                        }).join('')}
-                        <div class="bracket-round bracket-round-vainqueur">
-                            <div class="bracket-round-title">Vainqueur</div>
-                            <div class="bracket-match-wrap">
-                                <div class="bracket-match bracket-match-final">
-                                    <span class="bracket-joueur bracket-tbd">?</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                `;
-
-                if (estElimination) {
-                    activerSurbrillanceParcours(panneau);
-                }
-                return;
+            function classeJoueur(estMoi, estReel) {
+                return estMoi ? ' bracket-moi' : (!estReel ? ' bracket-bot' : ' bracket-autre-reel');
             }
 
-            const parTour = {};
-            instance.matchs.forEach(function (m) {
-                if (!parTour[m.numero_tour]) parTour[m.numero_tour] = [];
-                parTour[m.numero_tour].push(m);
-            });
-            Object.keys(parTour).forEach(function (t) { parTour[t].sort(function (a, b) { return a.ordre - b.ordre; }); });
-
-            const colonnes = ORDRE_TOURS_MATCHS.filter(function (t) { return parTour[t]; });
+            function nomJoueurCase(j) {
+                if (!j) return '<span class="bracket-joueur bracket-tbd">?</span>';
+                if (j.nom === 'BYE') return '<span class="bracket-joueur bracket-bye">BYE</span>';
+                const estMoi = j.est_reel && j.player_id === Number(playerId);
+                const classe = classeJoueur(estMoi, j.est_reel);
+                const rangTxt = j.rang ? ` <span class="bracket-rang">(${j.rang})</span>` : '';
+                const nomHtml = lienAdversaire(`${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}${rangTxt}`, j.est_reel, j.player_id, j.rival_id);
+                return `<span class="bracket-joueur${classe}">${nomHtml}</span><span class="bracket-seed">${j.tete_de_serie ? '[' + j.tete_de_serie + ']' : ''}</span>`;
+            }
 
             function nomAffiche(m, cote) {
                 const nom = cote === 1 ? m.joueur1_nom : m.joueur2_nom;
@@ -445,50 +379,120 @@
                 if (!nom) return '<span class="bracket-joueur bracket-bye">BYE</span>';
                 const estVainqueur = m.vainqueur_nom === nom;
                 const estMoi = estReel && pId === Number(playerId);
-                const classes = (estVainqueur ? ' bracket-vainqueur' : '') + (estMoi ? ' bracket-moi' : (!estReel ? ' bracket-bot' : ' bracket-autre-reel'));
+                const classes = (estVainqueur ? ' bracket-vainqueur' : '') + classeJoueur(estMoi, estReel);
                 const rangTxt = rang ? ` <span class="bracket-rang">(${rang})</span>` : '';
                 const nomHtml = lienAdversaire(`${flagImg(drap)} ${formaterNomComplet(nom)}${rangTxt}`, estReel, pId, rId);
                 return `<span class="bracket-joueur${classes}">${nomHtml}</span><span class="bracket-seed">${seed ? '[' + seed + ']' : ''}</span>`;
             }
 
-            const dernierTour = colonnes[colonnes.length - 1];
-            const finale = parTour[dernierTour] && parTour[dernierTour][0];
-            const estElimination = fiche.info.format !== 'poules';
+            const parTour = {};
+            (instance.matchs || []).forEach(function (m) {
+                if (!parTour[m.numero_tour]) parTour[m.numero_tour] = [];
+                parTour[m.numero_tour].push(m);
+            });
+            Object.keys(parTour).forEach(function (t) { parTour[t].sort(function (a, b) { return a.ordre - b.ordre; }); });
 
-            // Depuis le passage a la simulation tour par tour, un tournoi "a_venir"
-            // peut n'avoir que ses premiers tours joues - les suivants n'existent tout
-            // simplement pas encore en base, colonnes les exclut naturellement.
-            const banniereEnCours = instance.statut === 'a_venir'
-                ? '<div class="match-hint" style="margin-bottom:12px;">Tournoi en cours — les tours suivants apparaîtront au fil de la semaine.</div>'
-                : '';
+            const estElimination = fiche.info.format !== 'poules';
+            let colonnesHtml, vainqueurFinal;
+
+            if (estElimination) {
+                // Toutes les etapes du tableau (1er tour a la finale) sont affichees en
+                // permanence, meme celles pas encore jouees (en pointilles "?") - avant,
+                // des qu'un tour etait simule, les etapes suivantes disparaissaient
+                // purement et simplement des l'onglet au lieu de rester visibles en
+                // attente (bug signale par l'utilisateur, 2026-08-20). Le 1er tour est
+                // toujours connu des le tirage au sort (position_tableau), donc toujours
+                // affiche avec les vrais noms/BYE meme s'il n'a pas encore ete joue.
+                const joueursTries = instance.joueurs
+                    .filter(function (j) { return j.position_tableau !== null && j.position_tableau >= 0; })
+                    .sort(function (a, b) { return a.position_tableau - b.position_tableau; });
+
+                const labelsRounds = [];
+                let entrants = joueursTries.length;
+                while (entrants >= 2) {
+                    labelsRounds.push(ROUND_LABELS_CLIENT[entrants] || (entrants + 'e de finale'));
+                    entrants = entrants / 2;
+                }
+
+                const colonnes = labelsRounds.map(function (label, roundIndex) {
+                    if (parTour[label]) {
+                        return { label: label, matchs: parTour[label].map(function (m) { return { reel: m }; }) };
+                    }
+                    if (roundIndex === 0) {
+                        const paires = [];
+                        for (let i = 0; i < joueursTries.length; i += 2) {
+                            paires.push({ vide: { j1: joueursTries[i], j2: joueursTries[i + 1] } });
+                        }
+                        return { label: label, matchs: paires };
+                    }
+                    const nbMatchsCeTour = Math.pow(2, labelsRounds.length - 1 - roundIndex);
+                    const vides = [];
+                    for (let i = 0; i < nbMatchsCeTour; i++) vides.push({ vide: { j1: null, j2: null } });
+                    return { label: label, matchs: vides };
+                });
+
+                const dernierLabel = labelsRounds[labelsRounds.length - 1];
+                const finale = parTour[dernierLabel] && parTour[dernierLabel][0];
+                vainqueurFinal = finale && finale.vainqueur_nom;
+
+                colonnesHtml = colonnes.map(function (colonne, roundIndex) {
+                    return `
+                        <div class="bracket-round">
+                            <div class="bracket-round-title">${colonne.label}</div>
+                            ${colonne.matchs.map(function (m, ordre) {
+                                const contenu = m.reel
+                                    ? `<div class="bracket-match-row">${nomAffiche(m.reel, 1)}</div>
+                                       <div class="bracket-match-row">${nomAffiche(m.reel, 2)}</div>
+                                       ${m.reel.score ? `<div class="bracket-score">${m.reel.score}</div>` : ''}`
+                                    : `<div class="bracket-match-row">${nomJoueurCase(m.vide.j1)}</div>
+                                       <div class="bracket-match-row">${nomJoueurCase(m.vide.j2)}</div>`;
+                                return `
+                                    <div class="bracket-match-wrap" data-round-index="${roundIndex}" data-ordre="${ordre}" data-key="${roundIndex}-${ordre}">
+                                        <div class="bracket-match">${contenu}</div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    `;
+                }).join('');
+            } else {
+                // Format poules (Masters de fin de saison) : structure differente (pas de
+                // 1/2 puissance de 2 classique), colonnes futures pas encore construites
+                // ici - hors scope de ce correctif.
+                const colonnes = ORDRE_TOURS_MATCHS.filter(function (t) { return parTour[t]; });
+                const dernierTour = colonnes[colonnes.length - 1];
+                const finale = parTour[dernierTour] && parTour[dernierTour][0];
+                vainqueurFinal = finale && finale.vainqueur_nom;
+
+                colonnesHtml = colonnes.map(function (tour) {
+                    return `
+                        <div class="bracket-round">
+                            <div class="bracket-round-title">${tour}</div>
+                            ${parTour[tour].map(function (m) {
+                                return `
+                                    <div class="bracket-match-wrap">
+                                        <div class="bracket-match">
+                                            <div class="bracket-match-row">${nomAffiche(m, 1)}</div>
+                                            <div class="bracket-match-row">${nomAffiche(m, 2)}</div>
+                                            ${m.score ? `<div class="bracket-score">${m.score}</div>` : ''}
+                                        </div>
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    `;
+                }).join('');
+            }
 
             panneau.innerHTML = `
-                ${banniereEnCours}
                 <div class="bracket">
-                    ${colonnes.map(function (tour, roundIndex) {
-                        return `
-                            <div class="bracket-round">
-                                <div class="bracket-round-title">${tour}</div>
-                                ${parTour[tour].map(function (m) {
-                                    return `
-                                        <div class="bracket-match-wrap" ${estElimination ? `data-round-index="${roundIndex}" data-ordre="${m.ordre}" data-key="${roundIndex}-${m.ordre}"` : ''}>
-                                            <div class="bracket-match">
-                                                <div class="bracket-match-row">${nomAffiche(m, 1)}</div>
-                                                <div class="bracket-match-row">${nomAffiche(m, 2)}</div>
-                                                ${m.score ? `<div class="bracket-score">${m.score}</div>` : ''}
-                                            </div>
-                                        </div>
-                                    `;
-                                }).join('')}
-                            </div>
-                        `;
-                    }).join('')}
+                    ${colonnesHtml}
                     <div class="bracket-round bracket-round-vainqueur">
                         <div class="bracket-round-title">Vainqueur</div>
                         <div class="bracket-match-wrap">
                             <div class="bracket-match bracket-match-final">
-                                ${finale && finale.vainqueur_nom
-                                    ? `<span class="bracket-joueur bracket-vainqueur">${formaterNomComplet(finale.vainqueur_nom)}</span>`
+                                ${vainqueurFinal
+                                    ? `<span class="bracket-joueur bracket-vainqueur">${formaterNomComplet(vainqueurFinal)}</span>`
                                     : '<span class="bracket-joueur">?</span>'}
                             </div>
                         </div>
@@ -624,6 +628,113 @@
             }
         }
 
+        // Matchs 100% bots (aucun joueur du coach implique) : meme systeme Live/
+        // Resultat/Teletexte que les matchs "match-id" ci-dessus, mais source des
+        // donnees a part (/api/tournois/match-bot/:id, pas de ligne matchs) - cle de
+        // cache/minuteur prefixee "bot-" pour ne jamais entrer en collision avec un
+        // vrai matchId.
+        async function obtenirDetailBot(tournoiMatchId) {
+            const cle = 'bot-' + tournoiMatchId;
+            if (detailsCache[cle]) return detailsCache[cle];
+            const response = await fetch('/api/tournois/match-bot/' + tournoiMatchId);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Impossible de charger ce match.');
+            detailsCache[cle] = data.match;
+            return data.match;
+        }
+
+        function afficherResultatBot(viewer, match) {
+            viewer.innerHTML = `
+                <div class="match-result" style="display:block;">
+                    Victoire de ${formaterNomComplet(match.vainqueur_nom)} ${match.score}
+                </div>
+            `;
+        }
+
+        function afficherTeletexteBot(viewer, match) {
+            const texte = match.evenements.map(function (evt) { return evt.texte; }).join('\n');
+            viewer.innerHTML = `<div class="match-journal" style="display:block;">${texte}</div>`;
+        }
+
+        function afficherLiveBot(viewer, match, tournoiMatchId) {
+            if (!match.estSemaineActuelle) {
+                viewer.innerHTML = `<div class="match-hint">Le direct n'est plus disponible pour ce match (semaine passée). Utilise Résultat direct ou Téletexte.</div>`;
+                return;
+            }
+
+            const cle = 'bot-' + tournoiMatchId;
+            arreterLive(cle);
+
+            viewer.innerHTML = `
+                <div class="live-score" id="live-score-${cle}">C'est parti...</div>
+                <div class="live-log" id="live-log-${cle}"></div>
+                <button class="cta cta-secondary live-skip-btn" id="live-skip-${cle}" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
+            `;
+
+            const scoreDiv = document.getElementById('live-score-' + cle);
+            const logDiv = document.getElementById('live-log-' + cle);
+            const skipBtn = document.getElementById('live-skip-' + cle);
+
+            let index = 0;
+
+            function jouerEvenement(evt) {
+                const ligne = document.createElement('div');
+                ligne.className = 'live-log-ligne live-log-' + evt.type;
+                ligne.textContent = evt.texte;
+                logDiv.appendChild(ligne);
+                logDiv.scrollTop = logDiv.scrollHeight;
+
+                const score = libelleScore(evt);
+                if (score) scoreDiv.textContent = score;
+                if (evt.type === 'match_fin') {
+                    scoreDiv.textContent = evt.texte;
+                    arreterLive(cle);
+                    skipBtn.style.display = 'none';
+                }
+            }
+
+            function avancer() {
+                if (index >= match.evenements.length) {
+                    arreterLive(cle);
+                    return;
+                }
+                jouerEvenement(match.evenements[index]);
+                index++;
+            }
+
+            avancer();
+            liveEnCours[cle] = setInterval(avancer, 3000);
+
+            skipBtn.addEventListener('click', function () {
+                arreterLive(cle);
+                while (index < match.evenements.length) {
+                    jouerEvenement(match.evenements[index]);
+                    index++;
+                }
+            });
+        }
+
+        async function activerModeBot(tournoiMatchId, mode, boutonClique) {
+            const carte = document.querySelector('.match-card[data-tournoi-match-id="' + tournoiMatchId + '"]');
+            const viewer = carte.querySelector('.match-viewer');
+
+            carte.querySelectorAll('.match-mode-btn').forEach(function (b) { b.classList.remove('active'); });
+            boutonClique.classList.add('active');
+
+            arreterLive('bot-' + tournoiMatchId);
+            viewer.style.display = 'block';
+            viewer.innerHTML = '<div class="match-viewer-loading">Chargement...</div>';
+
+            try {
+                const match = await obtenirDetailBot(tournoiMatchId);
+                if (mode === 'resultat') afficherResultatBot(viewer, match);
+                else if (mode === 'teletexte') afficherTeletexteBot(viewer, match);
+                else if (mode === 'live') afficherLiveBot(viewer, match, tournoiMatchId);
+            } catch (err) {
+                viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
+            }
+        }
+
         function afficherResultats(fiche) {
             const panneau = document.getElementById('tab-resultats');
             const instance = fiche.instance;
@@ -680,6 +791,30 @@
                         if (bouton.disabled) return;
                         bouton.addEventListener('click', function () {
                             activerModeMatch(m.match_id, bouton.dataset.mode, bouton);
+                        });
+                    });
+                } else if (m.aReplayBot) {
+                    carte.dataset.tournoiMatchId = m.id;
+                    const liveDisabled = liveDisponible ? '' : 'disabled title="Disponible uniquement pour les matchs de la semaine en cours"';
+                    carte.innerHTML = `
+                        <div class="match-card-head">
+                            <div class="match-card-info">
+                                <div class="match-card-name">${nomJ1} vs ${nomJ2}</div>
+                                <div class="match-card-meta">${m.numero_tour}</div>
+                            </div>
+                        </div>
+                        <div class="match-card-actions">
+                            <button class="match-mode-btn" data-mode="live" ${liveDisabled}>Live</button>
+                            <button class="match-mode-btn" data-mode="resultat">Résultat direct</button>
+                            <button class="match-mode-btn" data-mode="teletexte">Téletexte</button>
+                        </div>
+                        <div class="match-viewer"></div>
+                    `;
+                    liste.appendChild(carte);
+                    carte.querySelectorAll('.match-mode-btn').forEach(function (bouton) {
+                        if (bouton.disabled) return;
+                        bouton.addEventListener('click', function () {
+                            activerModeBot(m.id, bouton.dataset.mode, bouton);
                         });
                     });
                 } else {

@@ -617,7 +617,8 @@ const migrations = [
     "ALTER TABLE players ADD COLUMN cap_volee INTEGER DEFAULT 0",
     "ALTER TABLE players ADD COLUMN cap_deplacement INTEGER DEFAULT 0",
     "ALTER TABLE players ADD COLUMN cap_puissance INTEGER DEFAULT 0",
-    "ALTER TABLE players ADD COLUMN cap_resistance INTEGER DEFAULT 0"
+    "ALTER TABLE players ADD COLUMN cap_resistance INTEGER DEFAULT 0",
+    "ALTER TABLE tournoi_matchs ADD COLUMN evenements TEXT"
 ];
 
 migrations.forEach(function (sql) {
