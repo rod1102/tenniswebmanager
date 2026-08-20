@@ -1577,6 +1577,33 @@ app.post('/api/admin/corriger-energie-reset', (req, res) => {
     }
 });
 
+// Route temporaire (2026-08-20) : restaure manuellement le coaching mental perdu
+// d'un joueur bloque a tort par le bug "inscription = engage" (corrige juste
+// avant) - credite le +1 a gagner / +1 a deplacer que la semaine en cours aurait
+// du donner. A n'utiliser qu'une fois, uniquement pour un joueur reellement
+// concerne (le coach doit confirmer que la semaine n'a pas encore avance).
+app.post('/api/admin/restaurer-coaching-mental/:playerId', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const { playerId } = req.params;
+        const info = db.prepare(`
+            UPDATE players SET
+                points_dispositions_a_gagner = points_dispositions_a_gagner + 1,
+                points_dispositions_a_deplacer = points_dispositions_a_deplacer + 1
+            WHERE id = ?
+        `).run(playerId);
+        if (info.changes === 0) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Route temporaire (2026-08-20) : nettoie les lignes de journal_semaine_joueur
 // devenues incoherentes suite au changement de LONGUEUR_SAISON (54 -> 48
 // semaines) - une ligne ecrite quand une semaine donnee etait encore un tournoi
