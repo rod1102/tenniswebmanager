@@ -5125,26 +5125,40 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         const semaineActuelle = etat.semaine_actuelle;
 
-        const joueurs = db.prepare("SELECT id FROM players WHERE user_id = ? AND statut = 'valide'").all(userId);
+        const joueurs = db.prepare("SELECT id, type FROM players WHERE user_id = ? AND statut = 'valide'").all(userId);
         if (joueurs.length === 0) {
             return res.json({ success: true, tournois: [] });
         }
 
-        // Meme tolerance d'un ecart de 1 semaine que /api/matchs (cf. bug Live) : un
-        // tournoi se joue integralement au moment ou semaine_actuelle avance dans la
-        // meme requete, donc au moment ou le coach consulte la page, la semaine
-        // courante a deja avance d'un cran par rapport a tournois.semaine.
-        const placeholders = joueurs.map(function () { return '?'; }).join(',');
+        // Un joueur par circuit (ATP pour 'joueur', WTA pour 'joueuse') pour batir le
+        // lien vers la fiche tournoi cote frontend - la fiche n'exige pas d'y etre
+        // inscrit pour etre consultee.
+        const joueurParCircuit = {};
+        joueurs.forEach(function (p) { joueurParCircuit[p.type === 'joueur' ? 'ATP' : 'WTA'] = p.id; });
+
+        // TOUS les tournois de la semaine sur les circuits du coach, inscrit ou non
+        // (demande explicite : "je veux voir tous les matchs de la semaine, que mon
+        // joueur y participe ou non") - plus seulement ceux ou l'un de mes joueurs a
+        // une inscription reelle. Meme tolerance d'un ecart de 1 semaine que
+        // /api/matchs (cf. bug Live) : un tournoi se joue integralement au moment ou
+        // semaine_actuelle avance dans la meme requete, donc au moment ou le coach
+        // consulte la page, la semaine courante a deja avance d'un cran par rapport a
+        // tournois.semaine.
+        const circuits = Object.keys(joueurParCircuit);
+        if (circuits.length === 0) {
+            return res.json({ success: true, tournois: [] });
+        }
+        const placeholders = circuits.map(function () { return '?'; }).join(',');
         const tournois = db.prepare(`
-            SELECT DISTINCT tournois.id, tournois.nom, tournois.circuit, tournois.surface,
-                   tournois.calendrier_id, tournoi_joueurs.player_id, tournois.semaine
+            SELECT tournois.id, tournois.nom, tournois.circuit, tournois.surface,
+                   tournois.calendrier_id, tournois.semaine
             FROM tournois
-            JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
             WHERE tournois.semaine >= ? AND tournois.semaine <= ?
-              AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id IN (${placeholders})
-        `).all(semaineActuelle - 1, semaineActuelle, ...joueurs.map(function (p) { return p.id; }));
+              AND tournois.circuit IN (${placeholders})
+        `).all(semaineActuelle - 1, semaineActuelle, ...circuits);
 
         const resultat = tournois.map(function (t) {
+            t.player_id = joueurParCircuit[t.circuit];
             const matchs = db.prepare(`
                 SELECT tournoi_matchs.numero_tour, tournoi_matchs.ordre, tournoi_matchs.score,
                        j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite,
