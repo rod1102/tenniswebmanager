@@ -333,6 +333,10 @@ app.post('/api/joueurs', (req, res) => {
             return res.status(400).json({ error: 'Ce compte a deja des personnages crees.' });
         }
 
+        // Un motif de refus eventuel ne concernait que la tentative precedente -
+        // efface au moment ou une nouvelle paire est soumise.
+        db.prepare('UPDATE users SET dernier_refus_motif = NULL, dernier_refus_date = NULL WHERE id = ?').run(userId);
+
         const insert = db.prepare(`
             INSERT INTO players (
                 user_id, type, prenom, nom, age, taille, nationalite, main_forte, statut,
@@ -502,7 +506,7 @@ app.get('/api/joueurs/:userId', (req, res) => {
 app.get('/api/utilisateur/:userId', (req, res) => {
     try {
         const userId = req.userId;
-        const user = db.prepare('SELECT id, email, role, est_redacteur FROM users WHERE id = ?').get(userId);
+        const user = db.prepare('SELECT id, email, role, est_redacteur, dernier_refus_motif, dernier_refus_date FROM users WHERE id = ?').get(userId);
 
         if (!user) {
             return res.status(404).json({ error: 'Utilisateur introuvable.' });
@@ -740,7 +744,7 @@ app.post('/api/deplacer-disposition', (req, res) => {
 
 app.post('/api/admin/decision', (req, res) => {
     try {
-        const { playerId, decision } = req.body;
+        const { playerId, decision, motif } = req.body;
 
         if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
@@ -757,8 +761,13 @@ app.post('/api/admin/decision', (req, res) => {
             // Un refus supprime le personnage refuse (et son eventuel binome encore en
             // attente) pour renvoyer le coach vers la creation de personnages plutot que
             // de le laisser bloque sur un statut "Refuse" sans issue. Un personnage deja
-            // valide n'est jamais touche.
+            // valide n'est jamais touche. Le motif (facultatif) est conserve sur le
+            // compte - la ligne players elle-meme disparait, donc c'est le seul endroit
+            // qui survit pour l'afficher au coach au retour sur creation-joueurs.html
+            // (demande utilisateur, 2026-08-20).
             db.prepare("DELETE FROM players WHERE user_id = ? AND statut != 'valide'").run(player.user_id);
+            db.prepare('UPDATE users SET dernier_refus_motif = ?, dernier_refus_date = ? WHERE id = ?')
+                .run((motif || '').trim() || null, new Date().toISOString(), player.user_id);
         } else {
             db.prepare('UPDATE players SET statut = ? WHERE id = ?').run(decision, playerId);
         }

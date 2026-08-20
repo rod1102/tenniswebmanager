@@ -18,6 +18,8 @@
                 <h1 class="auth-title">Crée tes deux champions</h1>
             </div>
 
+            <div id="refus-banner" style="display:none; background:rgba(226,75,74,0.12); border:1px solid #E24B4A; border-radius:10px; padding:14px 16px; margin-bottom:20px; font-size:0.8rem; line-height:1.6; color:#F0D0D0;"></div>
+
             <p style="font-size:0.75rem; color:#8B98A5; margin-bottom:12px; line-height:1.6; text-align:center;">
                 Choisis des prénoms et noms plausibles pour tes personnages : tout nom injurieux, appartenant à une personne réelle ou trop farfelu ne sera pas accepté.
             </p>
@@ -605,6 +607,20 @@
     </div>
 
     <script>
+        (async function afficherRefusEventuel() {
+            const userId = sessionStorage.getItem('currentUserId');
+            if (!userId) return;
+            try {
+                const response = await fetch('/api/utilisateur/' + userId + '?userId=' + userId);
+                const data = await response.json();
+                if (!response.ok || !data.user.dernier_refus_date) return;
+                const banniere = document.getElementById('refus-banner');
+                banniere.style.display = 'block';
+                banniere.innerHTML = '<strong style="color:#E24B4A;">Ta précédente inscription a été refusée.</strong>'
+                    + (data.user.dernier_refus_motif ? '<br>Motif : ' + data.user.dernier_refus_motif : '');
+            } catch (e) { /* pas bloquant si ca echoue */ }
+        })();
+
         const BUDGET = 120;
         const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
         const BUDGET_DISP = 12;

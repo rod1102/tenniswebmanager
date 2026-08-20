@@ -170,10 +170,16 @@
                     const playerId = btn.getAttribute('data-id');
                     const decision = btn.getAttribute('data-decision');
 
+                    let motif = null;
+                    if (decision === 'refuse') {
+                        motif = prompt('Motif du refus (facultatif, visible par le coach) :');
+                        if (motif === null) return; // annulation
+                    }
+
                     const response = await fetch('/api/admin/decision', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ adminId, playerId, decision })
+                        body: JSON.stringify({ adminId, playerId, decision, motif })
                     });
 
                     const data = await response.json();
