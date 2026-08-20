@@ -3167,7 +3167,13 @@ function resoudreMatchAdversaire(tournoi, label, j1, j2, tourIndex) {
     // complet (evenements) est conserve directement sur tournoi_matchs (pas de ligne
     // matchs, qui exige un user_id/player_id reel) pour offrir Live/Resultat/Teletexte
     // meme sur ces matchs-la (demande explicite de l'utilisateur, 2026-08-20).
-    const resultat = simulerMatch(j1.niveau, j1.niveau + 100, j2.niveau, j2.niveau + 100);
+    // Meme regle que jouerMatchTournoi/jouerMatchReelVsReel (Grand Chelem ATP =
+    // meilleur des 5 sets) - jamais transmise ici avant ce correctif, donc TOUS les
+    // matchs 100% bots (y compris en Grand Chelem hommes) se jouaient a tort en 2
+    // sets gagnants, produisant des scores en 2 manches impossibles pour un GC
+    // (bug signale par l'utilisateur, 2026-08-20).
+    const meilleurDe5 = tournoi.circuit === 'ATP' && tournoi.categorie === 'slam';
+    const resultat = simulerMatch(j1.niveau, j1.niveau + 100, j2.niveau, j2.niveau + 100, null, undefined, null, undefined, 0, 0, meilleurDe5);
     // Le moteur etiquette toujours les 2 cotes "Toi"/"Adversaire" (perspective d'un
     // coach) - sans le moindre sens pour un match 100% bots, remplace par les vrais
     // noms des deux entrants avant stockage.
