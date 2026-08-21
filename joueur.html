@@ -194,15 +194,15 @@
             return 'competence-noir';
         }
 
-        function ligneCompetence(label, valeur) {
-            return `<div class="bar-row"><span class="bar-label">${label}</span><div class="bar-track"><div class="bar-fill ${classeCompetence(valeur)}" style="width:${Math.min(100, valeur)}%;"></div></div><span class="bar-value">${valeur}</span></div>`;
+        function ligneCompetence(label, valeur, tooltip) {
+            return `<div class="bar-row"><span class="bar-label">${label}</span><div class="bar-track"><div class="bar-fill ${classeCompetence(valeur)}" style="width:${Math.min(100, valeur)}%;"></div></div><span class="bar-value">${valeur}</span>${tooltip ? iconeInfo(tooltip) : ''}</div>`;
         }
 
         // Meme police que les competences (bar-row), mais sans barre de progression
         // visible : une disposition n'a pas de plafond fixe (les gains d'intersaison
         // peuvent depasser 5), donc pas de largeur en % qui aurait un sens.
-        function ligneDisposition(label, valeur) {
-            return `<div class="bar-row"><span class="bar-label" style="width:140px;">${label}</span><div class="bar-track" style="background:transparent;"></div><span class="bar-value">${valeur}</span></div>`;
+        function ligneDisposition(label, valeur, tooltip) {
+            return `<div class="bar-row"><span class="bar-label" style="width:140px;">${label}</span><div class="bar-track" style="background:transparent;"></div><span class="bar-value">${valeur}</span>${tooltip ? iconeInfo(tooltip) : ''}</div>`;
         }
 
         function libellePhase(phase) {
@@ -675,23 +675,23 @@
                 ${xpLigne}
 
                 <div class="stats-header">Compétences techniques</div>
-                ${ligneCompetence('Service', player.service)}
-                ${ligneCompetence('Retour', player.retour)}
-                ${ligneCompetence('Coup droit / Revers', player.coup_droit_revers)}
-                ${ligneCompetence('Effet', player.effet)}
-                ${ligneCompetence('Volée', player.volee)}
-                ${ligneCompetence('Déplacement', player.deplacement)}
-                ${ligneCompetence('Puissance', player.puissance)}
-                ${ligneCompetence('Résistance', player.resistance)}
+                ${ligneCompetence('Service', player.service, COMPETENCES_TOOLTIPS.service)}
+                ${ligneCompetence('Retour', player.retour, COMPETENCES_TOOLTIPS.retour)}
+                ${ligneCompetence('Coup droit / Revers', player.coup_droit_revers, COMPETENCES_TOOLTIPS.coup_droit_revers)}
+                ${ligneCompetence('Effet', player.effet, COMPETENCES_TOOLTIPS.effet)}
+                ${ligneCompetence('Volée', player.volee, COMPETENCES_TOOLTIPS.volee)}
+                ${ligneCompetence('Déplacement', player.deplacement, COMPETENCES_TOOLTIPS.deplacement)}
+                ${ligneCompetence('Puissance', player.puissance, COMPETENCES_TOOLTIPS.puissance)}
+                ${ligneCompetence('Résistance', player.resistance, COMPETENCES_TOOLTIPS.resistance)}
 
                 <div class="stats-header">Dispositions</div>
-                ${ligneDisposition('Adversité', player.disposition_adversite)}
-                ${ligneDisposition('Coupeur de têtes', player.disposition_coupeur_de_tetes)}
-                ${ligneDisposition('Dernier carré', player.disposition_dernier_carre)}
-                ${ligneDisposition('Premiers tours', player.disposition_premiers_tours)}
-                ${ligneDisposition('Sang froid', player.disposition_sang_froid)}
-                ${ligneDisposition('Indoor', player.disposition_indoor)}
-                ${ligneDisposition('Rivalité', player.disposition_rivalite)}
+                ${ligneDisposition('Adversité', player.disposition_adversite, DISPOSITIONS_TOOLTIPS.adversite)}
+                ${ligneDisposition('Coupeur de têtes', player.disposition_coupeur_de_tetes, DISPOSITIONS_TOOLTIPS.coupeur_de_tetes)}
+                ${ligneDisposition('Dernier carré', player.disposition_dernier_carre, DISPOSITIONS_TOOLTIPS.dernier_carre)}
+                ${ligneDisposition('Premiers tours', player.disposition_premiers_tours, DISPOSITIONS_TOOLTIPS.premiers_tours)}
+                ${ligneDisposition('Sang froid', player.disposition_sang_froid, DISPOSITIONS_TOOLTIPS.sang_froid)}
+                ${ligneDisposition('Indoor', player.disposition_indoor, DISPOSITIONS_TOOLTIPS.indoor)}
+                ${ligneDisposition('Rivalité', player.disposition_rivalite, DISPOSITIONS_TOOLTIPS.rivalite)}
 
                 <div class="stats-header">Automatismes</div>
                 <div class="bar-row"><span class="bar-label">Dur</span><div class="bar-track"><div class="bar-fill ${classeAutomatismes(player.surface_dur_automatismes)}" style="width:${Math.min(100, player.surface_dur_automatismes / 30 * 100)}%;"></div></div><span class="bar-value">${player.surface_dur_automatismes}</span></div>
