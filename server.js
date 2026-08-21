@@ -3435,7 +3435,11 @@ function simulerUnTour(tournoiId) {
             const profondeur = Math.round(Math.log2(joueursAvantTour));
             const points = bareme[Math.min(profondeur, bareme.length - 1)];
             db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run(label, points, perdant.id);
-            verserXpTournoi(perdant, nbTours, tourIndex);
+            // Un abandon en cours de match (blessure) n'ouvre jamais droit a l'XP de
+            // progression de ce tour - le joueur n'a pas termine son match, contrairement
+            // a une elimination normale (demande explicite de l'utilisateur, 2026-08-21).
+            const estAbandon = !!score && score.indexOf('(Abandon)') !== -1;
+            if (!estAbandon) verserXpTournoi(perdant, nbTours, tourIndex);
             deduireEnergieFinTournoi(perdant);
         } else {
             // Le BYE lui-meme doit sortir de "vivants" (aucun point/XP/energie, ce
@@ -3527,10 +3531,16 @@ function simulerUnTourPoules(tournoiId) {
     const tourIndex = tournoi.tour_actuel;
     const groupes = groupesPoules(tournoiId);
 
-    function eliminer(label, indexPoints, perdant) {
+    // estAbandon (facultatif) : le joueur perd cette elimination suite a un abandon
+    // en cours de match (blessure) - jamais d'XP de progression dans ce cas (demande
+    // explicite de l'utilisateur, 2026-08-21). Uniquement calculable pour les
+    // eliminations directement liees a UN match precis (demies/finale) - pas pour
+    // la sortie 3e/4e de poules, decidee sur le classement du groupe plutot que sur
+    // un match unique.
+    function eliminer(label, indexPoints, perdant, estAbandon) {
         const points = bareme[Math.min(indexPoints, bareme.length - 1)];
         db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run(label, points, perdant.id);
-        verserXpTournoi(perdant, nbTours, tourIndex);
+        if (!estAbandon) verserXpTournoi(perdant, nbTours, tourIndex);
         deduireEnergieFinTournoi(perdant);
     }
 
@@ -3560,11 +3570,11 @@ function simulerUnTourPoules(tournoiId) {
 
         const sf1 = resoudreMatchAdversaire(tournoi, 'Demi-finale', classementA[0], classementB[1]);
         enregistrerMatchTournoi(tournoiId, 'Demi-finale', 100, classementA[0], classementB[1], sf1.vainqueur, sf1.score, sf1.matchId, sf1.matchIdJ2, sf1.evenements);
-        eliminer('Demi-finale', 2, sf1.vainqueur === classementA[0] ? classementB[1] : classementA[0]);
+        eliminer('Demi-finale', 2, sf1.vainqueur === classementA[0] ? classementB[1] : classementA[0], !!sf1.score && sf1.score.indexOf('(Abandon)') !== -1);
 
         const sf2 = resoudreMatchAdversaire(tournoi, 'Demi-finale', classementB[0], classementA[1]);
         enregistrerMatchTournoi(tournoiId, 'Demi-finale', 101, classementB[0], classementA[1], sf2.vainqueur, sf2.score, sf2.matchId, sf2.matchIdJ2, sf2.evenements);
-        eliminer('Demi-finale', 2, sf2.vainqueur === classementB[0] ? classementA[1] : classementB[0]);
+        eliminer('Demi-finale', 2, sf2.vainqueur === classementB[0] ? classementA[1] : classementB[0], !!sf2.score && sf2.score.indexOf('(Abandon)') !== -1);
     } else if (tourIndex === 4) {
         // Finale : les 2 seuls joueurs encore en lice.
         const finalistes = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine IS NULL').all(tournoiId);
@@ -3572,7 +3582,7 @@ function simulerUnTourPoules(tournoiId) {
         enregistrerMatchTournoi(tournoiId, 'Finale', 102, finalistes[0], finalistes[1], resultat.vainqueur, resultat.score, resultat.matchId, resultat.matchIdJ2, resultat.evenements);
         const champion = resultat.vainqueur;
         const runnerUp = champion.id === finalistes[0].id ? finalistes[1] : finalistes[0];
-        eliminer('Finale', 1, runnerUp);
+        eliminer('Finale', 1, runnerUp, !!resultat.score && resultat.score.indexOf('(Abandon)') !== -1);
         db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run('Vainqueur', bareme[0], champion.id);
         verserXpTournoi(champion, nbTours, tourIndex);
         deduireEnergieFinTournoi(champion);
@@ -7396,9 +7406,18 @@ function finaliserMancheCoupe(tieId) {
             .forEach(function (pair) { if (pair[0] && pair[1]) joueursImpliques.add(pair[1]); });
     });
 
+    // Un joueur ayant abandonne (blessure) l'un de ses rubbers de cette rencontre ne
+    // touche aucune XP de progression, meme s'il a par ailleurs gagne un autre
+    // rubber de la meme rencontre (ex. simple gagne puis double abandonne) - meme
+    // regle que les tournois (demande explicite de l'utilisateur, 2026-08-21).
+    const abandonParJoueur = new Set();
+    db.prepare("SELECT DISTINCT player_id FROM matchs WHERE coupe_equipe_id = ? AND score LIKE '%(Abandon)%'").all(tieId)
+        .forEach(function (row) { abandonParJoueur.add(row.player_id); });
+
     joueursImpliques.forEach(function (playerId) {
         const player = db.prepare('SELECT nationalite FROM players WHERE id = ?').get(playerId);
         if (!player) return;
+        if (abandonParJoueur.has(playerId)) return;
         const sonEquipeGagne = player.nationalite === nationVainqueur;
         const aGagneAuMoinsUnMatch = (victoiresParJoueur.get(playerId) || 0) > 0;
         let xp;
