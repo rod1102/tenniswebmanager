@@ -87,6 +87,10 @@
             return LABELS_SURFACE[info.surface] + (info.indoor ? ' (intérieur)' : '');
         }
 
+        function classeSurface(info) {
+            return info.surface + (info.surface === 'dur' && info.indoor ? '-indoor' : '');
+        }
+
         function flagImg(code) {
             if (!code) return '';
             return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
@@ -234,7 +238,7 @@
             }
 
             panneau.innerHTML = `
-                <div class="tournoi-card tournoi-card-${info.surface}">
+                <div class="tournoi-card tournoi-card-${classeSurface(info)}">
                     <div class="stat-row"><span class="stat-label">Pays</span><span class="stat-value">${flagImg(info.paysDrapeau)} ${info.pays}</span></div>
                     <div class="stat-row"><span class="stat-label">Circuit</span><span class="stat-value">${info.circuit === 'ATP' ? 'Masculin (ATP)' : 'Féminin (WTA)'}</span></div>
                     <div class="stat-row"><span class="stat-label">Catégorie</span><span class="stat-value">${labelCategorie(info.circuit, info.categorie)}</span></div>

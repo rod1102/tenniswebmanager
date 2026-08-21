@@ -81,6 +81,10 @@
             return LABELS_SURFACE[t.surface] + (t.indoor ? ' (intérieur)' : '');
         }
 
+        function classeSurface(t) {
+            return t.surface + (t.surface === 'dur' && t.indoor ? '-indoor' : '');
+        }
+
         function flagImg(code) {
             if (!code) return '';
             return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
@@ -167,7 +171,7 @@
 
             tournoisSemaine.forEach(function (t) {
                 const carte = document.createElement('div');
-                carte.className = 'tournoi-card tournoi-card-' + t.surface;
+                carte.className = 'tournoi-card tournoi-card-' + classeSurface(t);
                 carte.innerHTML = `
                     <div class="tournoi-card-head">
                         <div>
@@ -201,7 +205,7 @@
 
             data.tournois.forEach(function (t) {
                 const carte = document.createElement('div');
-                carte.className = 'tournoi-card tournoi-card-' + t.surface;
+                carte.className = 'tournoi-card tournoi-card-' + classeSurface(t);
 
                 let resultatHtml;
                 if (t.participe) {
@@ -315,7 +319,7 @@
                         return;
                     }
 
-                    carte.className = 'tournoi-card tournoi-card-' + t.surface;
+                    carte.className = 'tournoi-card tournoi-card-' + classeSurface(t);
 
                     const nomClasse = t.circuit === 'ATP' ? 'tournoi-name-atp' : 'tournoi-name-wta';
 

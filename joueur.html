@@ -835,7 +835,7 @@
                 const resultat = h.tour_elimine === 'Vainqueur' ? 'Vainqueur' : (h.tour_elimine ? 'Éliminé : ' + h.tour_elimine : '—');
                 const kineBadge = h.kineIntervenu ? '<span class="status-badge kine-badge">Kiné</span>' : '';
                 return `
-                    <div class="tournoi-card tournoi-card-${h.surface}">
+                    <div class="tournoi-card tournoi-card-${h.surface + (h.surface === 'dur' && h.indoor ? '-indoor' : '')}">
                         <a class="tournoi-card-name" href="tournoi-detail.html?calendrierId=${h.calendrier_id}&semaine=${h.semaine}&playerId=${player.id}">${h.nom} ${kineBadge}</a>
                         <div class="tournoi-card-meta">Semaine ${h.positionSemaine} · ${resultat} · ${h.points_gagnes || 0} points</div>
                     </div>
