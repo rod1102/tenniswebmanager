@@ -1342,7 +1342,6 @@ h1 {
 }
 
 .live-log-jeu,
-.live-log-set_fin,
 .live-log-tie_break_point {
     color: #F5F7FA;
     font-weight: 600;
@@ -1351,6 +1350,20 @@ h1 {
 .live-log-match_fin {
     color: #D4F000;
     font-weight: 700;
+}
+
+.live-log-set_fin,
+.teletexte-set_fin {
+    color: #D4F000;
+    font-weight: 600;
+}
+
+.live-log-kine,
+.live-log-abandon,
+.teletexte-kine,
+.teletexte-abandon {
+    color: #E24B4A;
+    font-weight: 600;
 }
 
 /* ---------- Page Tournois ---------- */

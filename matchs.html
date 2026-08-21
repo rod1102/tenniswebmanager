@@ -161,8 +161,10 @@
         }
 
         function afficherTeletexte(viewer, match) {
-            const texte = match.evenements.map(function (evt) { return evt.texte; }).join('\n');
-            viewer.innerHTML = `<div class="match-journal" style="display:block;">${texte}</div>`;
+            const lignes = match.evenements.map(function (evt) {
+                return `<div class="teletexte-ligne teletexte-${evt.type}">${evt.texte}</div>`;
+            }).join('');
+            viewer.innerHTML = `<div class="match-journal" style="display:block;">${lignes}</div>`;
         }
 
         function afficherLive(viewer, match, matchId) {
@@ -269,8 +271,10 @@
         }
 
         function afficherTeletexteBot(viewer, match) {
-            const texte = match.evenements.map(function (evt) { return evt.texte; }).join('\n');
-            viewer.innerHTML = `<div class="match-journal" style="display:block;">${texte}</div>`;
+            const lignes = match.evenements.map(function (evt) {
+                return `<div class="teletexte-ligne teletexte-${evt.type}">${evt.texte}</div>`;
+            }).join('');
+            viewer.innerHTML = `<div class="match-journal" style="display:block;">${lignes}</div>`;
         }
 
         function afficherLiveBot(viewer, match, tournoiMatchId) {

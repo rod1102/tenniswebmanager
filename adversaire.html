@@ -250,8 +250,10 @@
 
             try {
                 const match = await obtenirDetail(matchId);
-                const texte = match.evenements.map(function (evt) { return evt.texte; }).join('\n');
-                viewer.innerHTML = `<div class="match-journal" style="display:block;">${texte}</div>`;
+                const lignes = match.evenements.map(function (evt) {
+                    return `<div class="teletexte-ligne teletexte-${evt.type}">${evt.texte}</div>`;
+                }).join('');
+                viewer.innerHTML = `<div class="match-journal" style="display:block;">${lignes}</div>`;
             } catch (err) {
                 viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
             }

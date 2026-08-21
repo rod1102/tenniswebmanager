@@ -163,25 +163,23 @@ function appliquerPerteCaracteristique(playerId) {
 // + (80 - forme) si forme < 80. Si le tirage reussit et forme < 60, saut direct a
 // "Blesse" quel que soit l'etat courant. forme/points_energie doivent etre les
 // valeurs AVANT le match (constantes pendant tout le match), pas les valeurs deja
-// mises a jour post-match.
+// mises a jour post-match - seule la CONDITION evolue reellement en cours de match
+// desormais (voir tirageDegradationJeu, appele depuis simulerMatch).
 const CONDITION_ORDRE = ['en_forme', 'fatigue', 'diminue', 'blesse'];
 
-function degraderCondition(conditionActuelle, forme, pointsEnergie, totalJeux) {
-    let condition = conditionActuelle || 'en_forme';
+// Tirage de degradation pour UN SEUL jeu (remplace l'ancien degraderCondition, qui
+// bouclait "a l'aveugle" APRES le match sans jamais savoir a quel jeu precis la
+// degradation avait eu lieu - desormais appele depuis l'interieur de simulerMatch,
+// jeu par jeu, ce qui permet a la fois d'inserer l'alerte au bon endroit dans le
+// teletexte ET de degrader le niveau de jeu pour le reste du match, comme prevu par
+// le reglement (demande explicite de l'utilisateur, 2026-08-21).
+function tirageDegradationJeu(condition, forme, pointsEnergie) {
     const chancePourMille = (pointsEnergie <= 0 ? 10 : 0) + (forme < 80 ? (80 - forme) : 0);
     if (chancePourMille <= 0) return condition;
-
-    for (let i = 0; i < totalJeux; i++) {
-        if (Math.random() * 1000 < chancePourMille) {
-            if (forme < 60) {
-                condition = 'blesse';
-            } else {
-                const index = CONDITION_ORDRE.indexOf(condition);
-                condition = CONDITION_ORDRE[Math.min(index + 1, CONDITION_ORDRE.length - 1)];
-            }
-        }
-    }
-    return condition;
+    if (Math.random() * 1000 >= chancePourMille) return condition;
+    if (forme < 60) return 'blesse';
+    const index = CONDITION_ORDRE.indexOf(condition);
+    return CONDITION_ORDRE[Math.min(index + 1, CONDITION_ORDRE.length - 1)];
 }
 
 // "Le kine est intervenu pendant CE match" = la condition s'est reellement degradee
@@ -2238,7 +2236,13 @@ function ajusterNiveauxStyle(niveauA_normal, niveauA_mental, styleA, mentalCoura
 // bonusSangFroidA/B (disposition "Sang froid", optionnels) : n'ajoutent au niveau
 // de jeu que dans le set decisif - le jeu se joue toujours en 2 sets gagnants, donc
 // c'est systematiquement le 3e set (numeroSet === 3), jamais un 5e.
-function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_mental, styleA, mentalCourantA, styleB, mentalCourantB, bonusSangFroidA, bonusSangFroidB, meilleurDe5) {
+// etatPhysiqueA/B (optionnels) : { forme, pointsEnergie, condition } d'un vrai
+// joueur AVANT le match, pour tirer une eventuelle alerte kine jeu par jeu et
+// degrader dynamiquement son niveau de jeu pour le reste du match (regle du PDF,
+// demande explicite de l'utilisateur, 2026-08-21) - absent/falsy pour un
+// adversaire lambda/rival ou une equipe de double, qui n'ont pas de condition
+// physique individuelle suivie.
+function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_mental, styleA, mentalCourantA, styleB, mentalCourantB, bonusSangFroidA, bonusSangFroidB, meilleurDe5, etatPhysiqueA, etatPhysiqueB) {
     // Exception PDF : un match de Grand Chelem chez les hommes se joue en 3 sets
     // gagnants (5 sets max) au lieu de 2 (3 sets max) partout ailleurs - le set
     // decisif (Sang froid, tie-break a 10 points) se deplace donc du 3e au 5e set.
@@ -2253,15 +2257,46 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
     let numeroSet = 1;
     let ballesBreakSauveesA = 0, ballesBreakSauveesB = 0;
 
+    // Condition/malus dynamiques : demarrent a l'etat d'avant-match, puis peuvent
+    // evoluer jeu par jeu (voir tenterAlerteKine plus bas) - un adversaire sans
+    // etatPhysique (lambda/rival/double) n'a jamais de malus, jamais de tirage.
+    let conditionActuelleA = etatPhysiqueA ? (etatPhysiqueA.condition || 'en_forme') : null;
+    let conditionActuelleB = etatPhysiqueB ? (etatPhysiqueB.condition || 'en_forme') : null;
+    let malusActuelA = etatPhysiqueA ? malusCondition(conditionActuelleA) : 0;
+    let malusActuelB = etatPhysiqueB ? malusCondition(conditionActuelleB) : 0;
+
+    // Si un joueur atteint "Blesse" PENDANT le match, il est contraint a l'abandon
+    // (meme regle que le forfait pre-match, PDF) - abandonCote stoppe la simulation
+    // des que possible (voir les points d'appel plus bas).
+    let abandonCote = null;
+
+    function tenterAlerteKine(cote) {
+        const etatPhysique = cote === 'A' ? etatPhysiqueA : etatPhysiqueB;
+        if (!etatPhysique) return;
+        const conditionActuelle = cote === 'A' ? conditionActuelleA : conditionActuelleB;
+        if (conditionActuelle === 'blesse') return; // deja blesse, plus rien a tirer
+        const nouvelleCondition = tirageDegradationJeu(conditionActuelle, etatPhysique.forme, etatPhysique.pointsEnergie);
+        if (nouvelleCondition === conditionActuelle) return;
+        if (cote === 'A') { conditionActuelleA = nouvelleCondition; malusActuelA = malusCondition(nouvelleCondition); }
+        else { conditionActuelleB = nouvelleCondition; malusActuelB = malusCondition(nouvelleCondition); }
+
+        if (nouvelleCondition === 'blesse') {
+            evenements.push({
+                type: 'abandon',
+                texte: '➕ John n\'a rien pu faire pour ' + nomJoueur(cote) + ', il est obligé d\'abandonner.'
+            });
+            abandonCote = cote;
+        } else {
+            evenements.push({
+                type: 'kine',
+                texte: '🚑 ' + nomJoueur(cote) + ' fait appel à John le kiné.'
+            });
+        }
+    }
+
     while (setsA < setsRequis && setsB < setsRequis) {
         const bonusSetDecisifA = numeroSet === numeroSetDecisif ? (bonusSangFroidA || 0) : 0;
         const bonusSetDecisifB = numeroSet === numeroSetDecisif ? (bonusSangFroidB || 0) : 0;
-        const niveauxA = ajusterNiveauxStyle(niveauA_normal + bonusSetDecisifA, niveauA_mental, styleA, mentalCourantA, numeroSet);
-        const niveauA_normal_manche = niveauxA.normal;
-        const niveauA_mental_manche = niveauxA.mental;
-        const niveauxB = ajusterNiveauxStyle(niveauB_normal + bonusSetDecisifB, niveauB_mental, styleB, mentalCourantB, numeroSet);
-        const niveauB_normal_manche = niveauxB.normal;
-        const niveauB_mental_manche = niveauxB.mental;
         evenements.push({
             type: 'set_debut',
             texte: '--- Set ' + numeroSet + ' (Service : ' + nomJoueur(serveur) + ') ---',
@@ -2269,6 +2304,16 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
         });
         let jeuxA = 0, jeuxB = 0;
         while (true) {
+            // Recalcule a CHAQUE jeu (pas une fois par set) : une alerte kine peut avoir
+            // change le malus de condition depuis le jeu precedent, et ca doit affecter
+            // immediatement le niveau de jeu utilise pour la suite du match.
+            const niveauxA = ajusterNiveauxStyle(niveauA_normal - malusActuelA + bonusSetDecisifA, niveauA_mental - malusActuelA, styleA, mentalCourantA, numeroSet);
+            const niveauA_normal_manche = niveauxA.normal;
+            const niveauA_mental_manche = niveauxA.mental;
+            const niveauxB = ajusterNiveauxStyle(niveauB_normal - malusActuelB + bonusSetDecisifB, niveauB_mental - malusActuelB, styleB, mentalCourantB, numeroSet);
+            const niveauB_normal_manche = niveauxB.normal;
+            const niveauB_mental_manche = niveauxB.mental;
+
             if (jeuxA === 6 && jeuxB === 6) {
                 // 5e set d'un match en 3 sets gagnants : jeu decisif a 10 points (au lieu
                 // de 7) et gagne de 2 points d'ecart, seule exception au reglement normal.
@@ -2276,6 +2321,8 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
                 const vainqueurTB = simulerTieBreak(niveauA_normal_manche, niveauB_normal_manche, niveauA_mental_manche, niveauB_mental_manche, stats, evenements, numeroSet, setsA, setsB, seuilTB);
                 if (vainqueurTB === 'A') jeuxA++; else jeuxB++;
                 totalJeux++;
+                tenterAlerteKine('A');
+                if (!abandonCote) tenterAlerteKine('B');
                 break;
             }
 
@@ -2337,11 +2384,18 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
                     : 'Jeu remporte par ' + (vainqueurJeu === 'A' ? 'Toi' : 'Adversaire') + ' (score du set : ' + jeuxA + '-' + jeuxB + ')',
                 numeroSet, setsA, setsB, jeuxA, jeuxB
             });
+            tenterAlerteKine('A');
+            if (!abandonCote) tenterAlerteKine('B');
 
-            if ((jeuxA >= 6 || jeuxB >= 6) && Math.abs(jeuxA - jeuxB) >= 2) break;
+            if (abandonCote || ((jeuxA >= 6 || jeuxB >= 6) && Math.abs(jeuxA - jeuxB) >= 2)) break;
         }
 
+        // Set incomplet suite a un abandon : le score brut du moment est quand meme
+        // affiche (comme un vrai tableau de score), mais ce set n'est gagne par
+        // personne (pas d'incrementation de setsA/setsB) et pas de "Set remporte
+        // par..." puisqu'il ne l'a pas ete - on sort direct vers le bilan du match.
         scoreParManche.push(jeuxA + '-' + jeuxB);
+        if (abandonCote) break;
         if (jeuxA > jeuxB) setsA++; else setsB++;
         evenements.push({
             type: 'set_fin',
@@ -2349,6 +2403,27 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
             numeroSet, setsA, setsB, jeuxA, jeuxB, scoreSet: jeuxA + '-' + jeuxB
         });
         numeroSet++;
+    }
+
+    if (abandonCote) {
+        const vainqueurAbandon = abandonCote === 'A' ? 'B' : 'A';
+        const scoreAbandon = scoreParManche.join(', ') + ' (Abandon)';
+        evenements.push({
+            type: 'match_fin',
+            texte: 'Match termine : ' + (vainqueurAbandon === 'A' ? 'Victoire' : 'Defaite') + ' ' + scoreAbandon,
+            setsA, setsB
+        });
+        return {
+            vainqueur: vainqueurAbandon,
+            score: scoreAbandon,
+            totalJeux,
+            pointsImportants: stats.pointsImportants,
+            ballesBreakSauveesA,
+            ballesBreakSauveesB,
+            conditionFinaleA: conditionActuelleA,
+            conditionFinaleB: conditionActuelleB,
+            evenements
+        };
     }
 
     evenements.push({
@@ -2364,6 +2439,8 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
         pointsImportants: stats.pointsImportants,
         ballesBreakSauveesA,
         ballesBreakSauveesB,
+        conditionFinaleA: conditionActuelleA,
+        conditionFinaleB: conditionActuelleB,
         evenements
     };
 }
@@ -2934,7 +3011,7 @@ function perteMentalCourant(categorie, label) {
 // condition) selon SON PROPRE style. Taux de perte de forme (Prudence 0.08 / En
 // Avant 0.12 / defaut 0.10), de gain de mental max (Mental d'acier 0.15 / defaut
 // 0.1) et de gain d'automatisme (Reperage 6 / defaut 3) cf. tournoi_joueurs.style_choisi.
-function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants, categorie, label) {
+function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants, categorie, label, conditionFinale) {
     const tauxPerteForme = style === 'prudence' ? 0.08 : (style === 'en_avant' ? 0.12 : 0.10);
     const tauxGainMentalMax = style === 'mental_acier' ? 0.15 : 0.1;
     const gainAutomatisme = style === 'reperage' ? 6 : 3;
@@ -2944,7 +3021,11 @@ function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImporta
     const nouveauMentalCourant = Math.max(0, Math.round((player.mental_courant - perteMentalCourant(categorie, label)) * 10) / 10);
     const cleAutomatisme = 'surface_' + surface + '_automatismes';
     const nouvelAutomatisme = Math.min(30, player[cleAutomatisme] + gainAutomatisme);
-    const nouvelleCondition = degraderCondition(player.condition, player.forme, player.points_energie, totalJeux);
+    // La condition finale est desormais determinee PENDANT le match (simulerMatch,
+    // jeu par jeu, cf. tenterAlerteKine) et simplement appliquee ici - plus de
+    // second tirage independant apres coup, qui pouvait diverger de ce qui avait
+    // reellement ete raconte dans le teletexte.
+    const nouvelleCondition = conditionFinale || player.condition || 'en_forme';
     db.prepare(`UPDATE players SET forme = ?, usure = ?, mental_max = ?, mental_courant = ?, ${cleAutomatisme} = ?, condition = ? WHERE id = ?`).run(
         Math.round(nouvelleForme * 10) / 10, nouvelleUsure, nouveauMentalMax, nouveauMentalCourant, nouvelAutomatisme, nouvelleCondition, player.id
     );
@@ -2977,11 +3058,19 @@ function miroirEvenements(evenements) {
     });
 }
 
+// Un score peut porter un suffixe non-numerique en fin de chaine (ex. "6-4, 3-2
+// (Abandon)") depuis l'ajout de l'abandon force par blessure mi-match - on le met
+// de cote avant de miroiter les sets (sinon le "2" final se retrouverait fusionne
+// avec le texte du suffixe) et on le rattache tel quel a la fin.
 function miroirScore(score) {
-    return score.split(', ').map(function (set) {
+    const correspondance = score.match(/^(.*?)( \([^)]*\))?$/);
+    const setsBruts = correspondance[1];
+    const suffixe = correspondance[2] || '';
+    const setsMiroir = setsBruts.split(', ').map(function (set) {
         const parts = set.split('-');
         return parts[1] + '-' + parts[0];
     }).join(', ');
+    return setsMiroir + suffixe;
 }
 
 function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
@@ -3023,8 +3112,11 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
         premiersToursMax: nbTours === 7 ? 2 : 1,
         estIndoor: !!(entreeCalendrier && entreeCalendrier.indoor)
     });
-    // Malus de condition physique (PDF) : -50 fatigue, -100 diminue, 0 en pleine forme.
-    const niveauReel_normal_avecDispositions = niveauReel_normal - malusCondition(player.condition) + bonus.fixe;
+    // Malus de condition physique (PDF) : -50 fatigue, -100 diminue, 0 en pleine
+    // forme - applique desormais DYNAMIQUEMENT jeu par jeu a l'interieur de
+    // simulerMatch (via etatPhysiqueA), pas fige avant le match : niveauReel_normal
+    // reste donc "brut" ici (sans malus, juste les dispositions).
+    const niveauReel_normal_avecDispositions = niveauReel_normal + bonus.fixe;
 
     const niveauReel_mental = niveauReel_normal_avecDispositions + player.mental_courant;
     const niveauLambda_normal = lambda.niveau;
@@ -3039,9 +3131,13 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
     // Le joueur reel est toujours simule cote "A" : les evenements du moteur
     // (simulerMatch/resoudreJeu) etiquettent toujours 'A' comme "Toi", quelle que
     // soit sa position dans le tableau du tournoi.
-    const resultat = simulerMatch(niveauReel_normal_avecDispositions, niveauReel_mental, niveauLambda_normal, niveauLambda_mental, styleA, player.mental_courant, null, undefined, bonus.sangFroid, 0, meilleurDe5);
+    const resultat = simulerMatch(
+        niveauReel_normal_avecDispositions, niveauReel_mental, niveauLambda_normal, niveauLambda_mental,
+        styleA, player.mental_courant, null, undefined, bonus.sangFroid, 0, meilleurDe5,
+        { forme: player.forme, pointsEnergie: player.points_energie, condition: player.condition }
+    );
 
-    const { kineIntervenu } = appliquerEtatPostMatch(player, tournoi.surface, styleA, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label);
+    const { kineIntervenu } = appliquerEtatPostMatch(player, tournoi.surface, styleA, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA);
 
     const vainqueurEstReel = resultat.vainqueur === 'A';
 
@@ -3121,10 +3217,12 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
     const bonus1 = calculerBonusDispositions(player1, j2, Object.assign({ esTeteDeSerie: !!j1.tete_de_serie, adversaireEsTeteDeSerie: !!j2.tete_de_serie }, contexteCommun));
     const bonus2 = calculerBonusDispositions(player2, j1, Object.assign({ esTeteDeSerie: !!j2.tete_de_serie, adversaireEsTeteDeSerie: !!j1.tete_de_serie }, contexteCommun));
 
-    // Malus de condition physique (PDF) : -50 fatigue, -100 diminue, 0 en pleine forme.
-    const niveau1_normal = niveauNormal(player1, tournoi.surface, (j1.energie_misee || 0) * 5) - malusCondition(player1.condition) + bonus1.fixe;
+    // Malus de condition physique (PDF) : -50 fatigue, -100 diminue, 0 en pleine
+    // forme - applique desormais DYNAMIQUEMENT jeu par jeu a l'interieur de
+    // simulerMatch (via etatPhysiqueA/B), pas fige avant le match.
+    const niveau1_normal = niveauNormal(player1, tournoi.surface, (j1.energie_misee || 0) * 5) + bonus1.fixe;
     const niveau1_mental = niveau1_normal + player1.mental_courant;
-    const niveau2_normal = niveauNormal(player2, tournoi.surface, (j2.energie_misee || 0) * 5) - malusCondition(player2.condition) + bonus2.fixe;
+    const niveau2_normal = niveauNormal(player2, tournoi.surface, (j2.energie_misee || 0) * 5) + bonus2.fixe;
     const niveau2_mental = niveau2_normal + player2.mental_courant;
 
     const style1 = styleDuTourCourant(tournoi.id, player1, j1);
@@ -3134,10 +3232,15 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
     // inchange.
     const meilleurDe5 = tournoi.circuit === 'ATP' && tournoi.categorie === 'slam';
 
-    const resultat = simulerMatch(niveau1_normal, niveau1_mental, niveau2_normal, niveau2_mental, style1, player1.mental_courant, style2, player2.mental_courant, bonus1.sangFroid, bonus2.sangFroid, meilleurDe5);
+    const resultat = simulerMatch(
+        niveau1_normal, niveau1_mental, niveau2_normal, niveau2_mental,
+        style1, player1.mental_courant, style2, player2.mental_courant, bonus1.sangFroid, bonus2.sangFroid, meilleurDe5,
+        { forme: player1.forme, pointsEnergie: player1.points_energie, condition: player1.condition },
+        { forme: player2.forme, pointsEnergie: player2.points_energie, condition: player2.condition }
+    );
 
-    const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label);
-    const etat2 = appliquerEtatPostMatch(player2, tournoi.surface, style2, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label);
+    const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA);
+    const etat2 = appliquerEtatPostMatch(player2, tournoi.surface, style2, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleB);
 
     const j1Gagne = resultat.vainqueur === 'A';
 
@@ -7090,11 +7193,34 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
     const exterieurNormal = vExterieur.normal + bonusExterieur.fixe;
     const exterieurMental = vExterieur.mental + bonusExterieur.fixe;
 
+    // Alignement complet sur un match de tournoi (demande explicite de l'utilisateur,
+    // 2026-08-21) : un rubber de Coupe Davis/Fed Cup n'avait jusqu'ici AUCUN effet sur
+    // l'etat physique (jamais de malus de condition ni d'alerte kine, jamais de perte
+    // de forme/usure/gain de mental/automatismes - simulerMatch etait appele "nu").
+    // etatPhysique fait desormais demarrer ET evoluer le malus de condition pendant
+    // le rubber, exactement comme en tournoi.
+    const etatPhysiqueDomicile = vDomicile.joueur ? { forme: vDomicile.joueur.forme, pointsEnergie: vDomicile.joueur.points_energie, condition: vDomicile.joueur.condition } : null;
+    const etatPhysiqueExterieur = vExterieur.joueur ? { forme: vExterieur.joueur.forme, pointsEnergie: vExterieur.joueur.points_energie, condition: vExterieur.joueur.condition } : null;
+
     const resultat = simulerMatch(
         domicileNormal, domicileMental, exterieurNormal, exterieurMental,
         styleDomicile, vDomicile.mentalCourant, styleExterieur, vExterieur.mentalCourant,
-        bonusDomicile.sangFroid, bonusExterieur.sangFroid
+        bonusDomicile.sangFroid, bonusExterieur.sangFroid, false,
+        etatPhysiqueDomicile, etatPhysiqueExterieur
     );
+
+    // Meme bareme de perte de mental courant que les tournois (PERTE_MENTAL_COURANT),
+    // faute de bareme dedie a la Coupe Davis dans le PDF - mappe la manche de la
+    // rencontre sur le label/categorie attendus par perteMentalCourant, categorie 250
+    // par defaut (la moins punitive, choix assume en l'absence de bareme officiel).
+    const LABEL_MANCHE_COUPE = { finale: 'Finale', demies: 'Demi-finale', quarts: '1/4 finale' };
+    const labelPourEtatPostMatch = LABEL_MANCHE_COUPE[tie.manche] || 'premier tour';
+    const kineDomicile = vDomicile.joueur
+        ? appliquerEtatPostMatch(vDomicile.joueur, surface, styleDomicile, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleA).kineIntervenu
+        : false;
+    const kineExterieur = vExterieur.joueur
+        ? appliquerEtatPostMatch(vExterieur.joueur, surface, styleExterieur, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleB).kineIntervenu
+        : false;
 
     const nationVainqueur = resultat.vainqueur === 'A' ? tie.nation_domicile : tie.nation_exterieur;
 
@@ -7103,24 +7229,24 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
     let matchIdDomicile = null, matchIdExterieur = null;
     if (vDomicile.joueur) {
         matchIdDomicile = db.prepare(`
-            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id)
-            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id, kine_intervenu)
+            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             vDomicile.joueur.user_id, vDomicile.joueur.id, surface, tie.semaine,
             resultat.vainqueur === 'A' ? 'joueur' : 'adversaire', resultat.score,
             Math.round(domicileNormal), Math.round(exterieurNormal),
-            JSON.stringify(resultat.evenements || []), libelleRubber, resultat.ballesBreakSauveesA || 0, tie.id
+            JSON.stringify(resultat.evenements || []), libelleRubber, resultat.ballesBreakSauveesA || 0, tie.id, kineDomicile ? 1 : 0
         ).lastInsertRowid;
     }
     if (vExterieur.joueur) {
         matchIdExterieur = db.prepare(`
-            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id)
-            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id, kine_intervenu)
+            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             vExterieur.joueur.user_id, vExterieur.joueur.id, surface, tie.semaine,
             resultat.vainqueur === 'B' ? 'joueur' : 'adversaire', miroirScore(resultat.score),
             Math.round(exterieurNormal), Math.round(domicileNormal),
-            JSON.stringify(miroirEvenements(resultat.evenements || [])), libelleRubber, resultat.ballesBreakSauveesB || 0, tie.id
+            JSON.stringify(miroirEvenements(resultat.evenements || [])), libelleRubber, resultat.ballesBreakSauveesB || 0, tie.id, kineExterieur ? 1 : 0
         ).lastInsertRowid;
     }
 
