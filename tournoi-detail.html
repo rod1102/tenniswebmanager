@@ -874,7 +874,7 @@
                         const resultatHtml = p.participe
                             ? `Vainqueur : ${vainqueurTxt} · Ton résultat : ${p.tourElimineJoueur || '-'} (${p.pointsGagnesJoueur || 0} points)`
                             : `Vainqueur : ${vainqueurTxt}`;
-                        return `<div class="tournoi-card"><div class="tournoi-card-name">Semaine ${p.positionSemaine}</div>
+                        return `<div class="tournoi-card"><div class="tournoi-card-name">Saison ${p.numeroSaison}</div>
                             <div class="tournoi-resultat">${resultatHtml}</div></div>`;
                     }).join('')}
                 </div>

@@ -4578,6 +4578,7 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
         const mesResultatsParTournoi = db.prepare('SELECT tour_elimine, points_gagnes FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1');
         palmares.forEach(function (p) {
             p.positionSemaine = positionSemaineAffichee(p.semaine);
+            p.numeroSaison = phaseAffichee(p.semaine).numeroSaison;
             p.drapeauVainqueur = drapeau(p.vainqueur_nationalite);
             const monResultat = mesResultatsParTournoi.get(p.id, playerId);
             p.participe = !!monResultat;
