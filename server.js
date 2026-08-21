@@ -2286,10 +2286,9 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
     let abandonCote = null;
 
     // Renvoie l'evenement kine/abandon a pousser (ou null), sans le pousser lui-meme
-    // dans `evenements` - l'appelant decide QUAND l'inserer (immediatement si le jeu
-    // ne termine pas la manche, ou APRES le "Set remporte par..." s'il la termine :
-    // narrativement, l'alerte physio se declare entre les manches, jamais avant
-    // l'annonce du gain de la manche qui vient de se jouer).
+    // dans `evenements` - l'appelant l'insere AVANT de jouer le jeu concerne (voir les
+    // points d'appel plus bas), pas apres : l'alerte precede toujours le jeu qu'elle
+    // affecte, jamais son resultat.
     function tenterAlerteKine(cote) {
         const etatPhysique = cote === 'A' ? etatPhysiqueA : etatPhysiqueB;
         if (!etatPhysique) return null;
@@ -2302,7 +2301,9 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
 
         if (nouvelleCondition === 'blesse') {
             abandonCote = cote;
-            return { type: 'abandon', texte: '➕ John n\'a rien pu faire pour ' + nomJoueur(cote) + ', il est obligé d\'abandonner.' };
+            const estJoueuse = etatPhysique.type === 'joueuse';
+            const texteAbandon = estJoueuse ? 'elle est obligée d\'abandonner.' : 'il est obligé d\'abandonner.';
+            return { type: 'abandon', texte: '➕ John n\'a rien pu faire pour ' + nomJoueur(cote) + ', ' + texteAbandon };
         }
         return { type: 'kine', texte: '🚑 ' + nomJoueur(cote) + ' fait appel à John le kiné.' };
     }
@@ -3161,7 +3162,7 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
     const resultat = simulerMatch(
         niveauReel_normal_avecDispositions, niveauReel_mental, niveauLambda_normal, niveauLambda_mental,
         styleA, player.mental_courant, null, undefined, bonus.sangFroid, 0, meilleurDe5,
-        { forme: player.forme, pointsEnergie: player.points_energie, condition: player.condition }
+        { forme: player.forme, pointsEnergie: player.points_energie, condition: player.condition, type: player.type }
     );
 
     const { kineIntervenu } = appliquerEtatPostMatch(player, tournoi.surface, styleA, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA);
@@ -3262,8 +3263,8 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
     const resultat = simulerMatch(
         niveau1_normal, niveau1_mental, niveau2_normal, niveau2_mental,
         style1, player1.mental_courant, style2, player2.mental_courant, bonus1.sangFroid, bonus2.sangFroid, meilleurDe5,
-        { forme: player1.forme, pointsEnergie: player1.points_energie, condition: player1.condition },
-        { forme: player2.forme, pointsEnergie: player2.points_energie, condition: player2.condition }
+        { forme: player1.forme, pointsEnergie: player1.points_energie, condition: player1.condition, type: player1.type },
+        { forme: player2.forme, pointsEnergie: player2.points_energie, condition: player2.condition, type: player2.type }
     );
 
     const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA);
@@ -5764,6 +5765,12 @@ app.get('/api/matchs/:userId', (req, res) => {
         const userId = req.userId;
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
 
+        // Fenetre semaineActuelle-1 a semaineActuelle uniquement (meme tolerance d'un
+        // ecart de 1 qu'ailleurs sur cette page, cf. estSemaineActuelle plus bas) - sans
+        // filtre, cette requete remontait TOUS les matchs jamais joues par le coach
+        // depuis le debut de la partie, accumulant indefiniment et surchargeant la page
+        // (bug signale par l'utilisateur, 2026-08-21). "Historique de mes matchs" sur la
+        // fiche joueur (adversaire.html) reste la vraie page d'archive complete.
         const matchs = db.prepare(`
             SELECT matchs.id, matchs.player_id, matchs.surface, matchs.difficulte, matchs.semaine,
                    matchs.vainqueur, matchs.score, matchs.niveau_joueur, matchs.niveau_adversaire, matchs.date_creation,
@@ -5777,9 +5784,9 @@ app.get('/api/matchs/:userId', (req, res) => {
             LEFT JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id OR tm.match_id_j2 = matchs.id
             LEFT JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
             LEFT JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
-            WHERE matchs.user_id = ?
+            WHERE matchs.user_id = ? AND matchs.semaine >= ? AND matchs.semaine <= ?
             ORDER BY matchs.id DESC
-        `).all(userId);
+        `).all(userId, etat.semaine_actuelle - 1, etat.semaine_actuelle);
 
         const nbDivisionsCoupeCache = {};
         matchs.forEach(function (m) {
@@ -7275,8 +7282,8 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
     // de forme/usure/gain de mental/automatismes - simulerMatch etait appele "nu").
     // etatPhysique fait desormais demarrer ET evoluer le malus de condition pendant
     // le rubber, exactement comme en tournoi.
-    const etatPhysiqueDomicile = vDomicile.joueur ? { forme: vDomicile.joueur.forme, pointsEnergie: vDomicile.joueur.points_energie, condition: vDomicile.joueur.condition } : null;
-    const etatPhysiqueExterieur = vExterieur.joueur ? { forme: vExterieur.joueur.forme, pointsEnergie: vExterieur.joueur.points_energie, condition: vExterieur.joueur.condition } : null;
+    const etatPhysiqueDomicile = vDomicile.joueur ? { forme: vDomicile.joueur.forme, pointsEnergie: vDomicile.joueur.points_energie, condition: vDomicile.joueur.condition, type: vDomicile.joueur.type } : null;
+    const etatPhysiqueExterieur = vExterieur.joueur ? { forme: vExterieur.joueur.forme, pointsEnergie: vExterieur.joueur.points_energie, condition: vExterieur.joueur.condition, type: vExterieur.joueur.type } : null;
 
     const resultat = simulerMatch(
         domicileNormal, domicileMental, exterieurNormal, exterieurMental,
