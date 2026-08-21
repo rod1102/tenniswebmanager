@@ -66,6 +66,7 @@
         const params = new URLSearchParams(window.location.search);
         const typeAdversaire = params.get('type');
         const adversaireId = params.get('id');
+        const ongletInitial = params.get('onglet');
 
         if (typeAdversaire !== 'reel' && typeAdversaire !== 'rival') {
             window.location.href = 'index.html';
@@ -137,14 +138,23 @@
             }
         }
 
+        function activerOnglet(cle) {
+            const bouton = document.querySelector('.tab-btn[data-tab="' + cle + '"]');
+            if (!bouton) return;
+            document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+            document.querySelectorAll('.tab-panel').forEach(function (p) { p.style.display = 'none'; });
+            bouton.classList.add('active');
+            document.getElementById('tab-' + cle).style.display = 'block';
+        }
+
         document.querySelectorAll('.tab-btn').forEach(function (bouton) {
-            bouton.addEventListener('click', function () {
-                document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
-                document.querySelectorAll('.tab-panel').forEach(function (p) { p.style.display = 'none'; });
-                bouton.classList.add('active');
-                document.getElementById('tab-' + bouton.dataset.tab).style.display = 'block';
-            });
+            bouton.addEventListener('click', function () { activerOnglet(bouton.dataset.tab); });
         });
+
+        // Permet a un lien externe (ex. "Historique de mes matchs" sur joueur.html)
+        // d'arriver directement sur un onglet precis plutot que toujours "Infos" par
+        // defaut (demande utilisateur, 2026-08-21).
+        if (ongletInitial) activerOnglet(ongletInitial);
 
         function ligneClassement(info) {
             const classementTxt = info.classement ? info.classement : 'Non classé';

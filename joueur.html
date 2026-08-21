@@ -1040,7 +1040,7 @@ async function afficherJoueurCourant() {
                 return;
             }
 
-            lienHistorique.href = 'adversaire.html?type=reel&id=' + player.id;
+            lienHistorique.href = 'adversaire.html?type=reel&id=' + player.id + '&onglet=matchs';
             lienHistorique.style.display = 'inline-block';
 
             const bloquant = player.points_dispositions_a_retirer > 0 || player.points_competences_a_repartir > 0;
