@@ -35,7 +35,7 @@
 
     <div class="dashboard-page">
         <div class="dashboard-inner">
-            <div class="stats-header">Tournois en cours</div>
+            <div class="stats-header">Tournois de la semaine</div>
             <div id="tournois-container"><p class="match-hint">Chargement...</p></div>
 
             <div class="stats-header" style="margin-top:32px;">Classement Live</div>
@@ -93,7 +93,7 @@
                 return;
             }
             if (data.tournois.length === 0) {
-                container.innerHTML = '<p class="match-hint">Aucun tournoi en cours pour le moment.</p>';
+                container.innerHTML = '<p class="match-hint">Aucun tournoi cette semaine.</p>';
                 return;
             }
 

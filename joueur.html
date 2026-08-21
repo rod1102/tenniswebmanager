@@ -53,6 +53,10 @@
 
             <div class="stats-header">Journal hebdomadaire</div>
             <div id="journal-container"></div>
+
+            <div style="text-align:center; margin-top:24px;">
+                <a id="historique-matchs-link" href="#" class="cta cta-secondary" style="padding:12px 24px; font-size:0.85rem; display:none;">Historique de mes matchs</a>
+            </div>
         </div>
     </div>
 
@@ -1022,6 +1026,8 @@ async function afficherJoueurCourant() {
 
             document.title = label + ' — Tennis Web Manager';
 
+            const lienHistorique = document.getElementById('historique-matchs-link');
+
             if (!player) {
                 document.getElementById('semaine-info-container').innerHTML = '';
                 document.getElementById('planning-container').innerHTML = '';
@@ -1030,8 +1036,12 @@ async function afficherJoueurCourant() {
                 document.getElementById('journal-container').innerHTML = '';
                 document.getElementById('player-card-container').innerHTML =
                     '<p style="text-align:center; color:#8B98A5;">Pas encore de personnage sur ce circuit — <a href="creation-joueurs.html">créer mes personnages</a>.</p>';
+                lienHistorique.style.display = 'none';
                 return;
             }
+
+            lienHistorique.href = 'adversaire.html?type=reel&id=' + player.id;
+            lienHistorique.style.display = 'inline-block';
 
             const bloquant = player.points_dispositions_a_retirer > 0 || player.points_competences_a_repartir > 0;
             if (bloquant) {

@@ -45,7 +45,7 @@
 
             <div id="cartes-container" class="creation-grid"></div>
 
-            <div class="stats-header">Tournois en cours</div>
+            <div class="stats-header">Tournois de la semaine</div>
             <div id="tournois-en-cours-container"></div>
 
             <div class="stats-header">Classement</div>
@@ -254,7 +254,7 @@
                 return;
             }
             if (data.tournois.length === 0) {
-                container.innerHTML = '<p class="match-hint">Aucun tournoi en cours pour le moment.</p>';
+                container.innerHTML = '<p class="match-hint">Aucun tournoi cette semaine.</p>';
                 return;
             }
 

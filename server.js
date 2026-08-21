@@ -1250,11 +1250,18 @@ function executerAvancementSemaine() {
             // reellement en cours (un tournoi futur ne peut jamais avoir demarre avant
             // lui), donc trier par semaine croissante resout l'ambiguite (bug signale
             // par l'utilisateur, 2026-08-20).
+            // Un tournoi en 2 semaines reste statut='a_venir' pendant TOUTE sa duree,
+            // meme apres l'elimination du joueur des la 1ere semaine - sans exclure les
+            // lignes deja resolues (tour_elimine pose), un joueur elimine en semaine 1
+            // restait considere "engage" en semaine 2, son planning pour cette semaine
+            // (ex. entrainement generique prevu en cas d'elimination) etait silencieusement
+            // ignore et le journal affichait encore le nom du tournoi (bug signale par
+            // l'utilisateur, 2026-08-21).
             const tournoiEngage = db.prepare(`
                 SELECT t.nom, t.surface
                 FROM tournoi_joueurs tj
                 JOIN tournois t ON t.id = tj.tournoi_id
-                WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut = 'a_venir'
+                WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut = 'a_venir' AND tj.tour_elimine IS NULL
                 ORDER BY t.semaine ASC
                 LIMIT 1
             `).get(player.id);
@@ -3209,18 +3216,34 @@ const XP_TOURNOI = {
 // tournoi (PDF, table "Miser des points d'energie").
 const PLAFOND_MISE_ENERGIE = { slam: 10, finals: 10, '1000': 10, '500': 5, '250': 5 };
 
+// Ajoute cette XP au journal hebdomadaire de la semaine EN COURS (celle ou le tour
+// est reellement simule, pas celle du prevu/realise deja pose par la transition
+// hebdomadaire) - le journal ne tracait jusqu'ici que l'XP d'entrainement, jamais
+// celle de tournoi (versee ici, dans un tout autre code path que
+// executerAvancementSemaine) : le total affiche au coach etait donc toujours
+// incomplet des qu'un tournoi etait en jeu (demande utilisateur, 2026-08-21). La
+// ligne existe deja (creee par la transition qui a fait entrer le joueur dans
+// cette semaine, toujours avant qu'un tour ne s'y joue) - simple ajout, pas de
+// creation.
+function crediterXpJournal(playerId, xp) {
+    const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
+    db.prepare('UPDATE journal_semaine_joueur SET xp_credite = xp_credite + ? WHERE player_id = ? AND semaine = ?').run(xp, playerId, semaineActuelle);
+}
+
 function verserXpTournoi(entrant, nbTours, tourIndex) {
     if (!entrant.est_reel || !entrant.player_id) return;
     const table = XP_TOURNOI[nbTours];
     const xp = table ? (table[tourIndex] || 0) : 0;
     if (xp > 0) {
         db.prepare('UPDATE players SET points_experience = points_experience + ? WHERE id = ?').run(xp, entrant.player_id);
+        crediterXpJournal(entrant.player_id, xp);
     }
 }
 
 function verserXpQualificationSemaine2(entrant) {
     if (!entrant.est_reel || !entrant.player_id) return;
     db.prepare('UPDATE players SET points_experience = points_experience + ? WHERE id = ?').run(XP_QUALIFICATION_SEMAINE2, entrant.player_id);
+    crediterXpJournal(entrant.player_id, XP_QUALIFICATION_SEMAINE2);
 }
 
 // Cout en fin de parcours (elimination ou victoire finale) pour un entrant reel :
@@ -4419,22 +4442,37 @@ function estMoiDansTournoi(tournoiId, userId) {
     `).get(tournoiId, userId);
 }
 
+// "Tournois de la semaine" (ex "Tournois en cours", renomme 2026-08-21) : tous les
+// tournois dont la semaine du calendrier couvre la semaine ingame actuelle, MEME
+// s'ils sont deja 'termine' - avant, un tournoi disparaissait de l'accueil des
+// qu'il se terminait, souvent avant meme la fin de la semaine reelle (bug/demande
+// utilisateur). Le "termine" gagne desormais un etat dedie plutot que le texte
+// "En cours" errone qu'il aurait recu sinon. taille = duree du calendrier (1 ou 2
+// semaines) pour couvrir les tournois a cheval sur 2 semaines ingame.
+function tournoisDeLaSemaine(semaineActuelle) {
+    const lignes = db.prepare("SELECT * FROM tournois WHERE statut != 'inscriptions' ORDER BY semaine ASC, circuit ASC").all();
+    return lignes.filter(function (t) {
+        const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === t.calendrier_id; });
+        const duree = entree ? entree.duree : 1;
+        return t.semaine <= semaineActuelle && semaineActuelle < t.semaine + duree;
+    });
+}
+
+function etatTournoiAccueil(t) {
+    if (t.statut === 'termine') return 'Terminé';
+    if (t.tour_actuel === 0) return 'Tableau tiré — pas encore commencé';
+    const labels = calculerLabelsTours(t.taille_tableau, t.format);
+    return 'En cours — prochain tour : ' + (labels[t.tour_actuel] || 'tour final');
+}
+
 app.get('/api/accueil/tournois-en-cours/:userId', (req, res) => {
     try {
         const userId = req.userId;
+        const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
 
-        const lignes = db.prepare("SELECT * FROM tournois WHERE statut = 'a_venir' ORDER BY semaine ASC, circuit ASC").all();
-
-        const tournois = lignes.map(function (t) {
-            let etat;
-            if (t.tour_actuel === 0) {
-                etat = 'Tableau tiré — pas encore commencé';
-            } else {
-                const labels = calculerLabelsTours(t.taille_tableau, t.format);
-                etat = 'En cours — prochain tour : ' + (labels[t.tour_actuel] || 'tour final');
-            }
+        const tournois = tournoisDeLaSemaine(semaineActuelle).map(function (t) {
             return {
-                nom: t.nom, circuit: t.circuit, categorie: t.categorie, etat,
+                nom: t.nom, circuit: t.circuit, categorie: t.categorie, etat: etatTournoiAccueil(t),
                 estMoi: estMoiDansTournoi(t.id, userId),
                 calendrierId: t.calendrier_id, semaine: t.semaine
             };
@@ -4452,17 +4490,10 @@ app.get('/api/accueil/tournois-en-cours/:userId', (req, res) => {
 // d'un userId precis) puisqu'aucun visiteur n'est identifie a ce stade.
 app.get('/api/public/tournois-en-cours', (req, res) => {
     try {
-        const lignes = db.prepare("SELECT * FROM tournois WHERE statut = 'a_venir' ORDER BY semaine ASC, circuit ASC").all();
+        const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
 
-        const tournois = lignes.map(function (t) {
-            let etat;
-            if (t.tour_actuel === 0) {
-                etat = 'Tableau tiré — pas encore commencé';
-            } else {
-                const labels = calculerLabelsTours(t.taille_tableau, t.format);
-                etat = 'En cours — prochain tour : ' + (labels[t.tour_actuel] || 'tour final');
-            }
-            return { nom: t.nom, circuit: t.circuit, categorie: t.categorie, etat };
+        const tournois = tournoisDeLaSemaine(semaineActuelle).map(function (t) {
+            return { nom: t.nom, circuit: t.circuit, categorie: t.categorie, etat: etatTournoiAccueil(t) };
         });
 
         res.json({ success: true, tournois });
