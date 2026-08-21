@@ -2274,28 +2274,26 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
     // des que possible (voir les points d'appel plus bas).
     let abandonCote = null;
 
+    // Renvoie l'evenement kine/abandon a pousser (ou null), sans le pousser lui-meme
+    // dans `evenements` - l'appelant decide QUAND l'inserer (immediatement si le jeu
+    // ne termine pas la manche, ou APRES le "Set remporte par..." s'il la termine :
+    // narrativement, l'alerte physio se declare entre les manches, jamais avant
+    // l'annonce du gain de la manche qui vient de se jouer).
     function tenterAlerteKine(cote) {
         const etatPhysique = cote === 'A' ? etatPhysiqueA : etatPhysiqueB;
-        if (!etatPhysique) return;
+        if (!etatPhysique) return null;
         const conditionActuelle = cote === 'A' ? conditionActuelleA : conditionActuelleB;
-        if (conditionActuelle === 'blesse') return; // deja blesse, plus rien a tirer
+        if (conditionActuelle === 'blesse') return null; // deja blesse, plus rien a tirer
         const nouvelleCondition = tirageDegradationJeu(conditionActuelle, etatPhysique.forme, etatPhysique.pointsEnergie);
-        if (nouvelleCondition === conditionActuelle) return;
+        if (nouvelleCondition === conditionActuelle) return null;
         if (cote === 'A') { conditionActuelleA = nouvelleCondition; malusActuelA = malusCondition(nouvelleCondition); }
         else { conditionActuelleB = nouvelleCondition; malusActuelB = malusCondition(nouvelleCondition); }
 
         if (nouvelleCondition === 'blesse') {
-            evenements.push({
-                type: 'abandon',
-                texte: '➕ John n\'a rien pu faire pour ' + nomJoueur(cote) + ', il est obligé d\'abandonner.'
-            });
             abandonCote = cote;
-        } else {
-            evenements.push({
-                type: 'kine',
-                texte: '🚑 ' + nomJoueur(cote) + ' fait appel à John le kiné.'
-            });
+            return { type: 'abandon', texte: '➕ John n\'a rien pu faire pour ' + nomJoueur(cote) + ', il est obligé d\'abandonner.' };
         }
+        return { type: 'kine', texte: '🚑 ' + nomJoueur(cote) + ' fait appel à John le kiné.' };
     }
 
     while (setsA < setsRequis && setsB < setsRequis) {
@@ -2308,9 +2306,18 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
         });
         let jeuxA = 0, jeuxB = 0;
         while (true) {
+            // Tirage kine/abandon AVANT ce jeu (pas apres) : l'alerte concerne le jeu
+            // qui va se jouer, pas le suivant - elle s'affiche donc avant l'annonce de
+            // son resultat, et son malus (le cas echeant) s'applique des ce jeu-la.
+            const alerteA = tenterAlerteKine('A');
+            if (alerteA) evenements.push(alerteA);
+            const alerteB = abandonCote ? null : tenterAlerteKine('B');
+            if (alerteB) evenements.push(alerteB);
+            if (abandonCote) break; // ne peut meme pas commencer ce jeu
+
             // Recalcule a CHAQUE jeu (pas une fois par set) : une alerte kine peut avoir
-            // change le malus de condition depuis le jeu precedent, et ca doit affecter
-            // immediatement le niveau de jeu utilise pour la suite du match.
+            // change le malus de condition a l'instant, et ca doit affecter immediatement
+            // le niveau de jeu utilise pour CE jeu.
             const niveauxA = ajusterNiveauxStyle(niveauA_normal - malusActuelA + bonusSetDecisifA, niveauA_mental - malusActuelA, styleA, mentalCourantA, numeroSet);
             const niveauA_normal_manche = niveauxA.normal;
             const niveauA_mental_manche = niveauxA.mental;
@@ -2325,8 +2332,6 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
                 const vainqueurTB = simulerTieBreak(niveauA_normal_manche, niveauB_normal_manche, niveauA_mental_manche, niveauB_mental_manche, stats, evenements, numeroSet, setsA, setsB, seuilTB);
                 if (vainqueurTB === 'A') jeuxA++; else jeuxB++;
                 totalJeux++;
-                tenterAlerteKine('A');
-                if (!abandonCote) tenterAlerteKine('B');
                 break;
             }
 
@@ -2388,10 +2393,7 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
                     : 'Jeu remporte par ' + (vainqueurJeu === 'A' ? 'Toi' : 'Adversaire') + ' (score du set : ' + jeuxA + '-' + jeuxB + ')',
                 numeroSet, setsA, setsB, jeuxA, jeuxB
             });
-            tenterAlerteKine('A');
-            if (!abandonCote) tenterAlerteKine('B');
-
-            if (abandonCote || ((jeuxA >= 6 || jeuxB >= 6) && Math.abs(jeuxA - jeuxB) >= 2)) break;
+            if ((jeuxA >= 6 || jeuxB >= 6) && Math.abs(jeuxA - jeuxB) >= 2) break;
         }
 
         // Set incomplet suite a un abandon : le score brut du moment est quand meme
