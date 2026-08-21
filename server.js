@@ -937,6 +937,17 @@ app.get('/api/joueur/semaine-info/:playerId', (req, res) => {
             if (phase.type === 'presaison') return { libelle: 'Pré-saison' };
             if (phase.type === 's0') return { libelle: 'Semaine 0' };
 
+            // Une semaine deja atteinte (typiquement semaineActuelle) n'a plus de ligne
+            // dans `plannings` - supprimee des sa consommation par executerAvancementSemaine
+            // (voir la note sur /api/journal plus haut) - l'action reellement executee vit
+            // desormais dans journal_semaine_joueur. Sans ca, "Semaine en cours" affichait
+            // a tort "Pas encore defini" meme quand une action etait bel et bien en cours
+            // (bug signale par l'utilisateur, 2026-08-21).
+            const journal = db.prepare('SELECT action_prevue, tournoi_nom FROM journal_semaine_joueur WHERE player_id = ? AND semaine = ?').get(playerId, semaine);
+            if (journal && journal.action_prevue) {
+                return { libelle: journal.action_prevue === 'tournoi' ? 'Tournoi : ' + journal.tournoi_nom : (LABELS_ACTION_COURTS[journal.action_prevue] || journal.action_prevue) };
+            }
+
             const planning = db.prepare('SELECT action FROM plannings WHERE player_id = ? AND semaine = ?').get(playerId, semaine);
             if (planning) return { libelle: LABELS_ACTION_COURTS[planning.action] || planning.action };
 
@@ -2485,6 +2496,15 @@ function pointsVainqueurSimple(tournoi) {
     return tournoi.categorie === 'finals' ? 5 : 3;
 }
 
+// Seuls les vrais joueurs sont proposables au pronostic (rivaux/lambdas exclus,
+// demande explicite de l'utilisateur 2026-08-21) - SAUF si ca viderait totalement
+// la liste (aucun vrai joueur dans cette portion du tableau), auquel cas on retombe
+// sur la liste complete pour ne pas rendre cette tranche impronosticable.
+function reelsOuTousSiVide(liste) {
+    const reels = liste.filter(function (e) { return e.est_reel; });
+    return reels.length > 0 ? reels : liste;
+}
+
 // Decoupe les entrants d'un tableau (tries par position_tableau) en 16 tranches
 // consecutives - "huitieme de finale" designe toujours structurellement 16 joueurs,
 // quelle que soit la taille du tableau (56 ou 128), donc toujours 16 tranches.
@@ -2494,7 +2514,8 @@ function trancheHuitiemes(entrants, taillePuissance2) {
     const tranches = [];
     for (let i = 0; i < 16; i++) {
         const debut = i * parTranche;
-        tranches.push(entrants.slice(debut, debut + parTranche).filter(function (e) { return e.nom !== 'BYE'; }));
+        const brute = entrants.slice(debut, debut + parTranche).filter(function (e) { return e.nom !== 'BYE'; });
+        tranches.push(reelsOuTousSiVide(brute));
     }
     return tranches;
 }
@@ -4936,7 +4957,7 @@ app.get('/api/pronostics/tournoi/:tournoiId', (req, res) => {
             tournoi: { id: tournoi.id, nom: tournoi.nom, circuit: tournoi.circuit, categorie: tournoi.categorie, statut: tournoi.statut, semaine: tournoi.semaine },
             verrouille,
             type,
-            entrants: type === 'simple' ? entrants.filter(function (e) { return e.nom !== 'BYE'; }) : null,
+            entrants: type === 'simple' ? reelsOuTousSiVide(entrants.filter(function (e) { return e.nom !== 'BYE'; })) : null,
             tranchesHuitiemes: type === 'cascade' ? trancheHuitiemes(entrants, taillePuissance2) : null,
             pronosticActuel
         });
