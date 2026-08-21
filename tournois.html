@@ -199,19 +199,16 @@
                 return;
             }
 
-            const nomJoueur = player.prenom + ' ' + player.nom;
-
             data.tournois.forEach(function (t) {
                 const carte = document.createElement('div');
                 carte.className = 'tournoi-card tournoi-card-' + t.surface;
 
                 let resultatHtml;
                 if (t.participe) {
-                    const cestToi = t.nomVainqueur === nomJoueur;
-                    const vainqueurTxt = cestToi ? 'Toi !' : `${flagImg(t.drapeauVainqueur)} ${formaterNomComplet(t.nomVainqueur) || '-'}`;
+                    const vainqueurTxt = `${flagImg(t.drapeauVainqueur)} ${formaterNomComplet(t.nomVainqueur) || '-'}`;
                     resultatHtml = `Vainqueur : ${vainqueurTxt} · Ton résultat : ${t.tourElimineJoueur || '-'} (${t.pointsGagnesJoueur || 0} points)`;
                 } else if (t.nomVainqueur) {
-                    resultatHtml = `Vainqueur : ${flagImg(t.drapeauVainqueur)} ${formaterNomComplet(t.nomVainqueur)} · Tu n'y as pas participé`;
+                    resultatHtml = `Vainqueur : ${flagImg(t.drapeauVainqueur)} ${formaterNomComplet(t.nomVainqueur)}`;
                 } else {
                     resultatHtml = 'Non disputé';
                 }

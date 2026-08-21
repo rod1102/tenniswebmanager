@@ -272,6 +272,16 @@
             `;
         }
 
+        // Lien vers la fiche de l'adversaire d'UN match precis (jamais vers soi-meme -
+        // impossible ici puisqu'un adversaire de match n'est jamais le proprietaire de
+        // la fiche consultee) - un lambda jetable (ni playerId ni rivalId) reste texte
+        // simple, aucune fiche stable n'existe pour lui (demande utilisateur, 2026-08-21).
+        function lienVersAdversaireMatch(nomHtml, playerId, rivalId) {
+            if (playerId) return `<a class="lien-adversaire" href="adversaire.html?type=reel&id=${playerId}">${nomHtml}</a>`;
+            if (rivalId) return `<a class="lien-adversaire" href="adversaire.html?type=rival&id=${rivalId}">${nomHtml}</a>`;
+            return nomHtml;
+        }
+
         function creerCarteMatchAdversaire(m) {
             const carte = document.createElement('div');
             carte.className = 'match-card';
@@ -284,8 +294,9 @@
             if (typeAdversaire === 'reel' && m.matchId && m.tournoi) {
                 carte.dataset.matchId = m.matchId;
                 const classementTxt = m.adversaireClassement ? `<span class="match-card-adversaire-classement">#${m.adversaireClassement}</span>` : '';
+                const nomAdversaireHtml = lienVersAdversaireMatch(formaterNomComplet(m.adversaireNom), m.adversairePlayerId, m.adversaireRivalId);
                 const blocAdversaire = m.adversaireNom
-                    ? `<div class="match-card-adversaire">${flagImg(m.adversaireDrapeau)}<span class="match-card-adversaire-nom">${formaterNomComplet(m.adversaireNom)}</span>${classementTxt}</div>`
+                    ? `<div class="match-card-adversaire">${flagImg(m.adversaireDrapeau)}<span class="match-card-adversaire-nom">${nomAdversaireHtml}</span>${classementTxt}</div>`
                     : '';
                 // Trophee = la finale gagnee (dernier tour du tournoi, quel que soit son
                 // format elimination/poules, s'appelle toujours "Finale").
@@ -308,7 +319,9 @@
                     activerModeMatch(m.matchId, 'teletexte', this);
                 });
             } else {
-                const nomAdversaire = typeAdversaire === 'reel' ? m.numeroTour : (formaterNomComplet(m.adversaireNom) + ' · ' + m.numeroTour);
+                const nomAdversaire = typeAdversaire === 'reel'
+                    ? m.numeroTour
+                    : (lienVersAdversaireMatch(formaterNomComplet(m.adversaireNom), m.adversairePlayerId, m.adversaireRivalId) + ' · ' + m.numeroTour);
                 carte.innerHTML = `
                     <div class="match-card-head">
                         <div class="match-card-info">

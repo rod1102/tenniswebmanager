@@ -267,13 +267,13 @@
                 const meta = `${labelCategorie(t.circuit, t.categorie)} · ${t.etat}`;
                 if (!player) {
                     return `<div class="tournoi-card">
-                        <div class="tournoi-card-name ${nomClasse}">${t.nom}${t.estMoi ? ' (Toi)' : ''}</div>
+                        <div class="tournoi-card-name ${nomClasse}">${t.nom}${t.estMoi ? ' 🎾' : ''}</div>
                         <div class="tournoi-card-meta">${meta}</div>
                     </div>`;
                 }
                 const lien = 'tournoi-detail.html?calendrierId=' + t.calendrierId + '&semaine=' + t.semaine + '&playerId=' + player.id;
                 return `<div class="tournoi-card">
-                    <a class="tournoi-card-name ${nomClasse}" href="${lien}">${t.nom}${t.estMoi ? ' (Toi)' : ''}</a>
+                    <a class="tournoi-card-name ${nomClasse}" href="${lien}">${t.nom}${t.estMoi ? ' 🎾' : ''}</a>
                     <div class="tournoi-card-meta">${meta}</div>
                 </div>`;
             }

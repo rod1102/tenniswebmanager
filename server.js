@@ -4514,17 +4514,29 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
             && player.condition !== 'blesse'
             && player.points_energie >= 1;
 
+        // Palmares = TOUS les vainqueurs des editions precedentes de ce tournoi, que ce
+        // joueur y ait participe ou non (comme "Tournois passes" sur tournois.html) -
+        // avant, ne montrait QUE les propres resultats du joueur (jamais rien si
+        // c'etait sa 1ere fois sur cette edition, meme si le tournoi a une longue
+        // histoire), demande utilisateur 2026-08-21.
         const palmares = db.prepare(`
-            SELECT tournois.*, vainqueur_j.nom AS nom_vainqueur
+            SELECT tournois.id, tournois.semaine, tournois.categorie, tournois.surface,
+                   vainqueur_j.nom AS nom_vainqueur, vainqueur_j.nationalite AS vainqueur_nationalite
             FROM tournois
-            JOIN tournoi_joueurs AS participant
-                ON participant.tournoi_id = tournois.id AND participant.player_id = ? AND participant.est_reel = 1
             LEFT JOIN tournoi_joueurs AS vainqueur_j
                 ON vainqueur_j.tournoi_id = tournois.id AND vainqueur_j.tour_elimine = 'Vainqueur'
-            WHERE tournois.calendrier_id = ? AND tournois.statut = 'termine'
+            WHERE tournois.calendrier_id = ? AND tournois.statut = 'termine' AND tournois.semaine < ?
             ORDER BY tournois.semaine DESC
-        `).all(playerId, calendrierId);
-        palmares.forEach(function (p) { p.positionSemaine = positionSemaineAffichee(p.semaine); });
+        `).all(calendrierId, semaineNum);
+        const mesResultatsParTournoi = db.prepare('SELECT tour_elimine, points_gagnes FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1');
+        palmares.forEach(function (p) {
+            p.positionSemaine = positionSemaineAffichee(p.semaine);
+            p.drapeauVainqueur = drapeau(p.vainqueur_nationalite);
+            const monResultat = mesResultatsParTournoi.get(p.id, playerId);
+            p.participe = !!monResultat;
+            p.tourElimineJoueur = monResultat ? monResultat.tour_elimine : null;
+            p.pointsGagnesJoueur = monResultat ? monResultat.points_gagnes : null;
+        });
 
         res.json({
             success: true,
@@ -5228,6 +5240,8 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
             const adversaireRivalId = jeSuisTj1 ? m.tj2_rival_id : m.tj1_rival_id;
             const adversaireCle = adversairePlayerId ? ('joueur:' + adversairePlayerId) : (adversaireRivalId ? ('rival:' + adversaireRivalId) : null);
             m.adversaire_classement = classementALaSemaine(circuitAdversaire, adversaireCle, m.semaine);
+            m.adversaire_player_id = adversairePlayerId;
+            m.adversaire_rival_id = adversaireRivalId;
         });
 
         // "Derniers matchs" n'est plus plafonne a 20 : tous les matchs de la SAISON
@@ -5249,7 +5263,8 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
                     kineIntervenu: !!m.kine_intervenu,
                     tournoiId: m.tournoi_id, tournoiNom: m.tournoi_nom, tournoiCalendrierId: m.tournoi_calendrier_id, categorie: m.tournoi_categorie,
                     adversaireNom: m.adversaire_nom || null, adversaireDrapeau: drapeau(m.adversaire_nationalite),
-                    adversaireClassement: m.adversaire_classement || null
+                    adversaireClassement: m.adversaire_classement || null,
+                    adversairePlayerId: m.adversaire_player_id || null, adversaireRivalId: m.adversaire_rival_id || null
                 };
             });
 
@@ -5311,8 +5326,8 @@ app.get('/api/adversaire/rival/:rivalId', (req, res) => {
 
         const matchsBruts = db.prepare(`
             SELECT t.id AS tournoi_id, t.nom AS tournoi_nom, t.calendrier_id AS tournoi_calendrier_id, t.semaine, t.surface, tm.numero_tour, tm.score, tm.vainqueur_id,
-                   j1.id AS j1_id, j1.rival_id AS j1_rival_id, j1.nom AS j1_nom,
-                   j2.id AS j2_id, j2.rival_id AS j2_rival_id, j2.nom AS j2_nom
+                   j1.id AS j1_id, j1.rival_id AS j1_rival_id, j1.player_id AS j1_player_id, j1.nom AS j1_nom,
+                   j2.id AS j2_id, j2.rival_id AS j2_rival_id, j2.player_id AS j2_player_id, j2.nom AS j2_nom
             FROM tournoi_matchs tm
             JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
             JOIN tournoi_joueurs j2 ON j2.id = tm.joueur2_id
@@ -5326,11 +5341,14 @@ app.get('/api/adversaire/rival/:rivalId', (req, res) => {
             const monId = rivalEstJ1 ? m.j1_id : m.j2_id;
             const victoire = m.vainqueur_id === monId;
             const adversaireNom = rivalEstJ1 ? m.j2_nom : m.j1_nom;
+            const adversairePlayerId = rivalEstJ1 ? m.j2_player_id : m.j1_player_id;
+            const adversaireRivalId = rivalEstJ1 ? m.j2_rival_id : m.j1_rival_id;
             const score = rivalEstJ1 ? m.score : miroirScore(m.score);
             return {
                 tournoiId: m.tournoi_id, tournoiCalendrierId: m.tournoi_calendrier_id,
                 tournoiNom: m.tournoi_nom, semaine: m.semaine, positionSemaine: positionSemaineAffichee(m.semaine),
-                surface: m.surface, numeroTour: m.numero_tour, adversaireNom, victoire, score
+                surface: m.surface, numeroTour: m.numero_tour, adversaireNom, victoire, score,
+                adversairePlayerId: adversairePlayerId || null, adversaireRivalId: adversaireRivalId || null
             };
         });
 

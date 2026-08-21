@@ -859,15 +859,19 @@
             const panneau = document.getElementById('tab-palmares');
 
             if (fiche.palmares.length === 0) {
-                panneau.innerHTML = '<div class="match-hint">Tu n\'as pas encore disputé cette édition les années précédentes.</div>';
+                panneau.innerHTML = '<div class="match-hint">Aucune édition précédente de ce tournoi n\'a encore eu lieu.</div>';
                 return;
             }
 
             panneau.innerHTML = `
                 <div class="tournoi-list">
                     ${fiche.palmares.map(function (p) {
+                        const vainqueurTxt = `${flagImg(p.drapeauVainqueur)} ${formaterNomComplet(p.nom_vainqueur) || '-'}`;
+                        const resultatHtml = p.participe
+                            ? `Vainqueur : ${vainqueurTxt} · Ton résultat : ${p.tourElimineJoueur || '-'} (${p.pointsGagnesJoueur || 0} points)`
+                            : `Vainqueur : ${vainqueurTxt}`;
                         return `<div class="tournoi-card"><div class="tournoi-card-name">Semaine ${p.positionSemaine}</div>
-                            <div class="tournoi-resultat">Vainqueur : ${formaterNomComplet(p.nom_vainqueur) || '-'} · Ton résultat : ${p.tour_elimine_joueur || '-'} (${p.points_gagnes_joueur || 0} points)</div></div>`;
+                            <div class="tournoi-resultat">${resultatHtml}</div></div>`;
                     }).join('')}
                 </div>
             `;
