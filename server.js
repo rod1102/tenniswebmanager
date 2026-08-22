@@ -3557,12 +3557,14 @@ function simulerUnTour(tournoiId) {
         const perdant = vainqueur === j1 ? j2 : j1;
         if (perdant.nom !== 'BYE') {
             const profondeur = Math.round(Math.log2(joueursAvantTour));
-            const points = bareme[Math.min(profondeur, bareme.length - 1)];
-            db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run(label, points, perdant.id);
-            // Un abandon en cours de match (blessure) n'ouvre jamais droit a l'XP de
-            // progression de ce tour - le joueur n'a pas termine son match, contrairement
-            // a une elimination normale (demande explicite de l'utilisateur, 2026-08-21).
+            // Un abandon en cours de match OU un forfait pre-match (les deux dus a une
+            // blessure) n'ouvre jamais droit ni a l'XP de progression, ni aux points de
+            // classement de ce tour - le joueur n'a pas reellement joue ce tour,
+            // contrairement a une elimination normale (demande explicite de
+            // l'utilisateur, 2026-08-21 pour l'XP, 2026-08-22 pour les points).
             const estAbandon = matchSansXp(score);
+            const points = estAbandon ? 0 : bareme[Math.min(profondeur, bareme.length - 1)];
+            db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run(label, points, perdant.id);
             if (!estAbandon) verserXpTournoi(perdant, nbTours, tourIndex);
             deduireEnergieFinTournoi(perdant);
         } else {
@@ -3662,7 +3664,7 @@ function simulerUnTourPoules(tournoiId) {
     // la sortie 3e/4e de poules, decidee sur le classement du groupe plutot que sur
     // un match unique.
     function eliminer(label, indexPoints, perdant, estAbandon) {
-        const points = bareme[Math.min(indexPoints, bareme.length - 1)];
+        const points = estAbandon ? 0 : bareme[Math.min(indexPoints, bareme.length - 1)];
         db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run(label, points, perdant.id);
         if (!estAbandon) verserXpTournoi(perdant, nbTours, tourIndex);
         deduireEnergieFinTournoi(perdant);
