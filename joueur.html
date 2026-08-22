@@ -647,12 +647,20 @@
                 ? `<div class="stat-row"><span class="stat-label">XP en réserve</span><span class="stat-value">${player.points_experience}</span></div>`
                 : '';
 
+            const iconeGenerique = player.type === 'joueur' ? 'icone-joueur.png' : 'icone-joueuse.png';
+            const avatarHtml = player.photo_avatar
+                ? `<div class="player-avatar-photo avatar-personnalise"><img src="${player.photo_avatar}" alt=""></div>`
+                : `<div class="player-avatar-photo avatar-generique"><img src="${iconeGenerique}" alt=""></div>`;
+
             const card = document.createElement('div');
             card.className = 'player-summary';
             card.innerHTML = `
-                <div class="player-avatar">
-                    <img src="${player.type === 'joueur' ? 'icone-joueur.png' : 'icone-joueuse.png'}" alt="">
+                ${avatarHtml}
+                <div class="avatar-actions">
+                    <button type="button" class="avatar-changer-btn">Changer la photo</button>
+                    ${player.photo_avatar ? '<button type="button" class="avatar-retirer-btn">Retirer</button>' : ''}
                 </div>
+                <input type="file" class="avatar-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;">
                 ${badge}
                 <div class="player-summary-type">${player.type === 'joueur' ? 'Ton joueur' : 'Ta joueuse'}</div>
                 <div class="player-summary-name">${formaterNom(player.prenom, player.nom)}</div>
@@ -740,6 +748,38 @@
             container.innerHTML = '';
             container.appendChild(card);
             chargerZoneCapitaine(player);
+
+            const inputAvatar = card.querySelector('.avatar-input');
+            card.querySelector('.avatar-changer-btn').addEventListener('click', function () {
+                inputAvatar.click();
+            });
+            inputAvatar.addEventListener('change', async function () {
+                const fichier = inputAvatar.files[0];
+                if (!fichier) return;
+                const formData = new FormData();
+                formData.append('photo', fichier);
+                const response = await fetch('/api/joueur/avatar/' + player.id, { method: 'POST', body: formData });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.error || 'Impossible d\'envoyer cette image.');
+                    return;
+                }
+                player.photo_avatar = data.photoAvatar;
+                afficherCarteJoueur(player, rangs);
+            });
+            const btnRetirer = card.querySelector('.avatar-retirer-btn');
+            if (btnRetirer) {
+                btnRetirer.addEventListener('click', async function () {
+                    const response = await fetch('/api/joueur/avatar/' + player.id, { method: 'DELETE' });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.error || 'Impossible de retirer cette photo.');
+                        return;
+                    }
+                    player.photo_avatar = null;
+                    afficherCarteJoueur(player, rangs);
+                });
+            }
         }
 
         async function chargerZoneCapitaine(player) {

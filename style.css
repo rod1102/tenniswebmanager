@@ -922,6 +922,82 @@ h1 {
     object-fit: contain;
 }
 
+/* Avatar personnalise (rectangle) : uniquement sur la fiche "Mon joueur" et la
+   fiche adversaire quand une photo a ete uploadee - .player-avatar (rond, ci-
+   dessus) reste inchange partout ailleurs (accueil/matchs/coach, icone generique). */
+.player-avatar-photo {
+    width: 160px;
+    height: 200px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    margin: 0 auto 14px;
+    overflow: hidden;
+}
+
+.player-avatar-photo.avatar-generique {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.player-avatar-photo.avatar-generique img {
+    width: 45%;
+    height: 45%;
+    object-fit: contain;
+    opacity: 0.6;
+}
+
+.player-avatar-photo.avatar-personnalise img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 50% 18%;
+    display: block;
+}
+
+.avatar-actions {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.avatar-actions button {
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #9AA5B1;
+    border-radius: 999px;
+    padding: 5px 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.avatar-actions button:hover {
+    color: #F5F7FA;
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.fiche-adversaire-photo {
+    width: 220px;
+    height: 275px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    margin: 0 auto 20px;
+    overflow: hidden;
+}
+
+.fiche-adversaire-photo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: 50% 14%;
+    display: block;
+}
+
 /* ---------- Ligne de selection (planification, etc.) ---------- */
 
 .training-row {

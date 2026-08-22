@@ -42,6 +42,31 @@ const uploadPresse = multer({
     }
 });
 
+// Avatar personnalise d'un joueur reel (rectangle, remplace l'icone generique
+// icone-joueur.png/icone-joueuse.png sur joueur.html/adversaire.html quand present) -
+// meme dossier de stockage statique + meme logique DATA_DIR que les photos de
+// Presse ci-dessus.
+const DOSSIER_UPLOADS_AVATARS = path.join(DOSSIER_DONNEES, 'uploads', 'avatars');
+fs.mkdirSync(DOSSIER_UPLOADS_AVATARS, { recursive: true });
+
+const uploadAvatar = multer({
+    storage: multer.diskStorage({
+        destination: DOSSIER_UPLOADS_AVATARS,
+        filename: function (req, file, cb) {
+            const extension = path.extname(file.originalname).toLowerCase();
+            cb(null, Date.now() + '-' + crypto.randomBytes(6).toString('hex') + extension);
+        }
+    }),
+    limits: { fileSize: 5 * 1024 * 1024 },
+    fileFilter: function (req, file, cb) {
+        const autorises = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+        if (!autorises.includes(file.mimetype)) {
+            return cb(new Error('Format d\'image non supporté (jpg, png, webp ou gif uniquement).'));
+        }
+        cb(null, true);
+    }
+});
+
 // Tant qu'aucune cle Resend n'est configuree (.env), le reste du jeu doit
 // continuer a fonctionner normalement - seul l'envoi du mail de reinitialisation
 // est indisponible (le constructeur Resend() plante sinon des le demarrage).
@@ -495,6 +520,55 @@ app.get('/api/joueurs/:userId', (req, res) => {
         });
 
         res.json({ success: true, players });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Avatar personnalise d'un de ses 2 personnages : remplace la photo existante s'il
+// y en avait deja une (ancien fichier supprime du disque, pas seulement ecrase en
+// base). Reserve au proprietaire du joueur (verifie via user_id, comme partout).
+app.post('/api/joueur/avatar/:playerId', function (req, res) {
+    uploadAvatar.single('photo')(req, res, function (erreurUpload) {
+        if (erreurUpload) {
+            return res.status(400).json({ error: erreurUpload.code === 'LIMIT_FILE_SIZE' ? 'Image trop volumineuse (5 Mo maximum).' : erreurUpload.message });
+        }
+        try {
+            const { playerId } = req.params;
+            const player = db.prepare('SELECT id, photo_avatar FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
+            if (!player) {
+                if (req.file) fs.unlink(req.file.path, function () {});
+                return res.status(404).json({ error: 'Joueur introuvable.' });
+            }
+            if (!req.file) {
+                return res.status(400).json({ error: 'Aucune image envoyée.' });
+            }
+            if (player.photo_avatar) {
+                fs.unlink(path.join(DOSSIER_DONNEES, player.photo_avatar), function () {});
+            }
+            const photoAvatar = '/uploads/avatars/' + req.file.filename;
+            db.prepare('UPDATE players SET photo_avatar = ? WHERE id = ?').run(photoAvatar, playerId);
+            res.json({ success: true, photoAvatar });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ error: 'ERREUR : ' + err.message });
+        }
+    });
+});
+
+app.delete('/api/joueur/avatar/:playerId', (req, res) => {
+    try {
+        const { playerId } = req.params;
+        const player = db.prepare('SELECT id, photo_avatar FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        if (player.photo_avatar) {
+            fs.unlink(path.join(DOSSIER_DONNEES, player.photo_avatar), function () {});
+        }
+        db.prepare('UPDATE players SET photo_avatar = NULL WHERE id = ?').run(playerId);
+        res.json({ success: true });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
@@ -5255,7 +5329,8 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
             circuit: circuitAdversaire,
             classement: calculerRangsLiveGlobal(circuitAdversaire).get(cleAdversaire) || null,
             meilleurClassement: meilleurClassement(circuitAdversaire, cleAdversaire),
-            coachUserId: adversaire.user_id, coachNom: nomCoach(adversaire.user_id)
+            coachUserId: adversaire.user_id, coachNom: nomCoach(adversaire.user_id),
+            photoAvatar: adversaire.photo_avatar
         };
 
         const palmares = db.prepare(`
