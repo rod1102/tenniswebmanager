@@ -3880,6 +3880,12 @@ app.get('/api/tournois/cette-semaine/:circuit', (req, res) => {
         const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
 
+        // semaine BETWEEN (pas = ) : un tournoi sur 2 semaines (GC/M1000 96) garde
+        // tournois.semaine fige a sa semaine de DEBUT pendant toute sa duree - une
+        // egalite stricte le faisait disparaitre de "Tournois de la semaine" des que
+        // semaine_actuelle avancait vers sa 2e semaine, alors qu'il est toujours en
+        // cours (bug signale par l'utilisateur, 2026-08-22). Meme logique que
+        // tournoisDeLaSemaine (accueil.html), filtre par duree reelle applique ensuite en JS.
         const tournois = db.prepare(`
             SELECT tournois.*,
                    (moi.id IS NOT NULL) AS participe,
@@ -3891,9 +3897,14 @@ app.get('/api/tournois/cette-semaine/:circuit', (req, res) => {
                 AND moi.player_id IN (SELECT id FROM players WHERE user_id = ? AND type = ?)
             LEFT JOIN tournoi_joueurs AS vainqueur_j
                 ON vainqueur_j.tournoi_id = tournois.id AND vainqueur_j.tour_elimine = 'Vainqueur'
-            WHERE tournois.circuit = ? AND tournois.semaine = ?
+            WHERE tournois.circuit = ? AND tournois.semaine BETWEEN ? AND ?
             ORDER BY tournois.id
-        `).all(req.userId, type, circuit, etat.semaine_actuelle);
+        `).all(req.userId, type, circuit, etat.semaine_actuelle - 1, etat.semaine_actuelle)
+            .filter(function (t) {
+                const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === t.calendrier_id; });
+                const duree = entree ? entree.duree : 1;
+                return t.semaine <= etat.semaine_actuelle && etat.semaine_actuelle < t.semaine + duree;
+            });
 
         tournois.forEach(function (t) {
             t.positionSemaine = positionSemaineAffichee(t.semaine);
