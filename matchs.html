@@ -74,6 +74,14 @@
             return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
         }
 
+        // Lien cliquable vers la fiche d'un vrai joueur/rival (jamais pour un lambda,
+        // qui n'a pas de fiche) - demande utilisateur 2026-08-22.
+        function lienVersAdversaireMatch(nomHtml, playerId, rivalId) {
+            if (playerId) return `<a class="lien-adversaire" href="adversaire.html?type=reel&id=${playerId}">${nomHtml}</a>`;
+            if (rivalId) return `<a class="lien-adversaire" href="adversaire.html?type=rival&id=${rivalId}">${nomHtml}</a>`;
+            return nomHtml;
+        }
+
         function formaterNom(prenom, nom) {
             const p = (prenom || '').toLowerCase().replace(/(^|[\s'-])\p{L}/gu, function (c) { return c.toUpperCase(); });
             return p + ' ' + (nom || '').toUpperCase();
@@ -356,16 +364,22 @@
             }
         }
 
+        // Regroupe par tournoi/rencontre de coupe QUELLE QUE SOIT la position des
+        // matchs dans la liste source (une cle Map, pas "fusionner seulement si le
+        // groupe precedent correspond") - avec 2 personnages engages dans 2 tournois
+        // differents la meme semaine, leurs matchs s'entrelacent par ordre d'id
+        // (ATP tour 1, WTA tour 1, ATP tour 2, ...) et l'ancienne logique coupait
+        // alors un meme tournoi en plusieurs blocs disjoints des qu'un match de
+        // l'AUTRE tournoi s'intercalait (bug signale par l'utilisateur, 2026-08-22).
         function grouperMatchs(matchs) {
-            const groupes = [];
+            const groupesParCle = new Map();
+            const ordre = [];
             matchs.forEach(function (m) {
-                const dernier = groupes[groupes.length - 1];
-                if (m.tournoi_id && dernier && dernier.tournoi_id === m.tournoi_id) {
-                    dernier.matchs.push(m);
-                } else if (m.coupe_equipe_id && dernier && dernier.coupe_equipe_id === m.coupe_equipe_id) {
-                    dernier.matchs.push(m);
-                } else {
-                    groupes.push({
+                const cle = m.tournoi_id ? 'tournoi-' + m.tournoi_id
+                    : (m.coupe_equipe_id ? 'coupe-' + m.coupe_equipe_id : 'seul-' + m.id);
+                let groupe = groupesParCle.get(cle);
+                if (!groupe) {
+                    groupe = {
                         tournoi_id: m.tournoi_id,
                         tournoi_nom: m.tournoi_nom,
                         tournoi_calendrier_id: m.tournoi_calendrier_id,
@@ -378,11 +392,16 @@
                         positionSemaine: m.positionSemaine,
                         surface: m.surface,
                         circuit: m.type === 'joueur' ? 'ATP' : 'WTA',
-                        matchs: [m]
-                    });
+                        matchs: [],
+                        dernierId: m.id
+                    };
+                    groupesParCle.set(cle, groupe);
+                    ordre.push(groupe);
                 }
+                groupe.matchs.push(m);
+                if (m.id > groupe.dernierId) groupe.dernierId = m.id;
             });
-            groupes.forEach(function (g) {
+            ordre.forEach(function (g) {
                 if (g.tournoi_id || g.coupe_equipe_id) {
                     // Ordre chronologique (1er tour en haut) - le tour le plus avance en
                     // premier spoilait le resultat d'un tour precedent des qu'un tour
@@ -390,7 +409,11 @@
                     g.matchs.sort(function (a, b) { return rangTour(a.numero_tour) - rangTour(b.numero_tour); });
                 }
             });
-            return groupes;
+            // Le groupe contenant le match le plus RECENT (id le plus eleve) passe en
+            // dernier, tout en bas de la page - jamais le resultat le plus frais
+            // affiche en haut (demande utilisateur, 2026-08-22).
+            ordre.sort(function (a, b) { return a.dernierId - b.dernierId; });
+            return ordre;
         }
 
         function creerCarteMatch(match) {
@@ -401,9 +424,14 @@
             const liveDisabled = match.estSemaineActuelle ? '' : 'disabled title="Disponible uniquement pour les matchs de la semaine en cours"';
 
             const estGroupe = match.tournoi_id || match.difficulte === 'coupe';
+            const lienMoi = `<a class="lien-adversaire" href="joueur.html?type=${match.type}">${formaterNom(match.prenom, match.nom)}</a>`;
+            const lienAdversaire = lienVersAdversaireMatch(
+                formaterNomComplet(match.adversaire_nom || 'Adversaire'),
+                match.adversaire_player_id, match.adversaire_rival_id
+            );
             const nomAffiche = estGroupe
-                ? `${flagImg(match.joueur_drapeau)} ${formaterNom(match.prenom, match.nom)} - ${formaterNomComplet(match.adversaire_nom || 'Adversaire')} ${flagImg(match.adversaire_drapeau)}`
-                : formaterNom(match.prenom, match.nom);
+                ? `${flagImg(match.joueur_drapeau)} ${lienMoi} - ${lienAdversaire} ${flagImg(match.adversaire_drapeau)}`
+                : lienMoi;
             const metaAffiche = estGroupe
                 ? match.numero_tour
                 : match.semaineLabel + ' · ' + LABELS_SURFACE[match.surface] + ' · ' + LABELS_DIFFICULTE[match.difficulte];

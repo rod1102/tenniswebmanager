@@ -5552,6 +5552,12 @@ app.get('/api/adversaire/rival/:rivalId', (req, res) => {
 // aussi bien pour un vrai joueur que pour un rival persistant.
 const NOMS_PALIERS = ['sombre', 'bronze', 'argent', 'or', 'platine', 'diamant'];
 
+// Palette dediee aux 3 badges "victoires par surface" (seuils revus, demande
+// explicite de l'utilisateur 2026-08-22) : le palier le plus haut s'appelle
+// "legende" plutot que "diamant" ici, et n'est pas obtenu QUE par le seuil
+// numerique (150) - voir estRecord dans construireBadges plus bas.
+const NOMS_PALIERS_SURFACE = ['sombre', 'bronze', 'argent', 'or', 'platine', 'legende'];
+
 function palierBadge(valeur, seuils) {
     let palier = 0;
     for (let i = 0; i < seuils.length; i++) {
@@ -5560,14 +5566,48 @@ function palierBadge(valeur, seuils) {
     return palier;
 }
 
+// b.nomsPaliers (optionnel) remplace NOMS_PALIERS pour CE badge uniquement (les
+// autres badges partageant NOMS_PALIERS restent inchanges). b.estRecord force le
+// palier le plus prestigieux meme sous le seuil numerique normal - utilise pour
+// le palier "Legende" des badges par surface : peu importe le nombre, le joueur/
+// la joueuse ayant le plus de victoires sur cette surface (parmi son circuit)
+// obtient ce palier (demande explicite de l'utilisateur, 2026-08-22).
 function construireBadges(liste) {
     return liste.map(function (b) {
+        const noms = b.nomsPaliers || NOMS_PALIERS;
+        let palier = palierBadge(b.valeur, b.seuils);
+        if (b.estRecord && b.valeur > 0) palier = noms.length - 1;
         return {
             id: b.id, nom: b.nom, description: b.description, valeur: b.valeur, seuils: b.seuils,
-            palier: palierBadge(b.valeur, b.seuils), palierNom: NOMS_PALIERS[palierBadge(b.valeur, b.seuils)],
-            prochainSeuil: b.seuils[palierBadge(b.valeur, b.seuils)] || null
+            palier: palier, palierNom: noms[palier],
+            prochainSeuil: b.seuils[palier] || null
         };
     });
+}
+
+// Record absolu d'un circuit sur une surface donnee (max de victoires de tournoi
+// sur cette surface parmi TOUS les vrais joueurs ET rivaux persistants de ce
+// circuit) - sert uniquement a determiner qui merite le palier "Legende" des
+// badges victoires_dur/terre/herbe, jamais affiche tel quel.
+function maxVictoiresParSurfaceCircuit(circuit, surface) {
+    const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
+    const maxReel = db.prepare(`
+        SELECT MAX(n) AS m FROM (
+            SELECT COUNT(*) AS n FROM tournoi_matchs tm JOIN tournoi_joueurs tj ON tj.id = tm.vainqueur_id
+            JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE tj.est_reel = 1 AND t.surface = ? AND tj.player_id IN (SELECT id FROM players WHERE type = ?)
+            GROUP BY tj.player_id
+        )
+    `).get(surface, type).m || 0;
+    const maxRival = db.prepare(`
+        SELECT MAX(n) AS m FROM (
+            SELECT COUNT(*) AS n FROM tournoi_matchs tm JOIN tournoi_joueurs tj ON tj.id = tm.vainqueur_id
+            JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE tj.rival_id IN (SELECT id FROM classement_joueurs WHERE circuit = ?) AND t.surface = ?
+            GROUP BY tj.rival_id
+        )
+    `).get(circuit, surface).m || 0;
+    return Math.max(maxReel, maxRival);
 }
 
 // Score au format "6-3, 7-5" toujours oriente du point de vue de CE joueur/rival
@@ -5662,6 +5702,10 @@ function calculerBadges(circuit, cle, filtreColonne, id) {
         WHERE ${filtreJoint} AND t.categorie = 'finals'
     `).get(id).n;
 
+    const victoiresDur = victoiresParSurface('dur');
+    const victoiresTerre = victoiresParSurface('terre');
+    const victoiresHerbe = victoiresParSurface('herbe');
+
     const matchs = matchsOrientes(filtreColonne, id);
     const intouchable = matchs.filter(function (m) { return m.victoire && estIntouchable(m.score); }).length;
     let meilleureSerie = 0, serieActuelle = 0;
@@ -5679,9 +5723,12 @@ function calculerBadges(circuit, cle, filtreColonne, id) {
 
     return construireBadges([
         { id: 'victoires', nom: 'Victoires en tournoi', description: 'Matchs de tournoi remportés, toute la carrière', valeur: victoires, seuils: [50, 100, 150, 250, 500] },
-        { id: 'victoires_dur', nom: 'Matchs gagnés sur dur', description: 'Matchs remportés sur surface dure', valeur: victoiresParSurface('dur'), seuils: [5, 10, 15, 25, 50] },
-        { id: 'victoires_terre', nom: 'Matchs gagnés sur terre', description: 'Matchs remportés sur terre battue', valeur: victoiresParSurface('terre'), seuils: [5, 10, 15, 25, 50] },
-        { id: 'victoires_herbe', nom: 'Matchs gagnés sur herbe', description: 'Matchs remportés sur herbe', valeur: victoiresParSurface('herbe'), seuils: [5, 10, 15, 25, 50] },
+        { id: 'victoires_dur', nom: 'Matchs gagnés sur dur', description: 'Matchs remportés sur surface dure', valeur: victoiresDur,
+            seuils: [1, 25, 50, 75, 150], nomsPaliers: NOMS_PALIERS_SURFACE, estRecord: victoiresDur === maxVictoiresParSurfaceCircuit(circuit, 'dur') },
+        { id: 'victoires_terre', nom: 'Matchs gagnés sur terre', description: 'Matchs remportés sur terre battue', valeur: victoiresTerre,
+            seuils: [1, 25, 50, 75, 150], nomsPaliers: NOMS_PALIERS_SURFACE, estRecord: victoiresTerre === maxVictoiresParSurfaceCircuit(circuit, 'terre') },
+        { id: 'victoires_herbe', nom: 'Matchs gagnés sur herbe', description: 'Matchs remportés sur herbe', valeur: victoiresHerbe,
+            seuils: [1, 25, 50, 75, 150], nomsPaliers: NOMS_PALIERS_SURFACE, estRecord: victoiresHerbe === maxVictoiresParSurfaceCircuit(circuit, 'herbe') },
         { id: 'titres', nom: 'Titres remportés', description: 'Tournois remportés, toutes catégories confondues', valeur: titres, seuils: [5, 10, 15, 25, 50] },
         { id: 'titres_gc', nom: 'Titres du Grand Chelem', description: 'Open d\'Australie, Roland-Garros, Wimbledon, US Open remportés', valeur: titresGC, seuils: [5, 10, 15, 25, 50] },
         { id: 'gc_differents', nom: 'Grand Chelem différents gagnés', description: 'Nombre de Grand Chelem distincts remportés au moins une fois', valeur: gcDifferents, seuils: [1, 2, 3, 4, 5] },
@@ -5878,8 +5925,8 @@ app.get('/api/matchs/:userId', (req, res) => {
                    matchs.vainqueur, matchs.score, matchs.niveau_joueur, matchs.niveau_adversaire, matchs.date_creation,
                    matchs.tournoi_id, matchs.numero_tour, matchs.coupe_equipe_id, tournois.nom AS tournoi_nom, tournois.calendrier_id AS tournoi_calendrier_id,
                    players.prenom, players.nom, players.type, players.nationalite,
-                   tj1.player_id AS tj1_player_id, tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite,
-                   tj2.player_id AS tj2_player_id, tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite
+                   tj1.player_id AS tj1_player_id, tj1.rival_id AS tj1_rival_id, tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite,
+                   tj2.player_id AS tj2_player_id, tj2.rival_id AS tj2_rival_id, tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite
             FROM matchs
             JOIN players ON players.id = matchs.player_id
             LEFT JOIN tournois ON tournois.id = matchs.tournoi_id
@@ -5922,6 +5969,8 @@ app.get('/api/matchs/:userId', (req, res) => {
                 m.adversaire_nom = jeSuisTj1 ? m.tj2_nom : m.tj1_nom;
                 m.adversaire_nationalite = jeSuisTj1 ? m.tj2_nationalite : m.tj1_nationalite;
                 m.adversaire_drapeau = drapeau(m.adversaire_nationalite);
+                m.adversaire_player_id = jeSuisTj1 ? m.tj2_player_id : m.tj1_player_id;
+                m.adversaire_rival_id = jeSuisTj1 ? m.tj2_rival_id : m.tj1_rival_id;
             } else if (m.difficulte === 'coupe' && m.coupe_equipe_id) {
                 const tieCoupe = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(m.coupe_equipe_id);
                 const rubber = db.prepare(`
@@ -5934,12 +5983,19 @@ app.get('/api/matchs/:userId', (req, res) => {
                 if (rubber) {
                     const jeSuisDomicile = rubber.domicile_est_reel === 1 && (rubber.domicile_id === m.player_id || rubber.domicile_id2 === m.player_id);
                     const advEstReel = jeSuisDomicile ? !!rubber.exterieur_est_reel : !!rubber.domicile_est_reel;
-                    const adv1 = identiteJoueurOuRival(advEstReel, jeSuisDomicile ? rubber.exterieur_id : rubber.domicile_id);
+                    const adv1Id = jeSuisDomicile ? rubber.exterieur_id : rubber.domicile_id;
+                    const adv1 = identiteJoueurOuRival(advEstReel, adv1Id);
                     const adv2Id = jeSuisDomicile ? rubber.exterieur_id2 : rubber.domicile_id2;
                     const adv2 = adv2Id ? identiteJoueurOuRival(advEstReel, adv2Id) : null;
                     m.adversaire_nom = adv2 ? (adv1.nom + ' / ' + adv2.nom) : (adv1 ? adv1.nom : null);
                     m.adversaire_nationalite = adv1 ? adv1.nationalite : null;
                     m.adversaire_drapeau = drapeau(m.adversaire_nationalite);
+                    // Lien cliquable uniquement en simple (un double n'a pas de fiche
+                    // adversaire unique vers laquelle pointer).
+                    if (adv1 && !adv2) {
+                        m.adversaire_player_id = advEstReel ? adv1Id : null;
+                        m.adversaire_rival_id = advEstReel ? null : adv1Id;
+                    }
                 }
                 if (tieCoupe) {
                     m.coupe_manche = LABELS_MANCHE[tieCoupe.manche] || tieCoupe.manche;

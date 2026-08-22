@@ -1826,42 +1826,53 @@ table.points td.pts {
     color: #C5CDD6;
 }
 
-.badge-card.palier-0 {
+.badge-card.palier-sombre {
     border-left-color: #3A4552;
     opacity: 0.65;
 }
-.badge-card.palier-0 .badge-card-palier { color: #6B7684; }
+.badge-card.palier-sombre .badge-card-palier { color: #6B7684; }
 
-.badge-card.palier-1 {
+.badge-card.palier-bronze {
     background: rgba(205, 127, 50, 0.14);
     border-left-color: #CD7F32;
 }
-.badge-card.palier-1 .badge-card-palier { color: #CD7F32; }
+.badge-card.palier-bronze .badge-card-palier { color: #CD7F32; }
 
-.badge-card.palier-2 {
+.badge-card.palier-argent {
     background: rgba(192, 192, 192, 0.14);
     border-left-color: #C0C0C0;
 }
-.badge-card.palier-2 .badge-card-palier { color: #C0C0C0; }
+.badge-card.palier-argent .badge-card-palier { color: #C0C0C0; }
 
-.badge-card.palier-3 {
+.badge-card.palier-or {
     background: rgba(212, 175, 55, 0.16);
     border-left-color: #D4AF37;
 }
-.badge-card.palier-3 .badge-card-palier { color: #D4AF37; }
+.badge-card.palier-or .badge-card-palier { color: #D4AF37; }
 
-.badge-card.palier-4 {
+.badge-card.palier-platine {
     background: rgba(157, 195, 212, 0.18);
     border-left-color: #9DC3D4;
 }
-.badge-card.palier-4 .badge-card-palier { color: #9DC3D4; }
+.badge-card.palier-platine .badge-card-palier { color: #9DC3D4; }
 
-.badge-card.palier-5 {
+.badge-card.palier-diamant {
     background: rgba(127, 219, 255, 0.2);
     border-left-color: #7FDBFF;
     box-shadow: 0 0 14px rgba(127, 219, 255, 0.25);
 }
-.badge-card.palier-5 .badge-card-palier { color: #7FDBFF; }
+.badge-card.palier-diamant .badge-card-palier { color: #7FDBFF; }
+
+/* Palier le plus prestigieux des badges "victoires par surface" uniquement
+   (seuil de 150, ou record absolu du circuit peu importe le nombre) - degrade
+   or/braise avec lueur chaude, delibirement plus eclatant que le diamant glace
+   ci-dessus : "c'est le meilleur badge" (demande utilisateur, 2026-08-22). */
+.badge-card.palier-legende {
+    background: linear-gradient(135deg, rgba(255, 201, 74, 0.22), rgba(255, 138, 0, 0.16));
+    border-left-color: #FFC94A;
+    box-shadow: 0 0 18px rgba(255, 173, 51, 0.35);
+}
+.badge-card.palier-legende .badge-card-palier { color: #FFC94A; }
 
 .style-tour-card select option {
     background: #0A1628;
