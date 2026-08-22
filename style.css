@@ -1858,14 +1858,16 @@ table.points td.pts {
 
 /* Palier le plus prestigieux, commun a TOUS les badges (seuil numerique le plus
    haut, OU record absolu du circuit pour cette statistique peu importe le
-   nombre) - degrade or/braise avec lueur chaude : "c'est le meilleur badge"
-   (demande utilisateur, 2026-08-22). */
+   nombre) - fond argent au milieu, bande arc-en-ciel sur le cote façon maillot
+   de champion du monde de cyclisme (demande utilisateur, 2026-08-22). */
 .badge-card.palier-legende {
-    background: linear-gradient(135deg, rgba(255, 201, 74, 0.22), rgba(255, 138, 0, 0.16));
-    border-left-color: #FFC94A;
-    box-shadow: 0 0 18px rgba(255, 173, 51, 0.35);
+    background: linear-gradient(135deg, rgba(214, 218, 226, 0.22), rgba(160, 165, 176, 0.16));
+    border-left: 4px solid transparent;
+    border-image-source: linear-gradient(180deg, #2E5FD9 0 20%, #E0333F 20% 40%, #1A1A1A 40% 60%, #F4C430 60% 80%, #3FA34D 80% 100%);
+    border-image-slice: 1;
+    box-shadow: 0 0 16px rgba(200, 205, 215, 0.3);
 }
-.badge-card.palier-legende .badge-card-palier { color: #FFC94A; }
+.badge-card.palier-legende .badge-card-palier { color: #E2E6EC; }
 
 .style-tour-card select option {
     background: #0A1628;
