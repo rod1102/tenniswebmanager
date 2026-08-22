@@ -168,14 +168,6 @@
             return p + ' ' + (nom || '').toUpperCase();
         }
 
-        function classeAutomatismes(valeur) {
-            if (valeur <= 5) return 'energie-rouge';
-            if (valeur <= 14) return 'energie-orange';
-            if (valeur <= 19) return 'competence-jaune';
-            if (valeur <= 25) return 'energie-vert-clair';
-            return 'energie-vert-fonce';
-        }
-
         function classeEnergie(points) {
             if (points <= 10) return 'energie-noir';
             if (points <= 25) return 'energie-rouge-fonce';
@@ -702,9 +694,9 @@
                 ${ligneDisposition('Rivalité', player.disposition_rivalite, DISPOSITIONS_TOOLTIPS.rivalite)}
 
                 <div class="stats-header">Automatismes</div>
-                <div class="bar-row"><span class="bar-label">Dur</span><div class="bar-track"><div class="bar-fill ${classeAutomatismes(player.surface_dur_automatismes)}" style="width:${Math.min(100, player.surface_dur_automatismes / 30 * 100)}%;"></div></div><span class="bar-value">${player.surface_dur_automatismes}</span></div>
-                <div class="bar-row"><span class="bar-label">Terre battue</span><div class="bar-track"><div class="bar-fill ${classeAutomatismes(player.surface_terre_automatismes)}" style="width:${Math.min(100, player.surface_terre_automatismes / 30 * 100)}%;"></div></div><span class="bar-value">${player.surface_terre_automatismes}</span></div>
-                <div class="bar-row"><span class="bar-label">Herbe</span><div class="bar-track"><div class="bar-fill ${classeAutomatismes(player.surface_herbe_automatismes)}" style="width:${Math.min(100, player.surface_herbe_automatismes / 30 * 100)}%;"></div></div><span class="bar-value">${player.surface_herbe_automatismes}</span></div>
+                <div class="bar-row"><span class="bar-label">Dur</span><div class="bar-track"><div class="bar-fill automatisme-dur" style="width:${Math.min(100, player.surface_dur_automatismes / 30 * 100)}%;"></div></div><span class="bar-value">${player.surface_dur_automatismes}</span></div>
+                <div class="bar-row"><span class="bar-label">Terre battue</span><div class="bar-track"><div class="bar-fill automatisme-terre" style="width:${Math.min(100, player.surface_terre_automatismes / 30 * 100)}%;"></div></div><span class="bar-value">${player.surface_terre_automatismes}</span></div>
+                <div class="bar-row"><span class="bar-label">Herbe</span><div class="bar-track"><div class="bar-fill automatisme-herbe" style="width:${Math.min(100, player.surface_herbe_automatismes / 30 * 100)}%;"></div></div><span class="bar-value">${player.surface_herbe_automatismes}</span></div>
 
                 <div class="stats-header">Spécialisation par surface</div>
                 <div class="surface-grid">

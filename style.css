@@ -602,6 +602,10 @@ h1 {
 
 /* Competences techniques : couleur selon palier (0-24 vert, 25-49 jaune, 50-74
    orange, 75-99 rouge, 100+ noir). */
+.bar-fill.automatisme-dur { background: #5FA8E8; }
+.bar-fill.automatisme-terre { background: #E08A4B; }
+.bar-fill.automatisme-herbe { background: #5CC57F; }
+
 .bar-fill.competence-vert { background: #5CC57F; }
 .bar-fill.competence-jaune { background: #E0C64B; }
 .bar-fill.competence-orange { background: #E08A4B; }
