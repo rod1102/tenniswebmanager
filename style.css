@@ -1856,17 +1856,10 @@ table.points td.pts {
 }
 .badge-card.palier-platine .badge-card-palier { color: #9DC3D4; }
 
-.badge-card.palier-diamant {
-    background: rgba(127, 219, 255, 0.2);
-    border-left-color: #7FDBFF;
-    box-shadow: 0 0 14px rgba(127, 219, 255, 0.25);
-}
-.badge-card.palier-diamant .badge-card-palier { color: #7FDBFF; }
-
-/* Palier le plus prestigieux des badges "victoires par surface" uniquement
-   (seuil de 150, ou record absolu du circuit peu importe le nombre) - degrade
-   or/braise avec lueur chaude, delibirement plus eclatant que le diamant glace
-   ci-dessus : "c'est le meilleur badge" (demande utilisateur, 2026-08-22). */
+/* Palier le plus prestigieux, commun a TOUS les badges (seuil numerique le plus
+   haut, OU record absolu du circuit pour cette statistique peu importe le
+   nombre) - degrade or/braise avec lueur chaude : "c'est le meilleur badge"
+   (demande utilisateur, 2026-08-22). */
 .badge-card.palier-legende {
     background: linear-gradient(135deg, rgba(255, 201, 74, 0.22), rgba(255, 138, 0, 0.16));
     border-left-color: #FFC94A;
