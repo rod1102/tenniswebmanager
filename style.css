@@ -1794,6 +1794,8 @@ table.points td.pts {
 }
 
 .badge-card {
+    position: relative;
+    overflow: hidden;
     border-radius: 12px;
     padding: 14px;
     border-left: 4px solid transparent;
@@ -1860,15 +1862,49 @@ table.points td.pts {
    haut, OU record absolu du circuit pour cette statistique peu importe le
    nombre) - fond argent brillant au milieu, degrade arc-en-ciel irise (façon
    trophee holographique) sur le cote, lisse plutot qu'en bandes nettes
-   (demande utilisateur, 2026-08-22). */
+   (demande utilisateur, 2026-08-22). La bande passe par un pseudo-element
+   (::before) plutot que border-image, qui ignore border-radius et donnait des
+   coins carres sur une carte aux bords arrondis (bug signale par l'utilisateur,
+   2026-08-22) - .badge-card porte deja overflow:hidden pour la clipper proprement,
+   et sert aussi a decouper le reflet (::after) qui balaie la carte.*/
 .badge-card.palier-legende {
     background: linear-gradient(135deg, rgba(236, 240, 248, 0.36), rgba(196, 202, 216, 0.22));
-    border-left: 4px solid transparent;
-    border-image-source: linear-gradient(180deg, #4FA8FF 0%, #4FD8C4 25%, #A8E063 50%, #FFD54F 70%, #FF8FB3 88%, #C77DFF 100%);
-    border-image-slice: 1;
+    border-left-color: transparent;
     box-shadow: 0 0 18px rgba(226, 232, 244, 0.45), inset 0 0 14px rgba(255, 255, 255, 0.12);
 }
 .badge-card.palier-legende .badge-card-palier { color: #F4F7FC; text-shadow: 0 0 6px rgba(255, 255, 255, 0.45); }
+
+.badge-card.palier-legende::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: linear-gradient(180deg, #4FA8FF 0%, #4FD8C4 25%, #A8E063 50%, #FFD54F 70%, #FF8FB3 88%, #C77DFF 100%);
+}
+
+.badge-card.palier-legende::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -60%;
+    width: 45%;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.4), transparent);
+    animation: legende-reflet 4.5s ease-in-out infinite;
+    pointer-events: none;
+}
+
+@keyframes legende-reflet {
+    0% { left: -60%; }
+    35% { left: 120%; }
+    100% { left: 120%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .badge-card.palier-legende::after { animation: none; display: none; }
+}
 
 .style-tour-card select option {
     background: #0A1628;
