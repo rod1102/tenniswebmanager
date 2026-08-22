@@ -526,9 +526,17 @@ app.get('/api/joueurs/:userId', (req, res) => {
     }
 });
 
-// Avatar personnalise d'un de ses 2 personnages : remplace la photo existante s'il
-// y en avait deja une (ancien fichier supprime du disque, pas seulement ecrase en
-// base). Reserve au proprietaire du joueur (verifie via user_id, comme partout).
+// Avatar personnalise d'un joueur reel : remplace la photo existante s'il y en
+// avait deja une (ancien fichier supprime du disque, pas seulement ecrase en
+// base). Le proprietaire du joueur peut gerer sa propre photo ; un admin peut en
+// plus le faire sur N'IMPORTE QUEL joueur (seul l'admin doit pouvoir poser une
+// photo sur la fiche d'un joueur qui n'est pas le sien, demande explicite de
+// l'utilisateur 2026-08-22).
+function joueurGerableParAvatar(playerId, userId) {
+    if (estAdmin(userId)) return db.prepare('SELECT id, photo_avatar FROM players WHERE id = ?').get(playerId);
+    return db.prepare('SELECT id, photo_avatar FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+}
+
 app.post('/api/joueur/avatar/:playerId', function (req, res) {
     uploadAvatar.single('photo')(req, res, function (erreurUpload) {
         if (erreurUpload) {
@@ -536,7 +544,7 @@ app.post('/api/joueur/avatar/:playerId', function (req, res) {
         }
         try {
             const { playerId } = req.params;
-            const player = db.prepare('SELECT id, photo_avatar FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
+            const player = joueurGerableParAvatar(playerId, req.userId);
             if (!player) {
                 if (req.file) fs.unlink(req.file.path, function () {});
                 return res.status(404).json({ error: 'Joueur introuvable.' });
@@ -560,7 +568,7 @@ app.post('/api/joueur/avatar/:playerId', function (req, res) {
 app.delete('/api/joueur/avatar/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
-        const player = db.prepare('SELECT id, photo_avatar FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
+        const player = joueurGerableParAvatar(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }

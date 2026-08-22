@@ -131,10 +131,13 @@
             }
         }
 
+        let estAdminCourant = false;
+
         async function verifierAdmin() {
             const response = await fetch('/api/utilisateur/' + userId);
             const data = await response.json();
             if (response.ok && data.user.role === 'admin') {
+                estAdminCourant = true;
                 document.getElementById('admin-link').style.display = 'inline-block';
             }
         }
@@ -503,13 +506,53 @@
             document.getElementById('adversaire-titre').textContent = nomAffiche;
             document.title = nomAffiche + ' — Tennis Web Manager';
 
-            // Avatar personnalise : uniquement pour un vrai joueur qui en a uploade un
-            // (jamais pour un rival, aucune photo n'existe pour eux) - simple lecture,
-            // pas de controle d'upload ici (reserve au proprietaire sur joueur.html).
+            // Avatar personnalise : uniquement pour un vrai joueur (jamais pour un
+            // rival, aucune photo n'existe pour eux). Simple lecture pour un coach
+            // normal ; un admin voit en plus les controles pour poser/retirer une
+            // photo sur la fiche de N'IMPORTE QUEL joueur - seul lui doit pouvoir le
+            // faire sur la fiche d'un joueur qui n'est pas le sien (demande explicite
+            // de l'utilisateur 2026-08-22).
             const zonePhoto = document.getElementById('adversaire-photo-zone');
-            zonePhoto.innerHTML = (typeAdversaire === 'reel' && data.infos.photoAvatar)
-                ? `<div class="fiche-adversaire-photo"><img src="${data.infos.photoAvatar}" alt=""></div>`
-                : '';
+            if (typeAdversaire !== 'reel') {
+                zonePhoto.innerHTML = '';
+            } else if (!estAdminCourant) {
+                zonePhoto.innerHTML = data.infos.photoAvatar
+                    ? `<div class="fiche-adversaire-photo"><img src="${data.infos.photoAvatar}" alt=""></div>`
+                    : '';
+            } else {
+                zonePhoto.innerHTML = `
+                    <div class="fiche-adversaire-photo">
+                        ${data.infos.photoAvatar ? `<img src="${data.infos.photoAvatar}" alt="">` : '<div class="match-hint" style="padding:0;">Aucune photo</div>'}
+                    </div>
+                    <div class="avatar-actions">
+                        <button type="button" id="admin-avatar-changer-btn">Changer la photo</button>
+                        ${data.infos.photoAvatar ? '<button type="button" id="admin-avatar-retirer-btn">Retirer</button>' : ''}
+                    </div>
+                    <input type="file" id="admin-avatar-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;">
+                `;
+                document.getElementById('admin-avatar-changer-btn').addEventListener('click', function () {
+                    document.getElementById('admin-avatar-input').click();
+                });
+                document.getElementById('admin-avatar-input').addEventListener('change', async function (e) {
+                    const fichier = e.target.files[0];
+                    if (!fichier) return;
+                    const formData = new FormData();
+                    formData.append('photo', fichier);
+                    const rep = await fetch('/api/joueur/avatar/' + adversaireId, { method: 'POST', body: formData });
+                    const d = await rep.json();
+                    if (!rep.ok) { alert(d.error || 'Impossible d\'envoyer cette image.'); return; }
+                    chargerFiche();
+                });
+                const btnRetirer = document.getElementById('admin-avatar-retirer-btn');
+                if (btnRetirer) {
+                    btnRetirer.addEventListener('click', async function () {
+                        const rep = await fetch('/api/joueur/avatar/' + adversaireId, { method: 'DELETE' });
+                        const d = await rep.json();
+                        if (!rep.ok) { alert(d.error || 'Impossible de retirer cette photo.'); return; }
+                        chargerFiche();
+                    });
+                }
+            }
 
             afficherInfos(data);
             afficherPalmares(data);
@@ -538,7 +581,7 @@
 
         (async function init() {
             await chargerSemaine();
-            verifierAdmin();
+            await verifierAdmin();
             chargerFiche();
         })();
     </script>
