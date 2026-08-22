@@ -523,6 +523,21 @@ db.exec(`
 `);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_coupe_groupe_mondial_unique ON coupe_groupe_mondial(saison, circuit, nation)`);
 
+// Top 30 ATP/WTA "obligatoire" (regle du classement a 18/16 meilleurs resultats)
+// - fige une seule fois a la fin de chaque saison (classement Live du moment),
+// en vigueur pour toute la saison suivante. Volontairement absent en Saison 1
+// (aucune ligne tant que la 1ere fin de saison n'a pas eu lieu) : la regle ne
+// s'applique qu'a partir de la Saison 2 (demande explicite de l'utilisateur,
+// 2026-08-22).
+db.exec(`
+    CREATE TABLE IF NOT EXISTS classement_top30 (
+        saison INTEGER NOT NULL,
+        circuit TEXT NOT NULL,
+        cle TEXT NOT NULL,
+        PRIMARY KEY (saison, circuit, cle)
+    )
+`);
+
 // Vraie session serveur (2026-08-11) : un jeton oppose = une ligne, supprime a la
 // deconnexion ou a l'expiration. Remplace le mecanisme precedent (userId envoye en
 // clair par le client a chaque appel, jamais verifie cote serveur).

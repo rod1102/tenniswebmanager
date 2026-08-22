@@ -1262,6 +1262,24 @@ function appliquerChangementDeSaison(nouvelleSemaine) {
     // seule fois au tout debut de la nouvelle Pre-saison (idempotent).
     assurerTableauCoupe('ATP');
     assurerTableauCoupe('WTA');
+
+    // Top 30 "obligatoire" (regle des 18/16 meilleurs resultats) : fige une seule
+    // fois par saison, sur le classement Live tel qu'il etait a la toute derniere
+    // semaine de la saison qui vient de se terminer - en vigueur pour la saison qui
+    // commence. Idempotent (skip si deja fige pour cette saison/ce circuit).
+    fixerTop30Saison(nouvelleSemaine);
+}
+
+function fixerTop30Saison(nouvelleSemaine) {
+    const saison = phaseAffichee(nouvelleSemaine).numeroSaison;
+    ['ATP', 'WTA'].forEach(function (circuit) {
+        const existe = db.prepare('SELECT COUNT(*) AS n FROM classement_top30 WHERE saison = ? AND circuit = ?').get(saison, circuit).n;
+        if (existe > 0) return;
+        const semaineReference = nouvelleSemaine - 1;
+        const classement = calculerClassementGlobal(circuit, semaineReference - FENETRE_LIVE, semaineReference);
+        const insert = db.prepare('INSERT INTO classement_top30 (saison, circuit, cle) VALUES (?, ?, ?)');
+        classement.slice(0, 30).forEach(function (c) { insert.run(saison, circuit, c.cle); });
+    });
 }
 
 // Coeur de l'avancee de semaine, reutilise par la route admin ET par le scheduler
@@ -2756,19 +2774,100 @@ function assurerRoster(circuit) {
     }
 }
 
-// Points des rivaux persistants du roster sur une fenetre de semaines donnee,
-// partage entre calculerClassement (un seul coach) et calculerClassementGlobal
-// (tous les coachs, utilise pour la qualification aux Masters de fin de saison).
-function pointsRivaux(circuit, semaineMin, semaineActuelle) {
-    return db.prepare(`
-        SELECT cj.id, cj.nom, cj.nationalite, cj.niveau,
-               COALESCE(SUM(CASE WHEN t.id IS NOT NULL THEN tj.points_gagnes ELSE 0 END), 0) AS points
-        FROM classement_joueurs cj
-        LEFT JOIN tournoi_joueurs tj ON tj.rival_id = cj.id
-        LEFT JOIN tournois t ON t.id = tj.tournoi_id AND t.semaine > ? AND t.semaine <= ? AND t.statut = 'termine'
-        WHERE cj.circuit = ?
-        GROUP BY cj.id
-    `).all(semaineMin, semaineActuelle, circuit);
+// Regle "18/16 meilleurs resultats" ATP/WTA (fidele aux vraies regles du tour,
+// demande explicite de l'utilisateur, 2026-08-22) - le classement Live/Race
+// n'est plus une simple somme de tous les points gagnes, mais :
+//  - 18 resultats retenus pour l'ATP, 16 pour la WTA (+1 si qualifie·e aux
+//    Masters de fin de saison dans la fenetre, regle WTA uniquement) ;
+//  - les 4 Grand Chelem et les Masters 1000 "a comptage obligatoire" (voir
+//    M1000_COMPTAGE_OBLIGATOIRE) comptent TOUJOURS, quel que soit leur rang
+//    parmi les autres resultats - seuls les resultats restants ("meilleurs
+//    autres") se disputent les slots non deja pris par du GC/M1000 ;
+//  - +1 slot bonus, une seule fois, si l'entite fait partie du Top 30
+//    "obligatoire" fige a la fin de la saison precedente (classement_top30,
+//    vide en Saison 1 - la regle ne s'applique donc qu'a partir de la Saison 2)
+//    ET a manque au moins un GC/M1000 obligatoire qui a pourtant eu lieu dans
+//    la fenetre.
+const NB_RESULTATS_RETENUS = { ATP: 18, WTA: 16 };
+
+// Masters 1000 dont le resultat compte TOUJOURS dans le calcul (au meme titre
+// qu'un Grand Chelem) - reprend les vraies designations du circuit. Monte-Carlo
+// (ATP) en est exclu (seul M1000 traditionnellement facultatif) ; cote WTA,
+// seuls ces 4 WTA1000 comptent dans la formule de classement - les 6 autres
+// rejoignent le pool des "meilleurs autres resultats", au meme titre qu'un
+// 500/250.
+const M1000_COMPTAGE_OBLIGATOIRE = {
+    ATP: ['atp-indian-wells', 'atp-miami', 'atp-madrid', 'atp-rome', 'atp-canada', 'atp-cincinnati', 'atp-shanghai', 'atp-paris'],
+    WTA: ['wta-indian-wells', 'wta-miami', 'wta-madrid', 'wta-beijing']
+};
+
+function calendrierIdsGC(circuit) {
+    return CALENDRIER_TOURNOIS.filter(function (t) { return t.circuit === circuit && t.categorie === 'slam'; }).map(function (t) { return t.id; });
+}
+
+// Points retenus (regle des N meilleurs resultats) pour TOUTES les entites
+// (vrais joueurs + rivaux persistants) d'un circuit sur une fenetre donnee, en
+// un minimum de requetes SQL (un balayage groupe plutot qu'une requete par
+// entite). Retourne une Map cle ('joueur:ID'/'rival:ID') -> points retenus.
+function pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle) {
+    const resultats = db.prepare(`
+        SELECT tj.player_id, tj.rival_id, tj.points_gagnes, t.categorie, t.calendrier_id
+        FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE t.circuit = ? AND t.semaine > ? AND t.semaine <= ? AND t.statut = 'termine'
+          AND tj.points_gagnes IS NOT NULL
+          AND ((tj.player_id IS NOT NULL AND tj.est_reel = 1) OR tj.rival_id IS NOT NULL)
+    `).all(circuit, semaineMin, semaineActuelle);
+
+    const parEntite = new Map();
+    resultats.forEach(function (r) {
+        const cle = r.player_id ? 'joueur:' + r.player_id : 'rival:' + r.rival_id;
+        if (!parEntite.has(cle)) parEntite.set(cle, []);
+        parEntite.get(cle).push(r);
+    });
+
+    const idsM1000Oblig = M1000_COMPTAGE_OBLIGATOIRE[circuit] || [];
+    const idsGC = calendrierIdsGC(circuit);
+    const idsMandataires = idsGC.concat(idsM1000Oblig);
+
+    // Un GC/M1000 obligatoire qui n'a pas encore eu lieu dans la fenetre ne peut
+    // pas etre compte comme "rate" (personne n'a encore pu le jouer).
+    const idsMandatairesJoues = idsMandataires.length
+        ? new Set(db.prepare(`
+            SELECT DISTINCT calendrier_id FROM tournois
+            WHERE circuit = ? AND semaine > ? AND semaine <= ? AND statut = 'termine'
+              AND calendrier_id IN (${idsMandataires.map(function () { return '?'; }).join(',')})
+        `).all(circuit, semaineMin, semaineActuelle, ...idsMandataires).map(function (r) { return r.calendrier_id; }))
+        : new Set();
+
+    const saisonAffichee = phaseAffichee(semaineActuelle).numeroSaison;
+    const top30 = new Set(db.prepare('SELECT cle FROM classement_top30 WHERE saison = ? AND circuit = ?').all(saisonAffichee, circuit).map(function (r) { return r.cle; }));
+
+    const points = new Map();
+    parEntite.forEach(function (mesResultats, cle) {
+        const gc = mesResultats.filter(function (r) { return r.categorie === 'slam'; });
+        const m1000Oblig = mesResultats.filter(function (r) { return idsM1000Oblig.indexOf(r.calendrier_id) !== -1; });
+        const autres = mesResultats.filter(function (r) { return r.categorie !== 'slam' && idsM1000Oblig.indexOf(r.calendrier_id) === -1; });
+
+        let n = NB_RESULTATS_RETENUS[circuit];
+        // Bonus WTA : qualification aux Masters de fin de saison dans la fenetre.
+        if (circuit === 'WTA' && mesResultats.some(function (r) { return r.categorie === 'finals'; })) n += 1;
+
+        if (top30.has(cle)) {
+            const idsJoues = new Set(mesResultats.map(function (r) { return r.calendrier_id; }));
+            const aRateUnObligatoire = idsMandataires.some(function (id) { return idsMandatairesJoues.has(id) && !idsJoues.has(id); });
+            if (aRateUnObligatoire) n += 1;
+        }
+
+        const slotsAutres = Math.max(0, n - gc.length - m1000Oblig.length);
+        const meilleursAutres = autres.map(function (r) { return r.points_gagnes; }).sort(function (a, b) { return b - a; }).slice(0, slotsAutres);
+
+        const total = gc.reduce(function (s, r) { return s + r.points_gagnes; }, 0)
+            + m1000Oblig.reduce(function (s, r) { return s + r.points_gagnes; }, 0)
+            + meilleursAutres.reduce(function (s, x) { return s + x; }, 0);
+        points.set(cle, total);
+    });
+
+    return points;
 }
 
 // Classement PARTAGE (tous coachs confondus, pas un seul) pour un circuit et une
@@ -2781,30 +2880,28 @@ function pointsRivaux(circuit, semaineMin, semaineActuelle) {
 // marque des points).
 // Les points d'un tournoi encore en cours (statut != 'termine') ne comptent pas
 // encore dans le classement, meme si certains joueurs sont deja elimines - ils ne
-// sont credites qu'une fois le tournoi entierement termine (cf. pointsRivaux et le
-// filtre t.statut = 'termine' ci-dessous).
+// sont credites qu'une fois le tournoi entierement termine.
 function calculerClassementGlobal(circuit, semaineMin, semaineActuelle) {
-    const liste = pointsRivaux(circuit, semaineMin, semaineActuelle).map(function (r) {
-        return { cle: 'rival:' + r.id, nom: r.nom, nationalite: r.nationalite, drapeau: drapeau(r.nationalite), points: r.points, niveau: r.niveau, playerId: null, rivalId: r.id, userId: null };
+    const pointsRetenus = pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle);
+
+    const rivaux = db.prepare('SELECT id, nom, nationalite, niveau FROM classement_joueurs WHERE circuit = ?').all(circuit);
+    const liste = rivaux.map(function (r) {
+        const cle = 'rival:' + r.id;
+        return { cle, nom: r.nom, nationalite: r.nationalite, drapeau: drapeau(r.nationalite), points: pointsRetenus.get(cle) || 0, niveau: r.niveau, playerId: null, rivalId: r.id, userId: null };
     });
 
     const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
     const joueursReels = db.prepare("SELECT * FROM players WHERE type = ? AND statut = 'valide'").all(type);
     joueursReels.forEach(function (p) {
-        const total = db.prepare(`
-            SELECT COALESCE(SUM(tj.points_gagnes), 0) AS points
-            FROM tournoi_joueurs tj
-            JOIN tournois t ON t.id = tj.tournoi_id
-            WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.semaine > ? AND t.semaine <= ? AND t.statut = 'termine'
-        `).get(p.id, semaineMin, semaineActuelle);
+        const cle = 'joueur:' + p.id;
         liste.push({
-            cle: 'joueur:' + p.id,
+            cle,
             nom: p.prenom + ' ' + p.nom,
             prenom: p.prenom,
             nomFamille: p.nom,
             nationalite: p.nationalite,
             drapeau: drapeau(p.nationalite),
-            points: total.points,
+            points: pointsRetenus.get(cle) || 0,
             niveau: p.niveau,
             playerId: p.id,
             rivalId: null,
