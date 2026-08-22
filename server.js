@@ -2073,8 +2073,13 @@ function nomJoueur(cle) {
 }
 
 // Resout UN point : tirage technique simple si ce point n'a rien de decisif
-// (menacant = null), sinon on l'annonce puis on le rejoue jusqu'a ce que technique
-// et mental s'accordent (meme mecanique que resoudrePointTB pour le tie-break).
+// (menacant = null), sinon un unique tirage avec le mental deja integre au niveau
+// (niveau_mental = niveau_normal + mental_courant) - meme mecanique que
+// resoudrePointTB pour le tie-break. Plus de 1er tirage technique "a l'aveugle"
+// suivi de relances silencieuses tant que technique et mental ne s'accordent pas :
+// chaque relance invisible gonflait quand meme pointsImportants (donc le gain de
+// mental max) sans jamais apparaitre dans le teletexte (demande explicite de
+// l'utilisateur 2026-08-22, divergence assumee du PDF d'origine).
 function resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacant, libelle, mot, stats, evenements) {
     if (!menacant) {
         return tirage(niveauA_normal, niveauB_normal);
@@ -2082,24 +2087,14 @@ function resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveau
 
     evenements.push({ type: 'point_important', texte: libelle + ' pour ' + nomJoueur(menacant) });
 
-    let vainqueurT1 = tirage(niveauA_normal, niveauB_normal);
-    let iterations = 0;
-    while (iterations < 50) {
-        iterations++;
-        stats.pointsImportants++;
-        const vainqueurT2 = tirage(niveauA_mental, niveauB_mental);
-        if (vainqueurT2 === vainqueurT1) {
-            const motMajuscule = mot.charAt(0).toUpperCase() + mot.slice(1);
-            const texteResolution = vainqueurT1 === menacant
-                ? motMajuscule + ' ' + nomJoueur(vainqueurT1)
-                : motMajuscule + ' sauve par ' + nomJoueur(vainqueurT1);
-            evenements.push({ type: 'point_important', texte: texteResolution });
-            return vainqueurT1;
-        }
-        // technique et mental se contredisent : on rejoue le point silencieusement
-        vainqueurT1 = tirage(niveauA_normal, niveauB_normal);
-    }
-    return vainqueurT1;
+    stats.pointsImportants++;
+    const vainqueur = tirage(niveauA_mental, niveauB_mental);
+    const motMajuscule = mot.charAt(0).toUpperCase() + mot.slice(1);
+    const texteResolution = vainqueur === menacant
+        ? motMajuscule + ' ' + nomJoueur(vainqueur)
+        : motMajuscule + ' sauve par ' + nomJoueur(vainqueur);
+    evenements.push({ type: 'point_important', texte: texteResolution });
+    return vainqueur;
 }
 
 // Simule un jeu (service) point par point (0-15-30-40, egalite/avantage) plutot
@@ -2164,23 +2159,19 @@ function resoudrePointTB(niveauA_normal, niveauB_normal, niveauA_mental, niveauB
 
     evenements.push({ type: 'point_important', texte: 'Point decisif pour ' + nomJoueur(menacant) });
 
-    let vainqueurT1 = tirage(niveauA_normal, niveauB_normal);
-    let iterations = 0;
-    while (iterations < 50) {
-        iterations++;
-        stats.pointsImportants++;
-        const vainqueurT2 = tirage(niveauA_mental, niveauB_mental);
-        if (vainqueurT2 === vainqueurT1) {
-            const texteResolution = vainqueurT1 === menacant
-                ? 'Point ' + nomJoueur(vainqueurT1)
-                : 'Point sauve par ' + nomJoueur(vainqueurT1);
-            evenements.push({ type: 'point_important', texte: texteResolution });
-            return vainqueurT1;
-        }
-        // technique et mental se contredisent : on rejoue le point silencieusement
-        vainqueurT1 = tirage(niveauA_normal, niveauB_normal);
-    }
-    return tirage(niveauA_normal, niveauB_normal);
+    // Un seul tirage, avec le mental deja integre au niveau (niveau_mental =
+    // niveau_normal + mental_courant) - plus de 1er tirage technique "a l'aveugle"
+    // suivi de relances silencieuses tant que technique et mental ne s'accordent
+    // pas : chaque relance invisible gonflait quand meme pointsImportants (donc le
+    // gain de mental max) sans jamais apparaitre dans le teletexte (demande
+    // explicite de l'utilisateur 2026-08-22, divergence assumee du PDF d'origine).
+    stats.pointsImportants++;
+    const vainqueur = tirage(niveauA_mental, niveauB_mental);
+    const texteResolution = vainqueur === menacant
+        ? 'Point ' + nomJoueur(vainqueur)
+        : 'Point sauve par ' + nomJoueur(vainqueur);
+    evenements.push({ type: 'point_important', texte: texteResolution });
+    return vainqueur;
 }
 
 function simulerTieBreak(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, stats, evenements, numeroSet, setsA, setsB, seuil) {
@@ -2368,9 +2359,12 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
     let abandonCote = null;
 
     // Renvoie l'evenement kine/abandon a pousser (ou null), sans le pousser lui-meme
-    // dans `evenements` - l'appelant l'insere AVANT de jouer le jeu concerne (voir les
-    // points d'appel plus bas), pas apres : l'alerte precede toujours le jeu qu'elle
-    // affecte, jamais son resultat.
+    // dans `evenements` et SANS toucher a abandonCote - l'appelant insere l'evenement
+    // AVANT de jouer le jeu concerne (voir les points d'appel plus bas), pas apres :
+    // l'alerte precede toujours le jeu qu'elle affecte, jamais son resultat. Ne pas
+    // fixer abandonCote ici permet a l'appelant de tester les DEUX cotes de maniere
+    // independante avant de decider qui abandonne (cf. cas des deux joueurs blesses
+    // sur le meme jeu, PDF : tirage equiprobable).
     function tenterAlerteKine(cote) {
         const etatPhysique = cote === 'A' ? etatPhysiqueA : etatPhysiqueB;
         if (!etatPhysique) return null;
@@ -2382,7 +2376,6 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
         else { conditionActuelleB = nouvelleCondition; malusActuelB = malusCondition(nouvelleCondition); }
 
         if (nouvelleCondition === 'blesse') {
-            abandonCote = cote;
             const estJoueuse = etatPhysique.type === 'joueuse';
             const texteAbandon = estJoueuse ? 'elle est obligée d\'abandonner.' : 'il est obligé d\'abandonner.';
             return { type: 'abandon', texte: '➕ John n\'a rien pu faire pour ' + nomJoueur(cote) + ', ' + texteAbandon };
@@ -2403,10 +2396,23 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
             // Tirage kine/abandon AVANT ce jeu (pas apres) : l'alerte concerne le jeu
             // qui va se jouer, pas le suivant - elle s'affiche donc avant l'annonce de
             // son resultat, et son malus (le cas echeant) s'applique des ce jeu-la.
+            // Les deux cotes sont TOUJOURS testes independamment (PDF) - si les deux
+            // deviennent blesses sur ce meme jeu, un tirage equiprobable determine
+            // lequel abandonne (sinon A "gagnait" systematiquement l'abandon des que
+            // son propre tirage reussissait, le tirage de B n'etant jamais effectue).
             const alerteA = tenterAlerteKine('A');
+            const alerteB = tenterAlerteKine('B');
             if (alerteA) evenements.push(alerteA);
-            const alerteB = abandonCote ? null : tenterAlerteKine('B');
             if (alerteB) evenements.push(alerteB);
+            const aAbandonneA = alerteA && alerteA.type === 'abandon';
+            const aAbandonneB = alerteB && alerteB.type === 'abandon';
+            if (aAbandonneA && aAbandonneB) {
+                abandonCote = Math.random() < 0.5 ? 'A' : 'B';
+            } else if (aAbandonneA) {
+                abandonCote = 'A';
+            } else if (aAbandonneB) {
+                abandonCote = 'B';
+            }
             if (abandonCote) break; // ne peut meme pas commencer ce jeu
 
             // Recalcule a CHAQUE jeu (pas une fois par set) : une alerte kine peut avoir
