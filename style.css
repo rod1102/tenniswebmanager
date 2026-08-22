@@ -998,6 +998,19 @@ h1 {
     display: block;
 }
 
+.fiche-adversaire-photo.avatar-generique {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.fiche-adversaire-photo.avatar-generique img {
+    width: 40%;
+    height: 40%;
+    object-fit: contain;
+    opacity: 0.6;
+}
+
 /* ---------- Ligne de selection (planification, etc.) ---------- */
 
 .training-row {

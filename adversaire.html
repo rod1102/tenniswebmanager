@@ -511,18 +511,21 @@
             // normal ; un admin voit en plus les controles pour poser/retirer une
             // photo sur la fiche de N'IMPORTE QUEL joueur - seul lui doit pouvoir le
             // faire sur la fiche d'un joueur qui n'est pas le sien (demande explicite
-            // de l'utilisateur 2026-08-22).
+            // de l'utilisateur 2026-08-22). Sans photo perso, une icone generique
+            // (silhouette joueur/joueuse) s'affiche a la place - jamais une case vide
+            // ou un texte "Aucune photo" (demande explicite, 2026-08-22).
+            const iconeGeneriqueAdversaire = data.infos.type === 'joueuse' ? 'icone-joueuse.png' : 'icone-joueur.png';
             const zonePhoto = document.getElementById('adversaire-photo-zone');
             if (typeAdversaire !== 'reel') {
                 zonePhoto.innerHTML = '';
             } else if (!estAdminCourant) {
                 zonePhoto.innerHTML = data.infos.photoAvatar
                     ? `<div class="fiche-adversaire-photo"><img src="${data.infos.photoAvatar}" alt=""></div>`
-                    : '';
+                    : `<div class="fiche-adversaire-photo avatar-generique"><img src="${iconeGeneriqueAdversaire}" alt=""></div>`;
             } else {
                 zonePhoto.innerHTML = `
-                    <div class="fiche-adversaire-photo">
-                        ${data.infos.photoAvatar ? `<img src="${data.infos.photoAvatar}" alt="">` : '<div class="match-hint" style="padding:0;">Aucune photo</div>'}
+                    <div class="fiche-adversaire-photo${data.infos.photoAvatar ? '' : ' avatar-generique'}">
+                        <img src="${data.infos.photoAvatar || iconeGeneriqueAdversaire}" alt="">
                     </div>
                     <div class="avatar-actions">
                         <button type="button" id="admin-avatar-changer-btn">Changer la photo</button>
