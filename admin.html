@@ -42,6 +42,9 @@
                     <div class="planning-alerte-texte" style="color:#D4F000;">Saison en pause — l'avancement automatique ne fera rien tant que la saison n'est pas lancée.</div>
                     <button id="lancer-saison-btn" class="cta cta-primary" style="margin-top:10px;">Lancer la saison</button>
                 </div>
+                <div id="saison-active-badge" style="display:none; margin-top:12px;">
+                    <button id="pauser-saison-btn" class="cta cta-secondary" style="margin-top:10px;">Mettre en pause l'avancement automatique</button>
+                </div>
                 <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
                     <button id="avancer-btn" class="cta cta-primary" style="margin-top:12px;">Faire avancer la semaine</button>
                     <button id="avancer-tour-btn" class="cta cta-secondary" style="margin-top:12px;">Avancer un tour</button>
@@ -115,6 +118,7 @@
                 document.getElementById('prochain-auto-badge').textContent =
                     'Prochain avancement automatique : ' + prochain.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
                 document.getElementById('saison-pause-badge').style.display = data.saisonLancee ? 'none' : 'block';
+                document.getElementById('saison-active-badge').style.display = data.saisonLancee ? 'block' : 'none';
             }
         }
 
@@ -293,6 +297,24 @@
                 return;
             }
             alert('Saison lancée — l\'avancement automatique reprend.');
+            chargerSemaine();
+        });
+
+        document.getElementById('pauser-saison-btn').addEventListener('click', async function () {
+            const confirmation = confirm('Mettre en pause va arrêter l\'avancement automatique (lundi/jeudi 8h et la simulation des tours) jusqu\'à ce que tu relances la saison. Les boutons manuels restent disponibles. Continuer ?');
+            if (!confirmation) return;
+
+            const response = await fetch('/api/admin/pauser-saison', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error);
+                return;
+            }
+            alert('Saison mise en pause — l\'avancement automatique est arrêté.');
             chargerSemaine();
         });
 

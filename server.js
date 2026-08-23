@@ -1702,6 +1702,24 @@ app.post('/api/admin/lancer-saison', (req, res) => {
     }
 });
 
+// Pause manuelle (symetrique de lancer-saison) : meme verrou saison_lancee que
+// celui pose automatiquement a chaque nouvelle Pre-saison - bloque les 2
+// schedulers auto (semaine + tour), jamais les boutons manuels d'avancement
+// (demande explicite de l'utilisateur, 2026-08-23 : jusqu'ici seule la reprise
+// avait un bouton, jamais la mise en pause elle-meme).
+app.post('/api/admin/pauser-saison', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        db.prepare('UPDATE jeu_etat SET saison_lancee = 0 WHERE id = 1').run();
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Route temporaire (2026-08-20) : restaure manuellement le coaching mental perdu
 // d'un joueur bloque a tort par le bug "inscription = engage" (corrige juste
 // avant) - credite le +1 a gagner / +1 a deplacer que la semaine en cours aurait
@@ -3479,6 +3497,17 @@ function matchSansXp(score) {
     return !!score && (score.indexOf('(Abandon)') !== -1 || score.indexOf('Forfait') !== -1);
 }
 
+// Contrairement a l'XP ci-dessus, les points de classement ATP/WTA ne doivent
+// etre mis a zero que pour un vrai FORFAIT (blessure pre-match, le joueur ne s'est
+// jamais presente) - un abandon EN COURS de match (il a reellement joue, mais a du
+// se retirer) reste un tour effectivement dispute et garde donc les points du tour
+// atteint, comme sur le vrai circuit (un retrait mi-match compte, un forfait pur
+// non). Bug corrige le 2026-08-23 : la reutilisation de matchSansXp (qui couvre
+// les deux cas) mettait par erreur aussi les points a zero pour un abandon.
+function matchEstForfait(score) {
+    return !!score && score.indexOf('Forfait') !== -1;
+}
+
 function verserXpTournoi(entrant, nbTours, tourIndex) {
     if (!entrant.est_reel || !entrant.player_id) return;
     const table = XP_TOURNOI[nbTours];
@@ -3579,13 +3608,16 @@ function simulerUnTour(tournoiId) {
         const perdant = vainqueur === j1 ? j2 : j1;
         if (perdant.nom !== 'BYE') {
             const profondeur = Math.round(Math.log2(joueursAvantTour));
-            // Un abandon en cours de match OU un forfait pre-match (les deux dus a une
-            // blessure) n'ouvre jamais droit ni a l'XP de progression, ni aux points de
-            // classement de ce tour - le joueur n'a pas reellement joue ce tour,
-            // contrairement a une elimination normale (demande explicite de
-            // l'utilisateur, 2026-08-21 pour l'XP, 2026-08-22 pour les points).
+            // XP : jamais versee pour un abandon en cours de match NI pour un forfait
+            // pre-match (le joueur n'a pas reellement progresse ce tour dans les 2 cas).
+            // Points de classement : mis a zero UNIQUEMENT pour un forfait (jamais
+            // presente) - un abandon en cours de match a bel et bien ete dispute jusqu'a
+            // l'arret, il garde donc les points du tour atteint, comme sur le vrai
+            // circuit (bug corrige le 2026-08-23, matchSansXp couvrait les 2 a tort pour
+            // les points).
             const estAbandon = matchSansXp(score);
-            const points = estAbandon ? 0 : bareme[Math.min(profondeur, bareme.length - 1)];
+            const estForfait = matchEstForfait(score);
+            const points = estForfait ? 0 : bareme[Math.min(profondeur, bareme.length - 1)];
             db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run(label, points, perdant.id);
             if (!estAbandon) verserXpTournoi(perdant, nbTours, tourIndex);
             deduireEnergieFinTournoi(perdant);
@@ -3685,8 +3717,14 @@ function simulerUnTourPoules(tournoiId) {
     // eliminations directement liees a UN match precis (demies/finale) - pas pour
     // la sortie 3e/4e de poules, decidee sur le classement du groupe plutot que sur
     // un match unique.
-    function eliminer(label, indexPoints, perdant, estAbandon) {
-        const points = estAbandon ? 0 : bareme[Math.min(indexPoints, bareme.length - 1)];
+    // score (optionnel) : XP jamais versee pour un abandon EN COURS de match NI un
+    // forfait pre-match ; points de classement mis a zero UNIQUEMENT pour un
+    // forfait, un abandon garde les points du tour reellement atteint (bug corrige
+    // le 2026-08-23, cf. matchEstForfait plus haut).
+    function eliminer(label, indexPoints, perdant, score) {
+        const estAbandon = matchSansXp(score);
+        const estForfait = matchEstForfait(score);
+        const points = estForfait ? 0 : bareme[Math.min(indexPoints, bareme.length - 1)];
         db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run(label, points, perdant.id);
         if (!estAbandon) verserXpTournoi(perdant, nbTours, tourIndex);
         deduireEnergieFinTournoi(perdant);
@@ -3718,11 +3756,11 @@ function simulerUnTourPoules(tournoiId) {
 
         const sf1 = resoudreMatchAdversaire(tournoi, 'Demi-finale', classementA[0], classementB[1]);
         enregistrerMatchTournoi(tournoiId, 'Demi-finale', 100, classementA[0], classementB[1], sf1.vainqueur, sf1.score, sf1.matchId, sf1.matchIdJ2, sf1.evenements);
-        eliminer('Demi-finale', 2, sf1.vainqueur === classementA[0] ? classementB[1] : classementA[0], matchSansXp(sf1.score));
+        eliminer('Demi-finale', 2, sf1.vainqueur === classementA[0] ? classementB[1] : classementA[0], sf1.score);
 
         const sf2 = resoudreMatchAdversaire(tournoi, 'Demi-finale', classementB[0], classementA[1]);
         enregistrerMatchTournoi(tournoiId, 'Demi-finale', 101, classementB[0], classementA[1], sf2.vainqueur, sf2.score, sf2.matchId, sf2.matchIdJ2, sf2.evenements);
-        eliminer('Demi-finale', 2, sf2.vainqueur === classementB[0] ? classementA[1] : classementB[0], matchSansXp(sf2.score));
+        eliminer('Demi-finale', 2, sf2.vainqueur === classementB[0] ? classementA[1] : classementB[0], sf2.score);
     } else if (tourIndex === 4) {
         // Finale : les 2 seuls joueurs encore en lice.
         const finalistes = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine IS NULL').all(tournoiId);
@@ -3730,7 +3768,7 @@ function simulerUnTourPoules(tournoiId) {
         enregistrerMatchTournoi(tournoiId, 'Finale', 102, finalistes[0], finalistes[1], resultat.vainqueur, resultat.score, resultat.matchId, resultat.matchIdJ2, resultat.evenements);
         const champion = resultat.vainqueur;
         const runnerUp = champion.id === finalistes[0].id ? finalistes[1] : finalistes[0];
-        eliminer('Finale', 1, runnerUp, matchSansXp(resultat.score));
+        eliminer('Finale', 1, runnerUp, resultat.score);
         db.prepare('UPDATE tournoi_joueurs SET tour_elimine = ?, points_gagnes = ? WHERE id = ?').run('Vainqueur', bareme[0], champion.id);
         verserXpTournoi(champion, nbTours, tourIndex);
         deduireEnergieFinTournoi(champion);

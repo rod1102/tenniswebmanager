@@ -536,7 +536,7 @@
                         <div class="xp-pool-title">Mise de points d'énergie (plafond ${plafondMise}, énergie disponible ${data.pointsEnergieDisponibles})</div>
                         <div class="planning-alerte-texte" style="margin-bottom:8px;">S'ajoute au niveau de jeu pendant tout le tournoi, mais définitivement perdue à l'élimination ou à la victoire. ${tournoiDemarre ? 'Le tournoi a déjà commencé, la mise ne peut plus être modifiée.' : 'Modifiable librement jusqu\'au début du tournoi.'}</div>
                         <div class="training-row">
-                            <input type="number" min="0" max="${maxMise}" value="${bloc.energieMiseeActuelle || 0}" class="mise-energie-input" style="width:70px;" ${tournoiDemarre ? 'disabled' : ''}>
+                            <input type="number" min="0" max="${maxMise}" step="1" inputmode="numeric" value="${bloc.energieMiseeActuelle || 0}" class="mise-energie-input" style="width:70px;" ${tournoiDemarre ? 'disabled' : ''}>
                             <button class="cta cta-primary mise-energie-btn" style="padding:10px 16px; font-size:0.8rem;" ${tournoiDemarre ? 'disabled' : ''}>Valider la mise</button>
                         </div>
                     </div>
@@ -577,7 +577,7 @@
                 if (!bloc.verrouille && bloc.plafondMiseEnergie > 0) {
                     panneau.querySelector('.mise-energie-btn').addEventListener('click', async function () {
                         const inputMise = panneau.querySelector('.mise-energie-input');
-                        const energieMisee = Number(inputMise.value) || 0;
+                        const energieMisee = Math.floor(Number(inputMise.value) || 0);
 
                         const responseMise = await fetch('/api/tournois/mise-energie', {
                             method: 'POST',
