@@ -512,6 +512,16 @@
                 return;
             }
 
+            // Un joueur/une joueuse blesse(e) est contraint(e) au forfait pour tous ses
+            // tournois en attente tant qu'il/elle ne s'est pas repose(e) - choisir un
+            // style ou miser de l'energie n'a alors plus aucun sens (bug signale par
+            // l'utilisateur, 2026-08-23 : ces controles restaient actifs et suggeraient
+            // a tort qu'ils servaient encore a quelque chose).
+            if (player.condition === 'blesse') {
+                container.innerHTML = '<div class="match-hint">Votre joueur ou joueuse est blessé(e), il sera donc forfait pour le tournoi prévu la semaine prochaine.</div>';
+                return;
+            }
+
             // Un joueur peut avoir plusieurs tournois "a_venir" en meme temps (celui en
             // cours + le suivant deja tire a S-1) - un panneau independant par tournoi,
             // chacun avec ses propres selecteurs/boutons scopes par tournoi.id pour ne
