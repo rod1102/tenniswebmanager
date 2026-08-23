@@ -3491,11 +3491,17 @@ function resoudreMatchAdversaire(tournoi, label, j1, j2, tourIndex) {
     };
 }
 
-function enregistrerMatchTournoi(tournoiId, label, ordre, j1, j2, vainqueur, score, matchId, matchIdJ2, evenements) {
+// manchePoules (optionnel) : numero du round de poules (1/2/3, cf. SCHEDULE_POULE_4)
+// pour un match "Phase de poules" - sans ca, les 3 rounds partagent le meme
+// numero_tour et un `ordre` remis a 0 a chaque round, donc impossible de les
+// distinguer une fois plusieurs rounds joues (bug signale par l'utilisateur,
+// 2026-08-24 : impossible de voir l'ordre des matchs de poules dans l'onglet
+// Tableau). Toujours null pour les demies/finale (un seul match chacune).
+function enregistrerMatchTournoi(tournoiId, label, ordre, j1, j2, vainqueur, score, matchId, matchIdJ2, evenements, manchePoules) {
     db.prepare(`
-        INSERT INTO tournoi_matchs (tournoi_id, numero_tour, ordre, joueur1_id, joueur2_id, vainqueur_id, score, match_id, match_id_j2, evenements)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(tournoiId, label, ordre, j1.id, j2 ? j2.id : null, vainqueur ? vainqueur.id : null, score || null, matchId || null, matchIdJ2 || null, evenements || null);
+        INSERT INTO tournoi_matchs (tournoi_id, numero_tour, ordre, joueur1_id, joueur2_id, vainqueur_id, score, match_id, match_id_j2, evenements, manche_poules)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(tournoiId, label, ordre, j1.id, j2 ? j2.id : null, vainqueur ? vainqueur.id : null, score || null, matchId || null, matchIdJ2 || null, evenements || null, manchePoules || null);
 }
 
 // XP verse en une fois a l'elimination/victoire, selon le nombre total de tours du
@@ -3777,7 +3783,7 @@ function simulerUnTourPoules(tournoiId) {
                 const j1 = groupe[paire[0]];
                 const j2 = groupe[paire[1]];
                 const resultat = resoudreMatchAdversaire(tournoi, 'Phase de poules', j1, j2);
-                enregistrerMatchTournoi(tournoiId, 'Phase de poules', ordre++, j1, j2, resultat.vainqueur, resultat.score, resultat.matchId, resultat.matchIdJ2, resultat.evenements);
+                enregistrerMatchTournoi(tournoiId, 'Phase de poules', ordre++, j1, j2, resultat.vainqueur, resultat.score, resultat.matchId, resultat.matchIdJ2, resultat.evenements, tourIndex + 1);
             });
         });
 
@@ -4706,6 +4712,52 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
                 .sort(function (a, b) { return (a.rang || Infinity) - (b.rang || Infinity); });
 
             instance = Object.assign({}, instanceRow, { joueurs, enAttente });
+
+            // Format poules (Masters de fin de saison) : le niveau brut reste
+            // confidentiel (efface juste au-dessus pour tout le monde sauf "moi"), donc
+            // le frontend ne peut pas reconstruire lui-meme la repartition en groupes
+            // (basee sur le niveau) ni le classement de poule - on les calcule ici et on
+            // envoie uniquement des noms/victoires/rang, jamais le niveau (demande
+            // explicite de l'utilisateur, 2026-08-24 : les poules etaient invisibles
+            // dans l'onglet Tableau, aussi bien avant que pendant/apres le tournoi).
+            if (instanceRow.format === 'poules') {
+                const groupes = groupesPoules(instanceRow.id);
+                const groupeParId = new Map();
+                groupes.A.forEach(function (j) { groupeParId.set(j.id, 'A'); });
+                groupes.B.forEach(function (j) { groupeParId.set(j.id, 'B'); });
+                joueurs.forEach(function (j) { j.groupe = groupeParId.get(j.id) || null; });
+
+                function pourClientPoules(j) {
+                    return {
+                        id: j.id, nom: j.nom, drapeau: drapeau(j.nationalite),
+                        est_reel: j.est_reel, player_id: j.player_id, rival_id: j.rival_id,
+                        estMoi: !!(j.est_reel && j.player_id === Number(playerId))
+                    };
+                }
+
+                function victoiresParJoueur(groupe) {
+                    const idsGroupe = new Set(groupe.map(function (j) { return j.id; }));
+                    const compte = new Map();
+                    groupe.forEach(function (j) { compte.set(j.id, 0); });
+                    db.prepare("SELECT * FROM tournoi_matchs WHERE tournoi_id = ? AND numero_tour = 'Phase de poules'").all(instanceRow.id)
+                        .filter(function (m) { return idsGroupe.has(m.joueur1_id); })
+                        .forEach(function (m) { if (m.vainqueur_id != null) compte.set(m.vainqueur_id, (compte.get(m.vainqueur_id) || 0) + 1); });
+                    return compte;
+                }
+
+                const victA = victoiresParJoueur(groupes.A);
+                const victB = victoiresParJoueur(groupes.B);
+
+                // Composition FIGEE des groupes (ordre du tirage, jamais re-triee) - sert au
+                // frontend a reconstruire les 3 manches de poules (SCHEDULE_POULE_4) meme
+                // avant qu'elles ne soient jouees. Le classement, lui, evolue avec les
+                // resultats (victoires puis confrontation directe).
+                instance.groupesPoules = { A: groupes.A.map(pourClientPoules), B: groupes.B.map(pourClientPoules) };
+                instance.classementPoules = {
+                    A: classementGroupe(instanceRow.id, groupes.A).map(function (j, i) { return Object.assign(pourClientPoules(j), { rang: i + 1, victoires: victA.get(j.id) || 0 }); }),
+                    B: classementGroupe(instanceRow.id, groupes.B).map(function (j, i) { return Object.assign(pourClientPoules(j), { rang: i + 1, victoires: victB.get(j.id) || 0 }); })
+                };
+            }
 
             const matchs = db.prepare(`
                 SELECT tournoi_matchs.*,

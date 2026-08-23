@@ -460,35 +460,146 @@
                     `;
                 }).join('');
             } else {
-                // Format poules (Masters de fin de saison) : structure differente (pas de
-                // 1/2 puissance de 2 classique), colonnes futures pas encore construites
-                // ici - hors scope de ce correctif.
-                const colonnes = ORDRE_TOURS_MATCHS.filter(function (t) { return parTour[t]; });
-                const dernierTour = colonnes[colonnes.length - 1];
-                const finale = parTour[dernierTour] && parTour[dernierTour][0];
-                vainqueurFinal = finale && finale.vainqueur_nom;
+                // Format poules (Masters de fin de saison) : 2 groupes de 4, connus des le
+                // tirage (instance.groupesPoules, jamais retrie) - les 3 manches de poules
+                // (SCHEDULE_POULE_4, meme repartition que server.js) sont donc affichees
+                // avec les vrais noms des le depart, meme non jouees, comme le 1er tour
+                // d'un tableau classique. Demi-finale/Finale restent "a determiner" tant
+                // qu'elles n'ont pas ete jouees, avec un apercu base sur le classement de
+                // poule EN COURS (demande explicite de l'utilisateur, 2026-08-24 : les
+                // poules etaient invisibles avant/pendant/apres le tournoi).
+                const SCHEDULE_POULE_4_CLIENT = [[[0, 3], [1, 2]], [[0, 2], [3, 1]], [[0, 1], [2, 3]]];
+                const groupes = instance.groupesPoules || { A: [], B: [] };
+                const classA = (instance.classementPoules && instance.classementPoules.A) || [];
+                const classB = (instance.classementPoules && instance.classementPoules.B) || [];
+                const matchsPoules = parTour['Phase de poules'] || [];
 
-                colonnesHtml = colonnes.map(function (tour) {
+                function trouverMatchJoue(manche, id1, id2) {
+                    return matchsPoules.find(function (m) {
+                        return m.manche_poules === manche && ((m.joueur1_id === id1 && m.joueur2_id === id2) || (m.joueur1_id === id2 && m.joueur2_id === id1));
+                    });
+                }
+
+                function carteMatchPoule(j1, j2, manche) {
+                    if (!j1 || !j2) return '';
+                    const joue = trouverMatchJoue(manche, j1.id, j2.id);
+                    const ligne1 = joue ? nomAffiche(joue, joue.joueur1_id === j1.id ? 1 : 2) : nomJoueurCase(j1);
+                    const ligne2 = joue ? nomAffiche(joue, joue.joueur1_id === j1.id ? 2 : 1) : nomJoueurCase(j2);
+                    return `
+                        <div class="bracket-match-wrap">
+                            <div class="bracket-match">
+                                <div class="bracket-match-row">${ligne1}</div>
+                                <div class="bracket-match-row">${ligne2}</div>
+                                ${joue && joue.score ? `<div class="bracket-score">${joue.score}</div>` : ''}
+                            </div>
+                        </div>
+                    `;
+                }
+
+                const manchesHtml = [1, 2, 3].map(function (manche) {
+                    const pairesA = SCHEDULE_POULE_4_CLIENT[manche - 1].map(function (p) { return [groupes.A[p[0]], groupes.A[p[1]]]; });
+                    const pairesB = SCHEDULE_POULE_4_CLIENT[manche - 1].map(function (p) { return [groupes.B[p[0]], groupes.B[p[1]]]; });
                     return `
                         <div class="bracket-round">
-                            <div class="bracket-round-title">${tour}</div>
-                            ${parTour[tour].map(function (m) {
-                                return `
-                                    <div class="bracket-match-wrap">
-                                        <div class="bracket-match">
-                                            <div class="bracket-match-row">${nomAffiche(m, 1)}</div>
-                                            <div class="bracket-match-row">${nomAffiche(m, 2)}</div>
-                                            ${m.score ? `<div class="bracket-score">${m.score}</div>` : ''}
-                                        </div>
-                                    </div>
-                                `;
-                            }).join('')}
+                            <div class="bracket-round-title">Phase de poules (match ${manche})</div>
+                            <div class="poule-groupe-label">Groupe A</div>
+                            ${pairesA.map(function (pr) { return carteMatchPoule(pr[0], pr[1], manche); }).join('')}
+                            <div class="poule-groupe-label">Groupe B</div>
+                            ${pairesB.map(function (pr) { return carteMatchPoule(pr[0], pr[1], manche); }).join('')}
                         </div>
                     `;
                 }).join('');
+
+                function nomProvisoire(entry) {
+                    return entry ? flagImg(entry.drapeau) + ' ' + formaterNomComplet(entry.nom) : '?';
+                }
+
+                const demiMatchs = (parTour['Demi-finale'] || []).slice().sort(function (a, b) { return a.ordre - b.ordre; });
+                const finaleMatch = parTour['Finale'] && parTour['Finale'][0];
+
+                function celluleDemi(m, labelPrevu) {
+                    if (m) {
+                        return `
+                            <div class="bracket-match-wrap">
+                                <div class="bracket-match">
+                                    <div class="bracket-match-row">${nomAffiche(m, 1)}</div>
+                                    <div class="bracket-match-row">${nomAffiche(m, 2)}</div>
+                                    ${m.score ? `<div class="bracket-score">${m.score}</div>` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }
+                    return `
+                        <div class="bracket-match-wrap">
+                            <div class="bracket-match">
+                                <div class="bracket-match-row bracket-tbd-label">${labelPrevu[0]}</div>
+                                <div class="bracket-match-row bracket-tbd-label">${labelPrevu[1]}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                const demiHtml = `
+                    <div class="bracket-round">
+                        <div class="bracket-round-title">Demi-finale</div>
+                        ${celluleDemi(demiMatchs[0], ['1er Gr. A : ' + nomProvisoire(classA[0]), '2e Gr. B : ' + nomProvisoire(classB[1])])}
+                        ${celluleDemi(demiMatchs[1], ['1er Gr. B : ' + nomProvisoire(classB[0]), '2e Gr. A : ' + nomProvisoire(classA[1])])}
+                    </div>
+                `;
+
+                const finaleHtml = `
+                    <div class="bracket-round">
+                        <div class="bracket-round-title">Finale</div>
+                        ${finaleMatch ? `
+                            <div class="bracket-match-wrap">
+                                <div class="bracket-match">
+                                    <div class="bracket-match-row">${nomAffiche(finaleMatch, 1)}</div>
+                                    <div class="bracket-match-row">${nomAffiche(finaleMatch, 2)}</div>
+                                    ${finaleMatch.score ? `<div class="bracket-score">${finaleMatch.score}</div>` : ''}
+                                </div>
+                            </div>
+                        ` : `
+                            <div class="bracket-match-wrap">
+                                <div class="bracket-match">
+                                    <div class="bracket-match-row bracket-tbd-label">Vainqueur demi 1</div>
+                                    <div class="bracket-match-row bracket-tbd-label">Vainqueur demi 2</div>
+                                </div>
+                            </div>
+                        `}
+                    </div>
+                `;
+
+                vainqueurFinal = finaleMatch && finaleMatch.vainqueur_nom;
+                colonnesHtml = manchesHtml + demiHtml + finaleHtml;
             }
 
+            function tableauClassementGroupe(titre, lignes) {
+                return `
+                    <div class="poule-classement">
+                        <div class="stats-header">${titre}</div>
+                        <table class="points poule-classement-table">
+                            <thead><tr><th>#</th><th>Joueur</th><th>V</th></tr></thead>
+                            <tbody>
+                                ${lignes.map(function (l) {
+                                    const nomTxt = flagImg(l.drapeau) + ' ' + formaterNomComplet(l.nom) + (l.estMoi ? ' (Toi)' : '');
+                                    const nomHtml = lienAdversaire(nomTxt, l.est_reel, l.player_id, l.rival_id);
+                                    return `<tr${l.estMoi ? ' class="poule-ligne-moi"' : ''}><td>${l.rang}</td><td>${nomHtml}</td><td>${l.victoires}</td></tr>`;
+                                }).join('')}
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+
+            const classementsPoulesHtml = (!estElimination && instance.classementPoules) ? `
+                <div class="poules-classements">
+                    ${tableauClassementGroupe('Groupe A', instance.classementPoules.A)}
+                    ${tableauClassementGroupe('Groupe B', instance.classementPoules.B)}
+                </div>
+            ` : '';
+
             panneau.innerHTML = `
+                ${classementsPoulesHtml}
                 <div class="bracket">
                     ${colonnesHtml}
                     <div class="bracket-round bracket-round-vainqueur">

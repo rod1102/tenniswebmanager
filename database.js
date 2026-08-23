@@ -637,7 +637,8 @@ const migrations = [
     "ALTER TABLE users ADD COLUMN dernier_refus_motif TEXT",
     "ALTER TABLE users ADD COLUMN dernier_refus_date TEXT",
     "ALTER TABLE players ADD COLUMN xp_repartition_en_attente TEXT",
-    "ALTER TABLE players ADD COLUMN photo_avatar TEXT"
+    "ALTER TABLE players ADD COLUMN photo_avatar TEXT",
+    "ALTER TABLE tournoi_matchs ADD COLUMN manche_poules INTEGER"
 ];
 
 migrations.forEach(function (sql) {

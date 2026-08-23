@@ -2160,6 +2160,62 @@ table.points td.pts {
     background: rgba(212, 240, 0, 0.1);
 }
 
+.bracket-tbd-label {
+    color: #57697A;
+    font-style: italic;
+    justify-content: flex-start;
+}
+
+/* ---------- Poules (Masters de fin de saison) ---------- */
+
+.poule-groupe-label {
+    text-align: center;
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #57697A;
+    padding: 8px 0 2px;
+}
+
+.poules-classements {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.poule-classement-table th {
+    text-align: left;
+    padding: 6px 8px 8px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #8B98A5;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.poule-classement-table td {
+    padding: 6px 8px;
+}
+
+.poule-classement-table td:first-child,
+.poule-classement-table th:first-child {
+    width: 24px;
+    text-align: center;
+}
+
+.poule-classement-table td:last-child,
+.poule-classement-table th:last-child {
+    text-align: right;
+}
+
+.poule-ligne-moi td {
+    color: #D4F000;
+    font-weight: 700;
+}
+
 /* ---------- Responsive ---------- */
 
 @media (max-width: 600px) {
