@@ -45,6 +45,7 @@
                 <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
                     <button id="avancer-btn" class="cta cta-primary" style="margin-top:12px;">Faire avancer la semaine</button>
                     <button id="avancer-tour-btn" class="cta cta-secondary" style="margin-top:12px;">Avancer un tour</button>
+                    <button id="avancer-et-jouer-btn" class="cta cta-secondary" style="margin-top:12px;">Avancer la semaine + jouer tous les matchs de cette semaine</button>
                 </div>
             </div>
 
@@ -257,6 +258,24 @@
                 return;
             }
             alert(data.quelqueChoseSimule ? 'Un tour a été simulé pour chaque tournoi en cours.' : 'Rien à simuler pour le moment (aucun tournoi en cours, ou tous déjà à jour).');
+        });
+
+        document.getElementById('avancer-et-jouer-btn').addEventListener('click', async function () {
+            const confirmation = confirm('Faire avancer la semaine, puis jouer immédiatement tous les tours dus cette semaine (tournois + Coupe Davis/Fed Cup), sans attendre les horaires réels. Continuer ?');
+            if (!confirmation) return;
+
+            const response = await fetch('/api/admin/avancer-semaine-et-jouer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId })
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                alert(data.error);
+                return;
+            }
+            alert('Semaine avancée (nouvelle semaine : ' + data.nouvelleSemaine + '), ' + data.toursJoues + ' tour(s) joué(s) pour cette semaine.');
+            chargerSemaine();
         });
 
         document.getElementById('lancer-saison-btn').addEventListener('click', async function () {

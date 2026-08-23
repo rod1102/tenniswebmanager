@@ -1653,6 +1653,33 @@ app.post('/api/admin/avancer-tour', (req, res) => {
     }
 });
 
+// Combine avancer-semaine + avancer-tour en boucle : joue tous les tours de tous
+// les tournois/rencontres de Coupe Davis dus pour la semaine qui vient de
+// commencer, sans attendre les creneaux horaires reels. S'arrete naturellement
+// des qu'un tournoi/tie touche a une semaine ingame pas encore commencee (meme
+// verrou que "Avancer un tour" seul, executerAvancementTour/Coupe) - jamais de
+// franchissement vers la semaine suivante. Plafond de securite (50 iterations)
+// tres au-dela du plus grand tableau possible (7 tours), simple garde-fou.
+app.post('/api/admin/avancer-semaine-et-jouer', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const nouvelleSemaine = executerAvancementSemaine();
+        let toursJoues = 0;
+        for (let i = 0; i < 50; i++) {
+            const simuleTournoi = executerAvancementTour(true);
+            const simuleCoupe = executerAvancementTourCoupe(true);
+            if (!simuleTournoi && !simuleCoupe) break;
+            toursJoues++;
+        }
+        res.json({ success: true, nouvelleSemaine, toursJoues });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Verrou manuel : tant que la saison n'est pas "lancee", les 2 schedulers
 // automatiques (verifierAvancementAuto/verifierAvancementTourAuto) ne font rien,
 // meme si l'horaire reel est depasse - permet de rester bloque en Pre-saison
