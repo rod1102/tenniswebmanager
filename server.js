@@ -3294,7 +3294,10 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
             'adversaire', 'Forfait (blessure)', Math.round(niveauReel_normal), Math.round(lambda.niveau),
             JSON.stringify(evenementForfait), tournoi.id, label
         );
-        return { vainqueur: lambda, score: 'Forfait (blessure)', matchId: insertionForfait.lastInsertRowid, matchIdJ2: null };
+        // Score cote tournoi_matchs (bracket) nomme la personne qui forfait, meme regle
+        // que jouerMatchReelVsReel - la ligne matchs ci-dessus (perspective du coach
+        // concerne) reste inchangee, deja sans ambiguite pour lui.
+        return { vainqueur: lambda, score: 'Forfait de ' + player.prenom + ' ' + player.nom + ' (blessure)', matchId: insertionForfait.lastInsertRowid, matchIdJ2: null };
     }
 
     const entreeCalendrier = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
@@ -3395,7 +3398,12 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
         ).lastInsertRowid;
 
         return {
-            vainqueur: gagnantEstJ1 ? j1 : j2, score: 'Forfait (blessure)',
+            // Score cote tournoi_matchs (bracket, visible de TOUS les coachs) : nomme la
+            // personne qui forfait, contrairement aux 2 lignes matchs ci-dessus (perspective
+            // propre a chaque coach, deja sans ambiguite pour eux) - sinon impossible de
+            // savoir qui des deux a declare forfait en consultant juste le tableau (bug
+            // signale par l'utilisateur, 2026-08-24).
+            vainqueur: gagnantEstJ1 ? j1 : j2, score: 'Forfait de ' + perdant.prenom + ' ' + perdant.nom + ' (blessure)',
             matchId: gagnantEstJ1 ? matchIdGagnant : matchIdPerdant,
             matchIdJ2: gagnantEstJ1 ? matchIdPerdant : matchIdGagnant
         };
@@ -3713,34 +3721,110 @@ function groupesPoules(tournoiId) {
     };
 }
 
-// Classement d'un groupe (victoires puis confrontation directe puis niveau),
-// reconstruit a partir des tournoi_matchs "Phase de poules" deja joues - permet de
-// rappeler cette fonction a n'importe quel moment (demi-finales, finale) sans avoir
-// besoin de stocker le classement entre deux appels de simulerUnTourPoules.
-function classementGroupe(tournoiId, groupe) {
+// Statistiques brutes d'un groupe de poules a partir des tournoi_matchs "Phase de
+// poules" deja joues : victoires, matchs REELLEMENT disputes (un forfait n'en
+// compte aucun), sets/jeux gagnes-perdus. Le score stocke est toujours "A-B" ou A
+// est le joueur REEL si un seul des deux l'est (jouerMatchTournoi simule toujours
+// le joueur reel cote A, meme positionne joueur2 du match), sinon A = joueur1
+// (reel-vs-reel ou lambda-vs-lambda) - d'ou le drapeau `inverse` ci-dessous, sans
+// quoi les jeux/sets de la moitie des matchs se retrouveraient attribues au
+// mauvais joueur.
+function statsGroupePoules(tournoiId, groupe) {
     const idsGroupe = new Set(groupe.map(function (j) { return j.id; }));
+    const estReelParId = new Map(groupe.map(function (j) { return [j.id, !!j.est_reel]; }));
     const matchs = db.prepare("SELECT * FROM tournoi_matchs WHERE tournoi_id = ? AND numero_tour = 'Phase de poules'").all(tournoiId)
         .filter(function (m) { return idsGroupe.has(m.joueur1_id); });
 
-    const victoires = new Map();
+    const stats = new Map();
+    groupe.forEach(function (j) { stats.set(j.id, { victoires: 0, matchsJoues: 0, setsGagnes: 0, setsPerdus: 0, jeuxGagnes: 0, jeuxPerdus: 0 }); });
     const faceAFace = new Map();
-    groupe.forEach(function (j) { victoires.set(j.id, 0); });
+
     matchs.forEach(function (m) {
         if (m.vainqueur_id == null) return;
-        victoires.set(m.vainqueur_id, (victoires.get(m.vainqueur_id) || 0) + 1);
+        stats.get(m.vainqueur_id).victoires++;
         faceAFace.set(m.joueur1_id + '-' + m.joueur2_id, m.vainqueur_id);
         faceAFace.set(m.joueur2_id + '-' + m.joueur1_id, m.vainqueur_id);
+
+        if (matchEstForfait(m.score)) return; // aucun jeu/set reellement dispute
+
+        stats.get(m.joueur1_id).matchsJoues++;
+        stats.get(m.joueur2_id).matchsJoues++;
+
+        const inverse = !estReelParId.get(m.joueur1_id) && estReelParId.get(m.joueur2_id);
+        ((m.score || '').match(/(\d+)-(\d+)/g) || []).forEach(function (manche) {
+            const parts = manche.split('-').map(Number);
+            let a = parts[0], b = parts[1];
+            if (inverse) { const t = a; a = b; b = t; }
+            stats.get(m.joueur1_id).jeuxGagnes += a;
+            stats.get(m.joueur1_id).jeuxPerdus += b;
+            stats.get(m.joueur2_id).jeuxGagnes += b;
+            stats.get(m.joueur2_id).jeuxPerdus += a;
+            if (a > b) { stats.get(m.joueur1_id).setsGagnes++; stats.get(m.joueur2_id).setsPerdus++; }
+            else if (b > a) { stats.get(m.joueur2_id).setsGagnes++; stats.get(m.joueur1_id).setsPerdus++; }
+        });
     });
 
-    // (approximation : le vrai bareme ATP/WTA departage aussi par % de sets/jeux gagnes, non suivi ici).
-    return groupe.slice().sort(function (a, b) {
-        const diff = (victoires.get(b.id) || 0) - (victoires.get(a.id) || 0);
-        if (diff !== 0) return diff;
-        const confrontation = faceAFace.get(a.id + '-' + b.id);
-        if (confrontation === a.id) return -1;
-        if (confrontation === b.id) return 1;
-        return b.niveau - a.niveau;
+    return { stats, faceAFace };
+}
+
+// Classement d'un groupe de poules (Masters de fin de saison), selon l'ordre
+// officiel ATP/WTA Finals 2026 fourni explicitement par l'utilisateur (2026-08-24) :
+// 1) victoires, 2) matchs reellement disputes (utile en cas d'abandon/forfait en
+// cours de poule), 3) si EXACTEMENT 2 sont encore a egalite : confrontation
+// directe, 4) si 3 (ou plus) : % de sets gagnes, puis % de jeux gagnes, puis
+// classement Live. Reconstruit a partir des tournoi_matchs "Phase de poules" deja
+// joues - permet de rappeler cette fonction a n'importe quel moment (demi-finales,
+// finale) sans avoir besoin de stocker le classement entre deux appels de
+// simulerUnTourPoules.
+function classementGroupe(tournoiId, groupe) {
+    const tournoi = db.prepare('SELECT circuit FROM tournois WHERE id = ?').get(tournoiId);
+    const { stats, faceAFace } = statsGroupePoules(tournoiId, groupe);
+    const rangs = calculerRangsLiveGlobal(tournoi.circuit);
+    function rangDe(j) {
+        if (j.rival_id) return rangs.get('rival:' + j.rival_id) || Infinity;
+        if (j.est_reel) return rangs.get('joueur:' + j.player_id) || Infinity;
+        return Infinity;
+    }
+
+    const tries = groupe.slice().sort(function (a, b) {
+        const sa = stats.get(a.id), sb = stats.get(b.id);
+        if (sb.victoires !== sa.victoires) return sb.victoires - sa.victoires;
+        return sb.matchsJoues - sa.matchsJoues;
     });
+
+    const resultat = [];
+    let i = 0;
+    while (i < tries.length) {
+        let j = i + 1;
+        while (j < tries.length) {
+            const sa = stats.get(tries[i].id), sb = stats.get(tries[j].id);
+            if (sa.victoires !== sb.victoires || sa.matchsJoues !== sb.matchsJoues) break;
+            j++;
+        }
+        const exAequo = tries.slice(i, j);
+        if (exAequo.length === 2) {
+            const gagnant = faceAFace.get(exAequo[0].id + '-' + exAequo[1].id);
+            if (gagnant === exAequo[1].id) exAequo.reverse();
+        } else if (exAequo.length > 2) {
+            exAequo.sort(function (a, b) {
+                const sa = stats.get(a.id), sb = stats.get(b.id);
+                const totalSetsA = sa.setsGagnes + sa.setsPerdus, totalSetsB = sb.setsGagnes + sb.setsPerdus;
+                const pctSetsA = totalSetsA > 0 ? sa.setsGagnes / totalSetsA : 0;
+                const pctSetsB = totalSetsB > 0 ? sb.setsGagnes / totalSetsB : 0;
+                if (pctSetsB !== pctSetsA) return pctSetsB - pctSetsA;
+                const totalJeuxA = sa.jeuxGagnes + sa.jeuxPerdus, totalJeuxB = sb.jeuxGagnes + sb.jeuxPerdus;
+                const pctJeuxA = totalJeuxA > 0 ? sa.jeuxGagnes / totalJeuxA : 0;
+                const pctJeuxB = totalJeuxB > 0 ? sb.jeuxGagnes / totalJeuxB : 0;
+                if (pctJeuxB !== pctJeuxA) return pctJeuxB - pctJeuxA;
+                const rangA = rangDe(a), rangB = rangDe(b);
+                if (rangA !== rangB) return rangA - rangB;
+                return b.niveau - a.niveau; // filet de securite ultime, cas non prevu par la regle officielle
+            });
+        }
+        resultat.push.apply(resultat, exAequo);
+        i = j;
+    }
+    return resultat;
 }
 
 // Simule UNE SEULE etape des 5 que compte le format poules (Masters de fin de
@@ -4735,28 +4819,27 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
                     };
                 }
 
-                function victoiresParJoueur(groupe) {
-                    const idsGroupe = new Set(groupe.map(function (j) { return j.id; }));
-                    const compte = new Map();
-                    groupe.forEach(function (j) { compte.set(j.id, 0); });
-                    db.prepare("SELECT * FROM tournoi_matchs WHERE tournoi_id = ? AND numero_tour = 'Phase de poules'").all(instanceRow.id)
-                        .filter(function (m) { return idsGroupe.has(m.joueur1_id); })
-                        .forEach(function (m) { if (m.vainqueur_id != null) compte.set(m.vainqueur_id, (compte.get(m.vainqueur_id) || 0) + 1); });
-                    return compte;
+                // % de sets gagnes affiche a cote des victoires (demande explicite de
+                // l'utilisateur, 2026-08-24) - c'est aussi le 4e critere de departage
+                // officiel ATP/WTA Finals utilise par classementGroupe, cf. statsGroupePoules.
+                function pourStandings(groupe) {
+                    const stats = statsGroupePoules(instanceRow.id, groupe).stats;
+                    return classementGroupe(instanceRow.id, groupe).map(function (j, i) {
+                        const s = stats.get(j.id);
+                        const totalSets = s.setsGagnes + s.setsPerdus;
+                        return Object.assign(pourClientPoules(j), {
+                            rang: i + 1, victoires: s.victoires,
+                            pctSets: totalSets > 0 ? Math.round((s.setsGagnes / totalSets) * 100) : null
+                        });
+                    });
                 }
-
-                const victA = victoiresParJoueur(groupes.A);
-                const victB = victoiresParJoueur(groupes.B);
 
                 // Composition FIGEE des groupes (ordre du tirage, jamais re-triee) - sert au
                 // frontend a reconstruire les 3 manches de poules (SCHEDULE_POULE_4) meme
                 // avant qu'elles ne soient jouees. Le classement, lui, evolue avec les
-                // resultats (victoires puis confrontation directe).
+                // resultats (regle officielle, cf. classementGroupe).
                 instance.groupesPoules = { A: groupes.A.map(pourClientPoules), B: groupes.B.map(pourClientPoules) };
-                instance.classementPoules = {
-                    A: classementGroupe(instanceRow.id, groupes.A).map(function (j, i) { return Object.assign(pourClientPoules(j), { rang: i + 1, victoires: victA.get(j.id) || 0 }); }),
-                    B: classementGroupe(instanceRow.id, groupes.B).map(function (j, i) { return Object.assign(pourClientPoules(j), { rang: i + 1, victoires: victB.get(j.id) || 0 }); })
-                };
+                instance.classementPoules = { A: pourStandings(groupes.A), B: pourStandings(groupes.B) };
             }
 
             const matchs = db.prepare(`

@@ -2206,8 +2206,10 @@ table.points td.pts {
     text-align: center;
 }
 
-.poule-classement-table td:last-child,
-.poule-classement-table th:last-child {
+.poule-classement-table td:nth-child(3),
+.poule-classement-table th:nth-child(3),
+.poule-classement-table td:nth-child(4),
+.poule-classement-table th:nth-child(4) {
     text-align: right;
 }
 

@@ -474,15 +474,22 @@
                 const classB = (instance.classementPoules && instance.classementPoules.B) || [];
                 const matchsPoules = parTour['Phase de poules'] || [];
 
-                function trouverMatchJoue(manche, id1, id2) {
+                // Ne filtre PAS sur manche_poules : les tournois deja joues avant l'ajout
+                // de cette colonne (2026-08-24) l'ont a null pour tous leurs matchs de
+                // poules deja enregistres, donc un filtre strict ne trouvait jamais rien et
+                // le score n'apparaissait jamais (bug signale par l'utilisateur). Inutile de
+                // toute facon : avec 4 joueurs sur 3 manches (round-robin complet), une
+                // paire donnee ne se rencontre qu'UNE seule fois dans toute la phase de
+                // poules, donc la retrouver par les 2 identifiants suffit sans ambiguite.
+                function trouverMatchJoue(id1, id2) {
                     return matchsPoules.find(function (m) {
-                        return m.manche_poules === manche && ((m.joueur1_id === id1 && m.joueur2_id === id2) || (m.joueur1_id === id2 && m.joueur2_id === id1));
+                        return (m.joueur1_id === id1 && m.joueur2_id === id2) || (m.joueur1_id === id2 && m.joueur2_id === id1);
                     });
                 }
 
-                function carteMatchPoule(j1, j2, manche) {
+                function carteMatchPoule(j1, j2) {
                     if (!j1 || !j2) return '';
-                    const joue = trouverMatchJoue(manche, j1.id, j2.id);
+                    const joue = trouverMatchJoue(j1.id, j2.id);
                     const ligne1 = joue ? nomAffiche(joue, joue.joueur1_id === j1.id ? 1 : 2) : nomJoueurCase(j1);
                     const ligne2 = joue ? nomAffiche(joue, joue.joueur1_id === j1.id ? 2 : 1) : nomJoueurCase(j2);
                     return `
@@ -503,9 +510,9 @@
                         <div class="bracket-round">
                             <div class="bracket-round-title">Phase de poules (match ${manche})</div>
                             <div class="poule-groupe-label">Groupe A</div>
-                            ${pairesA.map(function (pr) { return carteMatchPoule(pr[0], pr[1], manche); }).join('')}
+                            ${pairesA.map(function (pr) { return carteMatchPoule(pr[0], pr[1]); }).join('')}
                             <div class="poule-groupe-label">Groupe B</div>
-                            ${pairesB.map(function (pr) { return carteMatchPoule(pr[0], pr[1], manche); }).join('')}
+                            ${pairesB.map(function (pr) { return carteMatchPoule(pr[0], pr[1]); }).join('')}
                         </div>
                     `;
                 }).join('');
@@ -578,12 +585,13 @@
                     <div class="poule-classement">
                         <div class="stats-header">${titre}</div>
                         <table class="points poule-classement-table">
-                            <thead><tr><th>#</th><th>Joueur</th><th>V</th></tr></thead>
+                            <thead><tr><th>#</th><th>Joueur</th><th>V</th><th>% Sets</th></tr></thead>
                             <tbody>
                                 ${lignes.map(function (l) {
                                     const nomTxt = flagImg(l.drapeau) + ' ' + formaterNomComplet(l.nom) + (l.estMoi ? ' (Toi)' : '');
                                     const nomHtml = lienAdversaire(nomTxt, l.est_reel, l.player_id, l.rival_id);
-                                    return `<tr${l.estMoi ? ' class="poule-ligne-moi"' : ''}><td>${l.rang}</td><td>${nomHtml}</td><td>${l.victoires}</td></tr>`;
+                                    const pctTxt = l.pctSets === null || l.pctSets === undefined ? '—' : l.pctSets + '%';
+                                    return `<tr${l.estMoi ? ' class="poule-ligne-moi"' : ''}><td>${l.rang}</td><td>${nomHtml}</td><td>${l.victoires}</td><td>${pctTxt}</td></tr>`;
                                 }).join('')}
                             </tbody>
                         </table>
