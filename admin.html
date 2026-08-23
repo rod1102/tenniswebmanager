@@ -46,18 +46,6 @@
                     <button id="avancer-btn" class="cta cta-primary" style="margin-top:12px;">Faire avancer la semaine</button>
                     <button id="avancer-tour-btn" class="cta cta-secondary" style="margin-top:12px;">Avancer un tour</button>
                 </div>
-                <div style="margin-top:24px; padding-top:20px; border-top:1px solid rgba(255,255,255,0.1);">
-                    <button id="reset-saison-48-btn" class="cta" style="background:#B00020; color:#fff;">Réinitialiser la partie (passage à 48 semaines)</button>
-                    <p class="match-hint" style="max-width:480px; margin:8px auto 0;">Action temporaire, à utiliser une seule fois : efface tous les tournois/classements/Coupe Davis en cours et redémarre une saison propre à la semaine 1. Les comptes et personnages (compétences, dispositions) sont conservés.</p>
-                </div>
-                <div style="margin-top:16px;">
-                    <button id="corriger-energie-btn" class="cta cta-secondary">Corriger l'énergie à 50 (bug du reset)</button>
-                    <p class="match-hint" style="max-width:480px; margin:8px auto 0;">Action temporaire, à utiliser une seule fois si tu as déjà cliqué sur "Réinitialiser la partie" ci-dessus avant cette correction : remet à 50 l'énergie des joueurs que le reset avait mise à 0 par erreur.</p>
-                </div>
-                <div style="margin-top:16px;">
-                    <button id="nettoyer-journal-btn" class="cta cta-secondary">Nettoyer le journal périmé (passage à 48 semaines)</button>
-                    <p class="match-hint" style="max-width:480px; margin:8px auto 0;">Action temporaire : efface uniquement les lignes du journal hebdomadaire devenues incohérentes après le passage à 48 semaines (ex. "Tournoi : X" affiché sur une semaine qui n'est plus un tournoi). Ne touche à rien d'autre.</p>
-                </div>
             </div>
 
             <h1 class="dashboard-title" style="font-size:1.8rem;">Inscriptions en attente</h1>
@@ -287,54 +275,6 @@
             }
             alert('Saison lancée — l\'avancement automatique reprend.');
             chargerSemaine();
-        });
-
-        document.getElementById('reset-saison-48-btn').addEventListener('click', async function () {
-            const c1 = confirm('Ceci efface DEFINITIVEMENT tous les tournois, classements et rencontres de Coupe Davis/Fed Cup en cours, et remet la partie a la semaine 1 (Pre-saison). Les comptes et personnages sont conserves. Continuer ?');
-            if (!c1) return;
-            const c2 = confirm('Derniere confirmation : cette action est irreversible. Vraiment reinitialiser la partie ?');
-            if (!c2) return;
-
-            const response = await fetch('/api/admin/reset-saison-48-semaines', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ adminId })
-            });
-            const data = await response.json();
-            if (!response.ok) {
-                alert(data.error);
-                return;
-            }
-            alert('Partie reinitialisee. Nouvelle saison a 48 semaines, semaine 1 (Pre-saison).');
-            chargerSemaine();
-        });
-
-        document.getElementById('corriger-energie-btn').addEventListener('click', async function () {
-            const response = await fetch('/api/admin/corriger-energie-reset', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ adminId })
-            });
-            const data = await response.json();
-            if (!response.ok) {
-                alert(data.error);
-                return;
-            }
-            alert(data.joueursCorriges + ' joueur(s) corrige(s) a 50 points d energie.');
-        });
-
-        document.getElementById('nettoyer-journal-btn').addEventListener('click', async function () {
-            const response = await fetch('/api/admin/nettoyer-journal-perime', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ adminId })
-            });
-            const data = await response.json();
-            if (!response.ok) {
-                alert(data.error);
-                return;
-            }
-            alert(data.lignesSupprimees + ' ligne(s) de journal perimee(s) supprimee(s).');
         });
 
         document.getElementById('nav-toggle').addEventListener('click', function (e) {

@@ -1675,69 +1675,6 @@ app.post('/api/admin/lancer-saison', (req, res) => {
     }
 });
 
-// Route temporaire (2026-08-20) : bascule LONGUEUR_SAISON de 54 a 50 semaines
-// (52->48 semaines de tournois) casse l'alignement de tout ce qui a deja ete cree
-// sous l'ancien calcul - remise a zero complete de la partie en cours pour
-// redemarrer une saison propre sous le nouveau calcul. Comptes et personnages
-// (competences, dispositions placees) conserves ; tout ce qui depend du cycle
-// hebdomadaire/saisonnier est remis a l'etat "sortie de creation".
-app.post('/api/admin/reset-saison-48-semaines', (req, res) => {
-    try {
-        if (!estAdmin(req.userId)) {
-            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
-        }
-        const reinitialiser = db.transaction(function () {
-            [
-                'tournoi_matchs', 'tournoi_joueurs', 'tournois', 'matchs', 'classement_historique',
-                'plannings', 'journal_semaine_joueur', 'semaines_reelles',
-                'coupe_rubbers', 'coupe_composition', 'coupe_styles', 'coupe_equipes',
-                'coupe_capitaines', 'coupe_candidatures', 'coupe_votes', 'coupe_groupe_mondial'
-            ].forEach(function (table) {
-                db.prepare('DELETE FROM ' + table).run();
-            });
-
-            db.prepare(`
-                UPDATE players SET
-                    usure = 0, points_energie = 50, points_experience = 0,
-                    surface_dur_automatismes = 0, surface_terre_automatismes = 0, surface_herbe_automatismes = 0,
-                    mental_max = 100, mental_courant = 100, forme = 100,
-                    points_dispositions_a_gagner = 0, points_dispositions_a_retirer = 0,
-                    points_dispositions_a_deplacer = 0, points_competences_a_repartir = 0,
-                    cap_service = 0, cap_retour = 0, cap_coup_droit_revers = 0, cap_effet = 0,
-                    cap_volee = 0, cap_deplacement = 0, cap_puissance = 0, cap_resistance = 0
-                WHERE statut = 'valide'
-            `).run();
-
-            db.prepare('UPDATE jeu_etat SET semaine_actuelle = 1, saison_offset = 0, saison_lancee = 0 WHERE id = 1').run();
-        });
-        reinitialiser();
-        res.json({ success: true });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
-// Route temporaire (2026-08-20) : correction ponctuelle d'un bug de la route
-// reset-saison-48-semaines ci-dessus, qui remettait points_energie a 0 au lieu de
-// 50 (valeur de sortie de creation, cf. database.js). Ne touche que les joueurs
-// dont l'energie vaut encore exactement 0 - sans risque une fois la saison
-// relancee, une vraie partie de plusieurs semaines pourrait legitimement amener un
-// joueur a 0 (mises/participations), donc a n'utiliser qu'une seule fois juste
-// apres la reinitialisation.
-app.post('/api/admin/corriger-energie-reset', (req, res) => {
-    try {
-        if (!estAdmin(req.userId)) {
-            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
-        }
-        const info = db.prepare("UPDATE players SET points_energie = 50 WHERE statut = 'valide' AND points_energie = 0").run();
-        res.json({ success: true, joueursCorriges: info.changes });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
 // Route temporaire (2026-08-20) : restaure manuellement le coaching mental perdu
 // d'un joueur bloque a tort par le bug "inscription = engage" (corrige juste
 // avant) - credite le +1 a gagner / +1 a deplacer que la semaine en cours aurait
@@ -1759,35 +1696,6 @@ app.post('/api/admin/restaurer-coaching-mental/:playerId', (req, res) => {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
         res.json({ success: true });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
-// Route temporaire (2026-08-20) : nettoie les lignes de journal_semaine_joueur
-// devenues incoherentes suite au changement de LONGUEUR_SAISON (54 -> 48
-// semaines) - une ligne ecrite quand une semaine donnee etait encore un tournoi
-// (ex. "Tournoi : Open d'Australie") peut se retrouver, sous le nouveau calcul,
-// a une semaine qui n'a plus rien a voir avec ce tournoi (semaine redevenue
-// Pre-saison/Semaine 0, OU redevenue un tournoi mais un AUTRE que celui note -
-// la premiere version de cette route ne detectait que le 1er cas). Verifie
-// desormais qu'une vraie ligne tournois avec ce nom exact existe encore a cette
-// semaine precise (la reinitialisation les a toutes effacees) ; sinon la ligne
-// de journal est orpheline. Sans toucher au reste de la partie en cours -
-// contrairement au reset complet, inutilisable ici puisque plusieurs coachs
-// testent en parallele et perdraient leur progression.
-app.post('/api/admin/nettoyer-journal-perime', (req, res) => {
-    try {
-        if (!estAdmin(req.userId)) {
-            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
-        }
-        const lignes = db.prepare("SELECT id, semaine, tournoi_nom FROM journal_semaine_joueur WHERE action_prevue = 'tournoi'").all();
-        const existeTournoi = db.prepare('SELECT 1 FROM tournois WHERE nom = ? AND semaine = ?');
-        const aSupprimer = lignes.filter(function (l) { return !existeTournoi.get(l.tournoi_nom, l.semaine); });
-        const supprimer = db.prepare('DELETE FROM journal_semaine_joueur WHERE id = ?');
-        aSupprimer.forEach(function (l) { supprimer.run(l.id); });
-        res.json({ success: true, lignesSupprimees: aSupprimer.length });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
