@@ -1577,10 +1577,18 @@ function executerAvancementSemaine() {
         // consultable dans l'onglet "Inscrits", meme si personne n'est encore inscrit.
         // Une seule fois par entree calendaire due (tous circuits), plus par joueur.
         // Pre-saison/Semaine 0 : rien a ouvrir, ces semaines n'ont jamais de tournoi.
+        // EXCEPTION : les Masters de fin de saison (categorie 'finals') ne sont jamais
+        // crees ici - leurs 8 qualifies sont determines par genererEntrantsFinals au
+        // moment du tirage (S-1, ci-dessous), pas 5 semaines a l'avance, pour refleter
+        // le classement Race a jour juste apres le dernier tournoi de la saison
+        // reguliere (Stockholm cote ATP, Hong Kong cote WTA) plutot qu'un instantane
+        // perime pris bien avant que ces derniers points ne soient marques (bug
+        // signale par l'utilisateur, 2026-08-24 - la semaine des Finals a ete decalee
+        // d'une semaine dans calendrier-tournois.js pour degager le delai necessaire).
         const rivauxUtilisesOuverture = new Set();
         if (phaseOuvertureEntrants.type === 'tournoi') {
             CALENDRIER_TOURNOIS
-                .filter(function (t) { return t.semaine_debut === phaseOuvertureEntrants.positionSemaine; })
+                .filter(function (t) { return t.semaine_debut === phaseOuvertureEntrants.positionSemaine && t.categorie !== 'finals'; })
                 .sort(function (a, b) { return b.taille_tableau - a.taille_tableau; })
                 .forEach(function (entree) {
                     const existe = db.prepare('SELECT id FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaineOuvertureEntrants);
@@ -1784,19 +1792,47 @@ app.get('/api/admin/diagnostiquer-doublons-joueurs', (req, res) => {
 });
 
 // Avancement automatique : fidele au PDF ("chaque semaine reelle equivaut a deux
-// semaines ingame"), rythme fixe a lundi et jeudi 8h00 heure locale.
-const JOURS_ECHEANCE_AUTO = [1, 4]; // lundi, jeudi (Date.getDay())
+// semaines ingame"), rythme fixe a lundi et jeudi 8h00 heure FRANCAISE (Europe/Paris).
+const JOURS_ECHEANCE_AUTO = [1, 4]; // lundi, jeudi
 const HEURE_ECHEANCE_AUTO = 8;
+const JOURS_SEMAINE_INTL = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
 
-// Premiere echeance strictement apres `date` (mercredi ou samedi, 8h00). Avance
-// jour par jour jusqu'a tomber sur un jour valide dont le crenau de 8h n'est pas
-// deja passe par rapport a `date`.
+// Decompose un instant en date/heure LOCALE Europe/Paris (gere automatiquement le
+// passage heure ete/hiver via Intl, sans dependance externe).
+function partiesParis(date) {
+    const dtf = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'Europe/Paris', hour12: false, weekday: 'short',
+        year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+    const parts = dtf.formatToParts(date).reduce(function (acc, p) { acc[p.type] = p.value; return acc; }, {});
+    return {
+        annee: Number(parts.year), mois: Number(parts.month), jour: Number(parts.day),
+        heure: Number(parts.hour === '24' ? '0' : parts.hour), minute: Number(parts.minute), seconde: Number(parts.second),
+        jourSemaine: JOURS_SEMAINE_INTL[parts.weekday]
+    };
+}
+
+// Construit l'instant UTC correspondant a une date/heure LOCALE Paris donnee (annee,
+// moisIndex0 0-11, jour, heure) - contrairement a `new Date(y,m,d,h)` qui utilise le
+// fuseau du SERVEUR : sur Railway (UTC), ca decalait l'avancement automatique de 2h
+// l'ete / 1h l'hiver par rapport a l'heure francaise annoncee (bug signale par
+// l'utilisateur, 2026-08-24 : "10:00" affiche au lieu de "8:00").
+function dateParisVersUTC(annee, moisIndex0, jour, heure) {
+    const approx = new Date(Date.UTC(annee, moisIndex0, jour, heure, 0, 0));
+    const p = partiesParis(approx);
+    const commeUTC = Date.UTC(p.annee, p.mois - 1, p.jour, p.heure, p.minute, p.seconde);
+    return new Date(approx.getTime() - (commeUTC - approx.getTime()));
+}
+
+// Premiere echeance strictement apres `date` (lundi ou jeudi, 8h00 heure de Paris).
+// Avance jour par jour (calendrier Paris) jusqu'a tomber sur un jour valide dont le
+// crenau de 8h n'est pas deja passe par rapport a `date`.
 function prochaineEcheanceApres(date) {
-    let jour = new Date(date.getFullYear(), date.getMonth(), date.getDate());
-    let candidate = new Date(jour.getFullYear(), jour.getMonth(), jour.getDate(), HEURE_ECHEANCE_AUTO, 0, 0, 0);
-    while (candidate.getTime() <= date.getTime() || !JOURS_ECHEANCE_AUTO.includes(candidate.getDay())) {
-        jour = new Date(jour.getFullYear(), jour.getMonth(), jour.getDate() + 1);
-        candidate = new Date(jour.getFullYear(), jour.getMonth(), jour.getDate(), HEURE_ECHEANCE_AUTO, 0, 0, 0);
+    let p = partiesParis(date);
+    let candidate = dateParisVersUTC(p.annee, p.mois - 1, p.jour, HEURE_ECHEANCE_AUTO);
+    while (candidate.getTime() <= date.getTime() || !JOURS_ECHEANCE_AUTO.includes(partiesParis(candidate).jourSemaine)) {
+        const pSuivant = partiesParis(new Date(candidate.getTime() + 24 * 3600 * 1000));
+        candidate = dateParisVersUTC(pSuivant.annee, pSuivant.mois - 1, pSuivant.jour, HEURE_ECHEANCE_AUTO);
     }
     return candidate;
 }
@@ -2973,9 +3009,12 @@ function genererEntrants(entreeCalendrier, semaine, rivauxUtilises) {
 }
 
 // Entrants des Masters de fin de saison : les 8 (taille_tableau) premiers du
-// classement Race du circuit, tous coachs confondus, calcules a la date de creation
-// du pool (S-5 avant le tournoi dans le deroulement normal). Melange naturellement
-// rivaux persistants et joueurs reels selon leurs points.
+// classement Race du circuit, tous coachs confondus, calcules au moment du tirage
+// (S-1, cf. l'exception 'finals' dans l'ouverture des inscriptions ci-dessus) - donc
+// juste apres le dernier tournoi de la saison reguliere du circuit (Stockholm cote
+// ATP, Hong Kong cote WTA), avec une semaine de battement avant le debut des Finals
+// pour choisir les styles. Melange naturellement rivaux persistants et joueurs reels
+// selon leurs points.
 function genererEntrantsFinals(entreeCalendrier, semaine) {
     assurerRoster(entreeCalendrier.circuit);
 

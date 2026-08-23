@@ -55,7 +55,7 @@ const SEMAINES_COUPES_EQUIPE = [
     { semaine: 5, manche: '1er tour' },
     { semaine: 14, manche: 'Quarts de finale' },
     { semaine: 37, manche: 'Demi-finales' },
-    { semaine: 47, manche: 'Finale' },
+    { semaine: 48, manche: 'Finale' },
     // Barrage de maintien (World Group Play-offs) : meme semaine que les Demi-
     // finales, comme dans le vrai ancien format (a ce stade il ne reste que 4
     // nations du Groupe mondial en lice, les 8 perdantes du 1er tour jouent leur
@@ -139,7 +139,7 @@ const CALENDRIER_TOURNOIS = [
     { id: 'atp-paris', circuit: 'ATP', nom: 'Paris Masters', pays: 'France', categorie: 1000, surface: 'dur', indoor: true, taille_tableau: 56, semaine_debut: 44, duree: 1, bareme: 'ATP_1000_56' },
 
     // --- ATP : Masters de fin de saison (format poules) ---
-    { id: 'atp-finals', circuit: 'ATP', nom: 'Nitto ATP Finals', pays: 'Italie', categorie: 'finals', surface: 'dur', indoor: true, taille_tableau: 8, semaine_debut: 46, duree: 1, bareme: 'ATP_FINALS', format: 'poules' },
+    { id: 'atp-finals', circuit: 'ATP', nom: 'Nitto ATP Finals', pays: 'Italie', categorie: 'finals', surface: 'dur', indoor: true, taille_tableau: 8, semaine_debut: 47, duree: 1, bareme: 'ATP_FINALS', format: 'poules' },
 
     // --- WTA : swing australien ---
     { id: 'wta-brisbane', circuit: 'WTA', nom: 'Brisbane International', pays: 'Australie', categorie: 500, surface: 'dur', taille_tableau: 48, semaine_debut: 1, duree: 1, bareme: 'WTA_500' },
@@ -209,7 +209,7 @@ const CALENDRIER_TOURNOIS = [
     { id: 'wta-chennai', circuit: 'WTA', nom: 'Chennai Open', pays: 'Inde', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 44, duree: 1, bareme: 'WTA_250' },
 
     // --- WTA : Masters de fin de saison (format poules) ---
-    { id: 'wta-finals', circuit: 'WTA', nom: 'WTA Finals', pays: 'Italie', categorie: 'finals', surface: 'dur', indoor: true, taille_tableau: 8, semaine_debut: 45, duree: 1, bareme: 'WTA_FINALS', format: 'poules' }
+    { id: 'wta-finals', circuit: 'WTA', nom: 'WTA Finals', pays: 'Italie', categorie: 'finals', surface: 'dur', indoor: true, taille_tableau: 8, semaine_debut: 46, duree: 1, bareme: 'WTA_FINALS', format: 'poules' }
 ];
 
 const PRENOMS_LAMBDA = [
