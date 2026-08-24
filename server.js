@@ -1215,24 +1215,31 @@ function variationDispositionsIntersaison(indexIntersaison) {
     return 0;
 }
 
-// Changement de saison (declenche une seule fois, a la transition S48 -> nouvelle
-// Pre-saison) : remise a zero de l'usure/automatismes/mental max/energie (choix
-// assume, divergent du PDF qui ne remet pas l'energie a zero), + la moulinette qui
-// ouvre une repartition manuelle des competences pour les joueurs les plus
-// developpes (cible = ((XP totale - 200) / 2.5) + 100, jamais si cible >= total) au
-// lieu d'une reduction automatique (regle PDF, revient sur un choix precedent), + la
-// variation de dispositions de la saison.
-function appliquerChangementDeSaison(nouvelleSemaine) {
+// "La moulinette" au sens strict (rabotage des competences) : declenchee une seule
+// fois a l'ENTREE en semaine 49 (derniere semaine de tournoi du cycle), PAS a la
+// bascule vers la Pre-saison suivante comme avant (demande explicite de
+// l'utilisateur, 2026-08-24). Ouvre une repartition manuelle des competences pour
+// les joueurs les plus developpes (cible = ((XP totale - 200) / 2.5) + 100, jamais
+// si cible >= total) au lieu d'une reduction automatique (regle PDF, revient sur un
+// choix precedent).
+//
+// SEULEMENT le rabotage des competences est deplace ici - la variation de
+// dispositions, le Top 30 fige et le tableau Coupe Davis restent a la bascule
+// Pre-saison (appliquerResetPreSaison plus bas), MEME MOMENT QU'AVANT : ces champs
+// (points_dispositions_a_gagner en particulier) sont aussi ecrits, sans lien avec
+// la moulinette, par la boucle hebdomadaire normale (credit du Coaching mental,
+// remise a 0 chaque semaine si rien de gagne) qui tourne pour TOUTE semaine
+// (y compris S49) - si le gain de dispositions de la moulinette avait ete pose ici,
+// la boucle hebdomadaire de la semaine 49 (executee lors du prochain appel, en
+// quittant S49) l'aurait aussitot ecrase avant meme que le coach ait pu le voir.
+// Le rabotage de competences n'a pas ce risque : aucune autre logique ne touche
+// points_competences_a_repartir/cap_* en dehors de cette fonction et de la route de
+// repartition manuelle.
+function appliquerMoulinette(semaine49) {
     const joueurs = db.prepare("SELECT * FROM players WHERE statut = 'valide'").all();
-    const indexIntersaison = phaseAffichee(nouvelleSemaine).numeroSaison - 1;
-    const variationDispositions = variationDispositionsIntersaison(indexIntersaison);
 
     const maj = db.prepare(`
         UPDATE players SET
-            usure = 0, points_energie = 0,
-            surface_dur_automatismes = 0, surface_terre_automatismes = 0, surface_herbe_automatismes = 0,
-            mental_max = 100, mental_courant = ?,
-            points_dispositions_a_gagner = ?, points_dispositions_a_retirer = ?,
             points_competences_a_repartir = ?,
             cap_service = ?, cap_retour = ?, cap_coup_droit_revers = ?, cap_effet = ?,
             cap_volee = ?, cap_deplacement = ?, cap_puissance = ?, cap_resistance = ?
@@ -1253,18 +1260,46 @@ function appliquerChangementDeSaison(nouvelleSemaine) {
         const caps = {};
         COMPETENCES.forEach(function (c) { caps[c] = competencesARepartir > 0 ? valeurs[c] : 0; });
 
-        const mentalCourant = Math.min(player.mental_courant, 100);
-        const dispositionsAGagner = player.points_dispositions_a_gagner + Math.max(0, variationDispositions);
-        const dispositionsARetirer = player.points_dispositions_a_retirer + Math.max(0, -variationDispositions);
-
         maj.run(
-            mentalCourant,
-            dispositionsAGagner, dispositionsARetirer,
             competencesARepartir,
             caps.service, caps.retour, caps.coup_droit_revers, caps.effet,
             caps.volee, caps.deplacement, caps.puissance, caps.resistance,
             player.id
         );
+    });
+}
+
+// Bascule vers la Pre-saison : remise a zero physique du joueur (usure/forme/
+// mental/automatismes reviennent a leur valeur d'origine de creation, la condition
+// repasse a "en forme") + variation de dispositions de la saison + Top 30 fige +
+// tableau Coupe Davis - meme moment qu'avant le decoupage de la moulinette
+// (2026-08-24), voir le commentaire d'appliquerMoulinette plus haut pour pourquoi
+// la variation de dispositions doit rester ici et pas suivre la moulinette.
+// La condition est remise a "en forme" bien que non citee explicitement par
+// l'utilisateur : sans ca, un joueur encore "blesse" a la fin de la saison
+// resterait bloque indefiniment, la Pre-saison ne proposant justement aucune
+// planification de repos pour s'en sortir. L'energie n'est PAS remise a zero ici,
+// contrairement a avant (revient sur le choix du 2026-07-18) : elle garde sa valeur
+// de fin de saison, comme les classements (jamais touches par cette fonction de
+// toute facon).
+function appliquerResetPreSaison(nouvelleSemaine) {
+    const joueurs = db.prepare("SELECT * FROM players WHERE statut = 'valide'").all();
+    const indexIntersaison = phaseAffichee(nouvelleSemaine).numeroSaison - 1;
+    const variationDispositions = variationDispositionsIntersaison(indexIntersaison);
+
+    const maj = db.prepare(`
+        UPDATE players SET
+            usure = 0, forme = 100, mental_courant = 100, mental_max = 100,
+            surface_dur_automatismes = 0, surface_terre_automatismes = 0, surface_herbe_automatismes = 0,
+            condition = 'en_forme',
+            points_dispositions_a_gagner = ?, points_dispositions_a_retirer = ?
+        WHERE id = ?
+    `);
+
+    joueurs.forEach(function (player) {
+        const dispositionsAGagner = player.points_dispositions_a_gagner + Math.max(0, variationDispositions);
+        const dispositionsARetirer = player.points_dispositions_a_retirer + Math.max(0, -variationDispositions);
+        maj.run(dispositionsAGagner, dispositionsARetirer, player.id);
     });
 
     // Coupe Davis / Fed Cup : tableau de 16 nations + ties du 1er tour genere une
@@ -1559,13 +1594,21 @@ function executerAvancementSemaine() {
 
         db.prepare('UPDATE jeu_etat SET semaine_actuelle = semaine_actuelle + 1 WHERE id = 1').run();
 
-        // Changement de saison : declenche une seule fois, exactement au moment ou
-        // l'on quitte S48 pour entrer dans la nouvelle Pre-saison. La partie se fige
-        // ensuite dans cette Pre-saison (meme verrou saison_lancee que pour le tout
-        // premier lancement) : l'admin doit relancer explicitement la nouvelle saison
-        // via /api/admin/lancer-saison, ce n'est plus automatique (demande explicite).
+        // Moulinette : declenche une seule fois, exactement a l'entree en semaine 49
+        // (derniere semaine de tournoi du cycle), pas a la bascule Pre-saison (demande
+        // explicite de l'utilisateur, 2026-08-24).
+        if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine === LONGUEUR_SAISON - 2) {
+            appliquerMoulinette(nouvelleSemaine);
+        }
+
+        // Remise a zero physique du joueur + verrou de saison : declenche exactement au
+        // moment ou l'on quitte S49 pour entrer dans la nouvelle Pre-saison. La partie
+        // se fige ensuite dans cette Pre-saison (meme verrou saison_lancee que pour le
+        // tout premier lancement) : l'admin doit relancer explicitement la nouvelle
+        // saison via /api/admin/lancer-saison, ce n'est plus automatique (demande
+        // explicite).
         if (phaseNouvelleSemaine.type === 'presaison') {
-            appliquerChangementDeSaison(nouvelleSemaine);
+            appliquerResetPreSaison(nouvelleSemaine);
             db.prepare('UPDATE jeu_etat SET saison_lancee = 0 WHERE id = 1').run();
         }
 
@@ -4537,18 +4580,27 @@ app.post('/api/tournois/desinscription', (req, res) => {
 
 // Styles interdits pour un tournoi donne : l'ensemble (sans doublon, "aucun" exclu)
 // de tous les styles utilises a n'importe quel tour du tournoi PRECEDENT joue par ce
-// joueur (le plus recent par semaine, strictement avant `semaineTournoiActuel`, avec
-// un style_choisi non nul). Pas de restriction a l'interieur d'un meme tournoi : on
-// peut tres bien garder le meme style a tous les tours, y compris consecutifs.
+// joueur CETTE MEME SAISON (le plus recent par semaine, strictement avant
+// `semaineTournoiActuel` mais pas avant la Pre-saison en cours, avec un
+// style_choisi non nul) - une nouvelle saison repart avec tous les styles
+// disponibles, y compris ceux utilises au dernier tournoi de la saison precedente
+// (demande explicite de l'utilisateur, 2026-08-24). Pas de restriction a l'interieur
+// d'un meme tournoi : on peut tres bien garder le meme style a tous les tours, y
+// compris consecutifs.
 function stylesInterditsDuTournoiPrecedent(playerId, semaineTournoiActuel) {
+    // Debut de saison (semaine de Semaine 0, exclue) - meme convention que
+    // genererEntrantsFinals pour delimiter une saison.
+    const positionSaisonBrute = ((semaineTournoiActuel - 1) % LONGUEUR_SAISON) + 1;
+    const debutSaison = semaineTournoiActuel - positionSaisonBrute + 2;
+
     const precedent = db.prepare(`
         SELECT tj.style_choisi
         FROM tournois t
         JOIN tournoi_joueurs tj ON tj.tournoi_id = t.id AND tj.player_id = ? AND tj.est_reel = 1
-        WHERE t.semaine < ? AND tj.style_choisi IS NOT NULL
+        WHERE t.semaine < ? AND t.semaine > ? AND tj.style_choisi IS NOT NULL
         ORDER BY t.semaine DESC
         LIMIT 1
-    `).get(playerId, semaineTournoiActuel);
+    `).get(playerId, semaineTournoiActuel, debutSaison);
 
     if (!precedent) return [];
     let stylesPrecedents = [];
