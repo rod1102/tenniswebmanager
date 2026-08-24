@@ -4119,47 +4119,42 @@ app.get('/api/tournois/passes/:playerId', (req, res) => {
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
         const cycleLongueur = LONGUEUR_SAISON;
-        const phaseActuelle = phaseDeSemaine(etat.semaine_actuelle);
 
         // Reellement termines uniquement (statut de la ligne tournois elle-meme, pas
         // seulement "la semaine du calendrier est atteinte") - un tournoi de la
         // semaine en cours, pas encore joue ou encore en cours, ne doit jamais
-        // apparaitre ici tant que son dernier tour n'est pas simule. Map (pas
-        // simplement un Set) pour retrouver l'id reel de chaque tournoi et pouvoir
-        // afficher son vainqueur meme quand ce joueur n'y a pas participe.
-        const tournoisTerminesMap = new Map(
-            db.prepare("SELECT id, calendrier_id, semaine FROM tournois WHERE circuit = ? AND statut = 'termine' AND semaine BETWEEN ? AND ?")
-                .all(circuit, etat.semaine_actuelle - cycleLongueur, etat.semaine_actuelle)
-                .map(function (t) { return [t.calendrier_id + '-' + t.semaine, t.id]; })
-        );
-
-        // Uniquement le passage en cours dans le cycle (saison en cours) : les tournois
-        // d'un cycle precedent ne sont pas remontes ici pour l'instant. Pendant la
-        // Pre-saison/Semaine 0, la saison en cours n'a encore rien joue.
-        const passes = phaseActuelle.type === 'tournoi'
-            ? CALENDRIER_TOURNOIS
-                .filter(function (t) { return t.circuit === circuit && t.semaine_debut <= phaseActuelle.positionSemaine; })
-                .map(function (t) {
-                    const semaine = etat.semaine_actuelle - (phaseActuelle.positionSemaine - t.semaine_debut);
-                    return Object.assign({}, t, { semaine, positionSemaine: t.semaine_debut });
-                })
-                .filter(function (t) { return tournoisTerminesMap.has(t.id + '-' + t.semaine); })
-            : [];
+        // apparaitre ici tant que son dernier tour n'est pas simule.
+        //
+        // Part DIRECTEMENT des lignes `tournois` reellement jouees (semaine stockee,
+        // immuable) plutot que de re-deriver une semaine attendue en parcourant
+        // CALENDRIER_TOURNOIS a partir de son semaine_debut ACTUEL : un tournoi deja
+        // joue avant un decalage de calendrier (ex. Cincinnati Open+1 le 2026-08-24)
+        // garde sa vraie semaine en base, mais semaine_debut a change entre-temps,
+        // donc le recalcul retombait a cote et le tournoi disparaissait purement et
+        // simplement de "Tournois passes" (bug signale par l'utilisateur, meme jour).
+        const passes = db.prepare("SELECT id, calendrier_id, semaine FROM tournois WHERE circuit = ? AND statut = 'termine' AND semaine BETWEEN ? AND ?")
+            .all(circuit, etat.semaine_actuelle - cycleLongueur, etat.semaine_actuelle)
+            .map(function (row) {
+                const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === row.calendrier_id; });
+                if (!entree) return null; // entree calendaire disparue (ne devrait jamais arriver)
+                return Object.assign({}, entree, { semaine: row.semaine, positionSemaine: positionSemaineAffichee(row.semaine), tournoiId: row.id });
+            })
+            .filter(Boolean);
 
         // Mes inscriptions reelles (le tournoi lui-meme est partage, l'appartenance vit
         // sur tournoi_joueurs.player_id/est_reel), jointes a tournois pour le statut et
         // le resultat propre a CE joueur (tj.tour_elimine/points_gagnes, pas une colonne
         // denormalisee sur tournois qui n'aurait plus de sens sur une ligne partagee).
         const registrations = db.prepare(`
-            SELECT t.id, t.calendrier_id, t.semaine, t.statut, tj.tour_elimine AS tour_elimine_joueur, tj.points_gagnes AS points_gagnes_joueur
+            SELECT t.id, t.statut, tj.tour_elimine AS tour_elimine_joueur, tj.points_gagnes AS points_gagnes_joueur
             FROM tournoi_joueurs tj
             JOIN tournois t ON t.id = tj.tournoi_id
             WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.semaine BETWEEN ? AND ?
         `).all(playerId, etat.semaine_actuelle - cycleLongueur, etat.semaine_actuelle);
-        const regMap = new Map(registrations.map(function (r) { return [r.calendrier_id + '-' + r.semaine, r]; }));
+        const regMap = new Map(registrations.map(function (r) { return [r.id, r]; }));
 
         passes.forEach(function (t) {
-            const reg = regMap.get(t.id + '-' + t.semaine);
+            const reg = regMap.get(t.tournoiId);
             if (reg && reg.statut === 'termine') {
                 t.participe = true;
                 t.tourElimineJoueur = reg.tour_elimine_joueur;
@@ -4171,8 +4166,7 @@ app.get('/api/tournois/passes/:playerId', (req, res) => {
             // Vainqueur affiche dans tous les cas (participation ou non) - demande
             // explicite de l'utilisateur : "Tournois passes" doit montrer TOUS les
             // tournois du circuit, avec le nom et le drapeau du vainqueur.
-            const tournoiId = tournoisTerminesMap.get(t.id + '-' + t.semaine);
-            const vainqueur = db.prepare("SELECT nom, nationalite FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine = 'Vainqueur'").get(tournoiId);
+            const vainqueur = db.prepare("SELECT nom, nationalite FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine = 'Vainqueur'").get(t.tournoiId);
             t.nomVainqueur = vainqueur ? vainqueur.nom : null;
             t.drapeauVainqueur = vainqueur ? drapeau(vainqueur.nationalite) : null;
         });
