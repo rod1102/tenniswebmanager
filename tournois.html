@@ -311,9 +311,9 @@
                     if (t.estCoupe) {
                         carte.className = 'tournoi-card';
                         carte.innerHTML = `
-                            <div class="tournoi-card-name">${t.nom}</div>
+                            <a class="tournoi-card-name" href="coupe-tableau.html?circuit=${t.circuit}">${t.nom}</a>
                             <div class="tournoi-card-meta">${t.manche}</div>
-                            <div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Pas d'inscription — compétition par équipe nationale</div>
+                            <div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Pas d'inscription — compétition par équipe nationale. Clique pour voir le tableau complet.</div>
                         `;
                         grille.appendChild(carte);
                         return;

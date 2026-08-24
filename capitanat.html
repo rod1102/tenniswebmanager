@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Capitanat — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Capitanat</h1>
+            <div style="text-align:center;">
+                <span class="week-badge" id="nation-badge">Chargement...</span>
+            </div>
+
+            <div id="rencontres-container" style="margin-top:20px;"><p class="match-hint">Chargement...</p></div>
+
+            <p style="text-align:center; margin-top:20px;"><a class="lien-adversaire" id="tableau-lien" href="#">Voir le tableau complet du groupe mondial</a></p>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const playerId = params.get('playerId');
+        if (!playerId) {
+            window.location.href = 'joueur.html';
+        }
+
+        const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        function formulaireSurface(tie) {
+            return `
+                <div class="form-group" style="margin-top:16px;">
+                    <label>Surface (choix du capitaine de l'équipe à domicile)</label>
+                    <select id="surface-select-${tie.id}">
+                        <option value="dur">Dur</option>
+                        <option value="terre">Terre battue</option>
+                        <option value="herbe">Herbe</option>
+                    </select>
+                    <button class="cta cta-primary surface-btn" data-tie-id="${tie.id}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider la surface</button>
+                </div>
+            `;
+        }
+
+        function optionsJoueurs(liste) {
+            return (liste || []).map(function (j) {
+                return `<option value="${j.estReel ? 'reel' : 'rival'}-${j.id}">${j.nom}${j.estReel ? '' : ' (rival)'}</option>`;
+            }).join('');
+        }
+
+        function formulaireComposition(tie, nation, joueurs) {
+            const opts = optionsJoueurs(joueurs);
+            return `
+                <div class="form-group" style="margin-top:16px;">
+                    <label>Composition — ${nation}</label>
+                    <label style="font-size:0.7rem;">Simple 1 (+ simple retour vs B adverse)</label>
+                    <select id="compo-a-${tie.id}"><option value="">—</option>${opts}</select>
+                    <label style="font-size:0.7rem;">Simple 2 (+ simple retour vs A adverse)</label>
+                    <select id="compo-b-${tie.id}"><option value="">—</option>${opts}</select>
+                    <label style="font-size:0.7rem;">Double — joueur 1</label>
+                    <select id="compo-d1-${tie.id}"><option value="">—</option>${opts}</select>
+                    <label style="font-size:0.7rem;">Double — joueur 2</label>
+                    <select id="compo-d2-${tie.id}"><option value="">—</option>${opts}</select>
+                    <button class="cta cta-primary compo-btn" data-tie-id="${tie.id}" data-nation="${nation}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider la composition</button>
+                </div>
+            `;
+        }
+
+        function carteRencontre(t, nation) {
+            const scoreTxt = t.statut === 'termine'
+                ? `${t.victoires_domicile} - ${t.victoires_exterieur} (${t.nation_vainqueur} qualifié)`
+                : (t.surface ? LABELS_SURFACE[t.surface] : 'Surface pas encore choisie');
+            const urgent = t.actionRequise;
+            return `
+                <div class="tournoi-card" style="${urgent ? 'border-color:#E24B4A;' : ''} margin-bottom:16px;">
+                    <div class="tournoi-card-name">${t.nation_domicile} vs ${t.nation_exterieur}</div>
+                    <div class="tournoi-card-meta">${t.manche} · Semaine ${t.positionSemaine} · ${scoreTxt}</div>
+                    ${urgent ? `<div class="planning-alerte-texte" style="font-weight:700;">Une action est attendue de ta part cette semaine.</div>` : ''}
+                    <div id="action-zone-${t.id}"></div>
+                    <p style="margin-top:10px;"><a class="lien-adversaire" href="coupe.html?playerId=${playerId}&tieId=${t.id}" style="font-size:0.75rem;">Voir le détail (styles, résultats match par match)</a></p>
+                </div>
+            `;
+        }
+
+        function attacherActionsSurface() {
+            document.querySelectorAll('.surface-btn').forEach(function (btn) {
+                btn.addEventListener('click', async function () {
+                    const tieId = btn.dataset.tieId;
+                    const surface = document.getElementById('surface-select-' + tieId).value;
+                    const r = await fetch('/api/coupe/surface', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tieId, capitainePlayerId: playerId, surface })
+                    });
+                    const d = await r.json();
+                    if (!r.ok) { alert(d.error); return; }
+                    charger();
+                });
+            });
+        }
+
+        function attacherActionsComposition() {
+            document.querySelectorAll('.compo-btn').forEach(function (btn) {
+                btn.addEventListener('click', async function () {
+                    const tieId = btn.dataset.tieId;
+                    const nation = btn.dataset.nation;
+                    function lireSelect(id) {
+                        const val = document.getElementById(id).value;
+                        if (!val) return null;
+                        const [type, id2] = val.split('-');
+                        return { estReel: type === 'reel', id: Number(id2) };
+                    }
+                    const joueurA = lireSelect('compo-a-' + tieId);
+                    const joueurB = lireSelect('compo-b-' + tieId);
+                    const doubleJ1 = lireSelect('compo-d1-' + tieId);
+                    const doubleJ2 = lireSelect('compo-d2-' + tieId);
+                    if (!joueurA || !joueurB || !doubleJ1 || !doubleJ2) { alert('Choisis les 4 postes (simple 1, simple 2, double 1, double 2).'); return; }
+                    const r = await fetch('/api/coupe/composition', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tieId, capitainePlayerId: playerId, nation, joueurA, joueurB, doubleJ1, doubleJ2 })
+                    });
+                    const d = await r.json();
+                    if (!r.ok) { alert(d.error); return; }
+                    charger();
+                });
+            });
+        }
+
+        async function charger() {
+            const response = await fetch('/api/coupe/capitanat/' + playerId);
+            const data = await response.json();
+
+            // Garde d'acces reelle (pas juste un lien cache) : quiconque n'est pas
+            // le capitaine designe de sa nation cette saison est renvoye ailleurs,
+            // meme esprit que verifierAcces() dans admin.html pour les non-admins
+            // (demande explicite de l'utilisateur, 2026-08-24 : "une vraie page
+            // accessible uniquement aux capitaines").
+            if (!response.ok) {
+                alert(data.error || 'Accès réservé aux capitaines.');
+                window.location.href = 'joueur.html';
+                return;
+            }
+
+            document.getElementById('nation-badge').textContent = data.nation + ' (' + (data.circuit === 'ATP' ? 'ATP' : 'WTA') + ')';
+            document.getElementById('tableau-lien').href = 'coupe-tableau.html?circuit=' + data.circuit;
+
+            const container = document.getElementById('rencontres-container');
+            if (data.ties.length === 0) {
+                container.innerHTML = '<p class="match-hint">Aucune rencontre programmée pour ta nation cette saison.</p>';
+                return;
+            }
+
+            container.innerHTML = data.ties.map(function (t) { return carteRencontre(t, data.nation); }).join('');
+
+            const tiesComposition = data.ties.filter(function (t) { return t.actionRequise && t.etape === 'composition'; });
+            const tiesSurface = data.ties.filter(function (t) { return t.actionRequise && t.etape === 'surface'; });
+
+            tiesSurface.forEach(function (t) {
+                document.getElementById('action-zone-' + t.id).innerHTML = formulaireSurface(t);
+            });
+
+            for (const t of tiesComposition) {
+                const detailResponse = await fetch('/api/coupe/tie/' + t.id);
+                const detail = await detailResponse.json();
+                if (!detailResponse.ok) continue;
+                const joueurs = t.nation_domicile === data.nation ? detail.joueursDomicile : detail.joueursExterieur;
+                document.getElementById('action-zone-' + t.id).innerHTML = formulaireComposition(t, data.nation, joueurs);
+            }
+
+            attacherActionsSurface();
+            attacherActionsComposition();
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin();
+        charger();
+    </script>
+</body>
+</html>

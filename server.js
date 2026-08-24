@@ -5274,11 +5274,22 @@ app.get('/api/annuaire/joueurs/:circuit', (req, res) => {
         const classement = calculerClassementGlobal(circuit, semaineActuelle - FENETRE_LIVE, semaineActuelle)
             .filter(function (c) { return c.playerId !== null; });
 
+        // Brassard de capitaine (emoji) affiche dans l'annuaire pour les joueurs
+        // designes capitaines de leur nation cette saison - demande explicite de
+        // l'utilisateur, 2026-08-24. Un seul SELECT groupe plutot qu'une requete par
+        // joueur.
+        const saison = nombreSaisonAffichee();
+        const capitainesSet = new Set(
+            db.prepare('SELECT player_id FROM coupe_capitaines WHERE saison = ? AND circuit = ?').all(saison, circuit)
+                .map(function (r) { return r.player_id; })
+        );
+
         const joueurs = classement.map(function (c) {
             return {
                 playerId: c.playerId, prenom: c.prenom, nom: c.nomFamille,
                 nationalite: c.nationalite, drapeau: c.drapeau, points: c.points,
-                coachNom: nomCoach(c.userId), coachUserId: c.userId
+                coachNom: nomCoach(c.userId), coachUserId: c.userId,
+                estCapitaine: capitainesSet.has(c.playerId)
             };
         });
 
@@ -7552,12 +7563,14 @@ app.get('/api/coupe/statut-capitaine/:playerId', (req, res) => {
         `).all(saison, circuit, player.nationalite);
         const monVote = db.prepare('SELECT candidat_player_id FROM coupe_votes WHERE saison = ? AND circuit = ? AND nation = ? AND votant_player_id = ?').get(saison, circuit, player.nationalite, player.id);
         const maCandidature = candidatures.some(function (c) { return c.player_id === player.id; });
+        const estCapitaine = !!capitaine && Number(capitaine.player_id) === Number(player.id);
 
         res.json({
             success: true, dansLeTableau, fenetreCandidature, fenetreVote,
             capitaine: capitaine ? capitaine.player_id : null,
             candidatures, maCandidature,
-            monVote: monVote ? monVote.candidat_player_id : null
+            monVote: monVote ? monVote.candidat_player_id : null,
+            alerte: estCapitaine ? alerteCapitaine(saison, circuit, player.nationalite) : null
         });
     } catch (err) {
         console.error(err);
@@ -7584,9 +7597,82 @@ app.get('/api/coupe/mes-rencontres/:playerId', (req, res) => {
         // meme categorie que le badge "Semaine 56" deja corrige ailleurs le 2026-07-20 -
         // coupe.html n'avait pas ete couvert par ce correctif-la).
         res.json({
-            success: true, nbDivisions,
+            success: true, nbDivisions, circuit,
             ties: ties.map(function (t) { return Object.assign({}, t, { manche: LABELS_MANCHE[t.manche] || t.manche, positionSemaine: positionSemaineAffichee(t.semaine) }); })
         });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Tableau de bord du capitaine (page dediee capitanat.html) : refuse l'acces (403)
+// a quiconque n'est pas REELLEMENT le capitaine designe de sa nation cette saison -
+// contrairement a coupe.html qui reste ouvert a tout participant. Pour chaque
+// rencontre, `actionRequise` dit si une action de capitaine (surface/composition)
+// est due CETTE semaine et pas encore faite - c'est ce qui declenche l'affichage du
+// formulaire inline sur la page (demande explicite de l'utilisateur, 2026-08-24).
+app.get('/api/coupe/capitanat/:playerId', (req, res) => {
+    try {
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(req.params.playerId, req.userId);
+        if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+
+        const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
+        const saison = nombreSaisonAffichee();
+        const nation = player.nationalite;
+
+        const capitaineId = capitaineDe(saison, circuit, nation);
+        if (!capitaineId || Number(capitaineId) !== Number(player.id)) {
+            return res.status(403).json({ error: 'Tu n es pas capitaine de la Coupe Davis / Fed Cup cette saison.' });
+        }
+
+        const ties = db.prepare(`
+            SELECT * FROM coupe_equipes WHERE saison = ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?)
+            ORDER BY semaine ASC
+        `).all(saison, circuit, nation, nation);
+
+        res.json({
+            success: true, nation, circuit,
+            ties: ties.map(function (t) {
+                const etape = etapeCoupe(t);
+                const compositionFaite = !!db.prepare('SELECT 1 FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(t.id, nation);
+                const actionRequise = (etape === 'surface' && t.nation_domicile === nation && t.surface == null)
+                    || (etape === 'composition' && !compositionFaite);
+                return Object.assign({}, t, {
+                    manche: LABELS_MANCHE[t.manche] || t.manche,
+                    positionSemaine: positionSemaineAffichee(t.semaine),
+                    etape, actionRequise, compositionFaite
+                });
+            })
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Tableau complet du groupe mondial (page coupe-tableau.html) : en acces libre,
+// jamais filtre par nation - meme esprit que GET /api/coupe/tie/:tieId qui n'a
+// jamais impose de verification de nation non plus. Le barrage de maintien (meme
+// semaine que les demies, mais une branche a part qui ne rejoint jamais l'echelle
+// principale) est renvoye separement plutot que mele au tour "demies".
+app.get('/api/coupe/tableau/:circuit', (req, res) => {
+    try {
+        const circuit = req.params.circuit === 'WTA' ? 'WTA' : 'ATP';
+        const saison = nombreSaisonAffichee();
+
+        const ties = db.prepare('SELECT * FROM coupe_equipes WHERE saison = ? AND circuit = ? ORDER BY division ASC, position ASC').all(saison, circuit);
+
+        const echelle = {};
+        const barrage = [];
+        ties.forEach(function (t) {
+            const ligne = Object.assign({}, t, { mancheLabel: LABELS_MANCHE[t.manche] || t.manche, positionSemaine: positionSemaineAffichee(t.semaine) });
+            if (t.manche === 'barrage') { barrage.push(ligne); return; }
+            if (!echelle[t.manche]) echelle[t.manche] = [];
+            echelle[t.manche].push(ligne);
+        });
+
+        res.json({ success: true, circuit, saison, echelle, barrage });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
@@ -7708,6 +7794,33 @@ function etapeCoupe(tie) {
 function capitaineDe(saison, circuit, nation) {
     const row = db.prepare('SELECT player_id FROM coupe_capitaines WHERE saison = ? AND circuit = ? AND nation = ?').get(saison, circuit, nation);
     return row ? row.player_id : null;
+}
+
+// Texte d'alerte a afficher au capitaine s'il doit agir CETTE semaine sur une de
+// ses rencontres non terminees - etapeCoupe() dit seulement "quelle semaine
+// correspond a quelle etape", pas si l'action a deja ete faite, donc on croise avec
+// l'absence de surface/composition enregistree. Une seule etape peut etre due a la
+// fois en pratique (une nation ne joue jamais 2 rencontres la meme semaine), mais on
+// boucle par securite et on retourne la premiere trouvee. Demande explicite de
+// l'utilisateur, 2026-08-24 : textes exacts, pas de 3e alerte pour les styles
+// (chaque joueur choisit le sien, ce n'est pas une action du capitaine).
+function alerteCapitaine(saison, circuit, nation) {
+    const ties = db.prepare(`
+        SELECT * FROM coupe_equipes
+        WHERE saison = ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?) AND statut != 'termine'
+    `).all(saison, circuit, nation, nation);
+
+    for (const tie of ties) {
+        const etape = etapeCoupe(tie);
+        if (etape === 'surface' && tie.nation_domicile === nation && tie.surface == null) {
+            return 'S-3 : Attention tu dois choisir la surface cette semaine';
+        }
+        if (etape === 'composition') {
+            const dejaCompo = db.prepare('SELECT 1 FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, nation);
+            if (!dejaCompo) return 'S-2 : Attention tu dois choisir les joueurs cette semaine';
+        }
+    }
+    return null;
 }
 
 app.get('/api/coupe/tie/:tieId', (req, res) => {

@@ -38,6 +38,7 @@
             <div id="liste-container" style="display:none;">
                 <div class="stats-header">Mes rencontres</div>
                 <div id="liste-rencontres"><p class="match-hint">Chargement...</p></div>
+                <p style="text-align:center; margin-top:16px;" id="tableau-complet-zone"></p>
             </div>
 
             <div id="detail-container" style="display:none;">
@@ -104,12 +105,12 @@
                 container.innerHTML = '<p class="match-hint">' + (data.error || 'Impossible de charger tes rencontres.') + '</p>';
                 return;
             }
-            if (data.ties.length === 0) {
-                container.innerHTML = '<p class="match-hint">Ta nation ne fait pas partie du tableau cette saison, ou aucune rencontre n\'a encore été programmée.</p>';
-                return;
-            }
+            container.innerHTML = data.ties.length === 0
+                ? '<p class="match-hint">Ta nation ne fait pas partie du tableau cette saison, ou aucune rencontre n\'a encore été programmée.</p>'
+                : '<div class="tournoi-list">' + data.ties.map(function (t) { return carteRencontre(t, data.nbDivisions); }).join('') + '</div>';
 
-            container.innerHTML = '<div class="tournoi-list">' + data.ties.map(function (t) { return carteRencontre(t, data.nbDivisions); }).join('') + '</div>';
+            const zone = document.getElementById('tableau-complet-zone');
+            if (zone) zone.innerHTML = `<a class="lien-adversaire" href="coupe-tableau.html?circuit=${data.circuit}">Voir le tableau complet du groupe mondial</a>`;
         }
 
         function formulaireSurface(tie) {

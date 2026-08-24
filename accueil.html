@@ -41,6 +41,7 @@
 
             <div id="annonce-container"></div>
 
+            <div id="alerte-capitaine-container"></div>
             <div id="badge-attente-container"></div>
 
             <div id="cartes-container" class="creation-grid"></div>
@@ -240,6 +241,25 @@
             `;
         }
 
+        // Alerte rouge "tu dois agir cette semaine" pour un capitaine de Coupe Davis/
+        // Fed Cup - demande explicite de l'utilisateur, 2026-08-24, textes exacts
+        // fournis par lui ("S-3 : ..."/"S-2 : ...") calcules cote serveur (etapeCoupe +
+        // verification que l'action n'a pas deja ete faite), jamais recalcules ici.
+        async function afficherAlerteCapitaine(players) {
+            const reponses = await Promise.all(
+                players.map(function (player) { return fetch('/api/coupe/statut-capitaine/' + player.id).then(function (r) { return r.json(); }); })
+            );
+            const alertes = reponses.filter(function (d) { return d.success && d.alerte; }).map(function (d) { return d.alerte; });
+
+            const container = document.getElementById('alerte-capitaine-container');
+            if (alertes.length === 0) { container.innerHTML = ''; return; }
+            container.innerHTML = `
+                <div class="xp-pool-panel" style="border-color:#E24B4A;">
+                    ${alertes.map(function (a) { return '<div class="planning-alerte-texte" style="font-weight:700;">' + a + '</div>'; }).join('')}
+                </div>
+            `;
+        }
+
         async function chargerTournoisEnCours() {
             const container = document.getElementById('tournois-en-cours-container');
             const [reponseTournois, reponseJoueurs] = await Promise.all([
@@ -395,6 +415,7 @@
                 carteJoueur('joueur', joueur, semaineInfoJoueur) + carteJoueur('joueuse', joueuse, semaineInfoJoueuse);
 
             afficherBadgeAttente(data.players);
+            afficherAlerteCapitaine(data.players);
         }
 
         document.getElementById('logout-btn').addEventListener('click', function (e) {

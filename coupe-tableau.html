@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tableau Coupe Davis / Fed Cup — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Coupe Davis / Fed Cup — Groupe mondial</h1>
+
+            <div class="tabs-nav" id="circuit-nav">
+                <button class="tab-btn" data-circuit="ATP">Coupe Davis (ATP)</button>
+                <button class="tab-btn" data-circuit="WTA">Fed Cup (WTA)</button>
+            </div>
+
+            <div class="tab-panel-wide" id="tableau-container" style="margin-top:16px;"><p class="match-hint">Chargement...</p></div>
+        </div>
+    </div>
+
+    <script>
+        const userId = sessionStorage.getItem('currentUserId');
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        let circuit = params.get('circuit') === 'WTA' ? 'WTA' : 'ATP';
+
+        const ORDRE_MANCHES = ['1er_tour', 'quarts', 'demies', 'finale'];
+        const LABELS_MANCHES = { '1er_tour': '1er tour', quarts: 'Quarts de finale', demies: 'Demi-finales', finale: 'Finale', barrage: 'Barrage de maintien' };
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        function carteRencontre(t) {
+            const estTermine = t.statut === 'termine';
+            const ligneDomicile = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_domicile ? ' bracket-vainqueur' : ''}"><span class="bracket-joueur">${t.nation_domicile}</span></div>`;
+            const ligneExterieur = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_exterieur ? ' bracket-vainqueur' : ''}"><span class="bracket-joueur">${t.nation_exterieur}</span></div>`;
+            const score = estTermine ? `<div class="bracket-score">${t.victoires_domicile} - ${t.victoires_exterieur}</div>` : '';
+            return `
+                <div class="bracket-match-wrap">
+                    <div class="bracket-match">
+                        ${ligneDomicile}
+                        ${ligneExterieur}
+                        ${score}
+                    </div>
+                </div>
+            `;
+        }
+
+        function colonneManche(manche, ties) {
+            const contenu = (ties && ties.length > 0)
+                ? ties.map(carteRencontre).join('')
+                : '<p class="match-hint" style="padding:12px 0; font-size:0.7rem;">Pas encore déterminé</p>';
+            return `
+                <div class="bracket-round">
+                    <div class="bracket-round-title">${LABELS_MANCHES[manche]}</div>
+                    ${contenu}
+                </div>
+            `;
+        }
+
+        async function charger() {
+            document.querySelectorAll('#circuit-nav .tab-btn').forEach(function (b) {
+                b.classList.toggle('active', b.dataset.circuit === circuit);
+            });
+
+            const container = document.getElementById('tableau-container');
+            container.innerHTML = '<p class="match-hint">Chargement...</p>';
+
+            const response = await fetch('/api/coupe/tableau/' + circuit);
+            const data = await response.json();
+            if (!response.ok) {
+                container.innerHTML = '<p class="match-hint">' + (data.error || 'Impossible de charger le tableau.') + '</p>';
+                return;
+            }
+
+            const colonnesEchelle = ORDRE_MANCHES.map(function (m) { return colonneManche(m, data.echelle[m]); }).join('');
+            const colonneBarrage = data.barrage.length > 0 ? colonneManche('barrage', data.barrage) : '';
+
+            container.innerHTML = `<div class="bracket">${colonnesEchelle}${colonneBarrage}</div>`;
+        }
+
+        document.querySelectorAll('#circuit-nav .tab-btn').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                circuit = btn.dataset.circuit;
+                charger();
+            });
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
+            sessionStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin();
+        charger();
+    </script>
+</body>
+</html>

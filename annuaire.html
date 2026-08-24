@@ -100,7 +100,7 @@
                 }
                 html += `
                     <tr>
-                        <td><a class="lien-adversaire" href="adversaire.html?type=reel&id=${j.playerId}">${formaterNom(j.prenom, j.nom)}</a></td>
+                        <td><a class="lien-adversaire" href="adversaire.html?type=reel&id=${j.playerId}">${formaterNom(j.prenom, j.nom)}</a>${j.estCapitaine ? ' <span title="Capitaine de la Coupe Davis / Fed Cup">🎽</span>' : ''}</td>
                         <td><a class="lien-adversaire" href="coach.html?id=${j.coachUserId}">${j.coachNom}</a></td>
                     </tr>
                 `;
