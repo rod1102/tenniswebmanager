@@ -180,7 +180,7 @@
                         </div>
                         <div class="tournoi-status-badge tournoi-status-${t.statut}">${traduireStatutTournoi(t.statut)}</div>
                     </div>
-                    ${t.statut === 'termine' && t.participe ? `<div class="tournoi-resultat">Éliminé(e) : ${t.tour_elimine_joueur || '-'} · ${t.points_gagnes_joueur || 0} points</div>` : ''}
+                    ${t.statut === 'termine' && t.participe ? `<div class="tournoi-resultat">${t.tour_elimine_joueur === 'Vainqueur' ? 'Vainqueur' : 'Éliminé(e) : ' + (t.tour_elimine_joueur || '-')} · ${t.points_gagnes_joueur || 0} points</div>` : ''}
                     ${!t.participe ? `<div class="tournoi-card-meta">Tu n'es pas inscrit(e) à ce tournoi.</div>` : ''}
                 `;
                 liste.appendChild(carte);
