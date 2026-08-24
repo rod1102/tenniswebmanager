@@ -4320,19 +4320,24 @@ app.get('/api/tournois/:id', (req, res) => {
 // Distance absolue plutot que re-derivation du numero de saison via
 // phaseDeSemaine : un changement de LONGUEUR_SAISON (ex. 50->51 le 2026-08-24)
 // reinterprete RETROACTIVEMENT la saison de N'IMPORTE QUELLE semaine passee, y
-// compris une ligne creee des annees de jeu plus tot sous une autre valeur -
-// bug decouvert le 2026-08-25 : l'Open d'Australie et la semaine 7 de la saison 2
-// disparaissaient completement de "Tournois de l'annee" (et n'etaient jamais
-// recrees non plus) car une ligne bien plus ancienne se retrouvait par erreur
-// reinterpretee comme "meme saison" que l'occurrence a venir. Deux occurrences a
-// moins d'une demi-saison d'ecart sont presque certainement un doublon (decalage
-// de calendrier), deux occurrences a l'ecart d'une saison complete ou plus sont
-// deux editions differentes - stable quel que soit LONGUEUR_SAISON au moment de
-// la comparaison, contrairement au recalcul de saison.
+// compris une ligne creee des annees de jeu plus tot sous une autre valeur.
+// Deux occurrences a moins d'une demi-saison d'ecart sont presque certainement
+// un doublon (decalage de calendrier), deux occurrences a l'ecart d'une saison
+// complete ou plus sont deux editions differentes - stable quel que soit
+// LONGUEUR_SAISON au moment de la comparaison, contrairement au recalcul de saison.
+// r.semaine !== semaineReference (ajoute le 2026-08-25) : sans cette exclusion,
+// un tournoi deja cree A CETTE POSITION EXACTE (le cas normal - cree a S-5,
+// tire a S-1) se detectait lui-meme comme "doublon" des qu'il apparaissait dans
+// la liste "Tournois de l'annee", le faisant disparaitre completement de
+// l'affichage (bug signale par l'utilisateur pour l'Open d'Australie et la
+// semaine 7 de la saison 2 - les 2 avaient deja ete crees a leur bonne position
+// et se sont donc mis a se filtrer eux-memes). Les appels cote creation
+// verifient deja `!tournoiRow`/`!existe` en position exacte avant d'appeler
+// cette fonction, donc l'exclusion ne change rien pour eux.
 function tournoiDejaCreeCetteSaison(calendrierId, semaineReference) {
     const seuil = LONGUEUR_SAISON / 2;
     return db.prepare('SELECT semaine FROM tournois WHERE calendrier_id = ?').all(calendrierId)
-        .some(function (r) { return Math.abs(r.semaine - semaineReference) < seuil; });
+        .some(function (r) { return r.semaine !== semaineReference && Math.abs(r.semaine - semaineReference) < seuil; });
 }
 
 // Cree un tournoi au stade "inscriptions" : le pool d'entrants existe (visible dans
