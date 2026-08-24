@@ -1676,7 +1676,11 @@ function executerAvancementSemaine() {
                         tournoiRow = { id: nouveauId, statut: 'inscriptions' };
                     }
                     if (tournoiRow.statut === 'inscriptions') {
-                        forcerInscriptionTop30Obligatoire(entree, semaineTirage);
+                        // Plus d'inscription forcee des joueurs du Top 30 fixe aux tournois
+                        // obligatoires (revient sur le choix du 2026-08-23, demande explicite
+                        // de l'utilisateur, 2026-08-24) : le respect de l'obligation se
+                        // verifie desormais au calcul des points (pointsRetenusParEntiteCircuit),
+                        // pas ici a l'inscription.
                         tirerAuSort(tournoiRow.id, entree);
                     }
                 });
@@ -2832,14 +2836,8 @@ function assurerRoster(circuit) {
 // Regle "18/16 meilleurs resultats" ATP/WTA (fidele aux vraies regles du tour,
 // demande explicite de l'utilisateur, 2026-08-22) - le classement Live/Race
 // n'est plus une simple somme de tous les points gagnes : seuls les N meilleurs
-// resultats (par points, sans distinction de categorie - la partition GC/M1000
-// "a comptage garanti" a ete retiree le 2026-08-23, jugee source de confusion
-// pour un gain de fidelite marginal) comptent : 18 pour l'ATP, 16 pour la WTA
-// (+1 si qualifie·e aux Masters de fin de saison dans la fenetre, regle WTA
-// uniquement). Le respect des tournois obligatoires (Grand Chelem, Masters 1000)
-// pour le Top 30 fixe ne joue plus sur le calcul des points : un membre du Top
-// 30 qui ne serait pas inscrit a l'un d'eux y est desormais ajoute directement
-// (voir forcerInscriptionTop30Obligatoire, au tirage au sort).
+// resultats comptent : 18 pour l'ATP, 16 pour la WTA (+1 si qualifie·e aux
+// Masters de fin de saison dans la fenetre, regle WTA uniquement).
 const NB_RESULTATS_RETENUS = { ATP: 18, WTA: 16 };
 
 // Masters 1000 obligatoires pour le Top 30 fixe - reprend les vraies
@@ -2851,14 +2849,48 @@ const M1000_OBLIGATOIRE_TOP30 = {
     WTA: ['wta-indian-wells', 'wta-miami', 'wta-madrid', 'wta-beijing']
 };
 
-// Points retenus (regle des N meilleurs resultats, sans distinction de
-// categorie) pour TOUTES les entites (vrais joueurs + rivaux persistants) d'un
-// circuit sur une fenetre donnee, en un minimum de requetes SQL (un balayage
-// groupe plutot qu'une requete par entite). Retourne une Map cle
-// ('joueur:ID'/'rival:ID') -> points retenus.
+function estTournoiObligatoireTop30(circuit, calendrierId, categorie) {
+    return categorie === 'slam' || (M1000_OBLIGATOIRE_TOP30[circuit] || []).indexOf(calendrierId) !== -1;
+}
+
+// Points retenus (regle des N meilleurs resultats) pour TOUTES les entites
+// (vrais joueurs + rivaux persistants) d'un circuit sur une fenetre donnee, en
+// un minimum de requetes SQL (un balayage groupe plutot qu'une requete par
+// entite). Retourne une Map cle ('joueur:ID'/'rival:ID') -> points retenus.
+//
+// Regle des tournois obligatoires (Grand Chelem, Masters 1000 designes) pour un
+// vrai joueur classe dans le Top 30 fixe de la saison concernee (classement_top30) :
+// PLUS d'inscription forcee (revient sur le choix du 2026-08-23, demande
+// explicite de l'utilisateur, 2026-08-24) - le coach reste libre de ne pas
+// inscrire son joueur. En revanche, chaque occurrence obligatoire, si elle est
+// TERMINEE dans la fenetre, occupe TOUJOURS un des N resultats retenus : avec le
+// resultat reellement obtenu s'il a participe, ou un ZERO force sinon - ce n'est
+// donc PAS equivalent a "l'ignorer" (qui reviendrait juste a completer avec le
+// meilleur resultat volontaire suivant). Seuls les resultats VOLONTAIRES
+// (non-obligatoires, ou obligatoires d'une saison ou le joueur n'etait pas
+// Top 30) se disputent les slots restants (N moins le nombre d'obligatoires deja
+// comptes, jamais negatif). La fenetre (52 semaines, FENETRE_LIVE) chevauche
+// quasi-systematiquement 2 saisons (LONGUEUR_SAISON=51) : le Top 30 et le
+// calendrier obligatoire sont donc verifies saison par saison, pas globalement.
 function pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle) {
+    const tournois = db.prepare(`
+        SELECT id, semaine, categorie, calendrier_id FROM tournois
+        WHERE circuit = ? AND semaine > ? AND semaine <= ? AND statut = 'termine'
+    `).all(circuit, semaineMin, semaineActuelle);
+    const infoTournoi = new Map(tournois.map(function (t) { return [t.id, t]; }));
+
+    const tournoisObligatoires = tournois
+        .filter(function (t) { return estTournoiObligatoireTop30(circuit, t.calendrier_id, t.categorie); })
+        .map(function (t) { return Object.assign({}, t, { saison: phaseAffichee(t.semaine).numeroSaison }); });
+
+    const top30ParSaison = new Map();
+    new Set(tournoisObligatoires.map(function (t) { return t.saison; })).forEach(function (saison) {
+        const rows = db.prepare('SELECT cle FROM classement_top30 WHERE saison = ? AND circuit = ?').all(saison, circuit);
+        top30ParSaison.set(saison, new Set(rows.map(function (r) { return r.cle; })));
+    });
+
     const resultats = db.prepare(`
-        SELECT tj.player_id, tj.rival_id, tj.points_gagnes, t.categorie
+        SELECT tj.player_id, tj.rival_id, tj.points_gagnes, tj.tournoi_id
         FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
         WHERE t.circuit = ? AND t.semaine > ? AND t.semaine <= ? AND t.statut = 'termine'
           AND tj.points_gagnes IS NOT NULL
@@ -2868,50 +2900,46 @@ function pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle) {
     const parEntite = new Map();
     resultats.forEach(function (r) {
         const cle = r.player_id ? 'joueur:' + r.player_id : 'rival:' + r.rival_id;
-        if (!parEntite.has(cle)) parEntite.set(cle, []);
-        parEntite.get(cle).push(r);
+        if (!parEntite.has(cle)) parEntite.set(cle, new Map());
+        parEntite.get(cle).set(r.tournoi_id, r.points_gagnes);
     });
 
-    const points = new Map();
-    parEntite.forEach(function (mesResultats, cle) {
-        let n = NB_RESULTATS_RETENUS[circuit];
-        // Bonus WTA : qualification aux Masters de fin de saison dans la fenetre.
-        if (circuit === 'WTA' && mesResultats.some(function (r) { return r.categorie === 'finals'; })) n += 1;
+    // Toutes les entites concernees : celles qui ont au moins un resultat, PLUS
+    // les joueurs Top 30 d'une saison presente dans la fenetre meme sans aucun
+    // resultat du tout (leurs zeros obligatoires doivent quand meme compter).
+    const cles = new Set(parEntite.keys());
+    top30ParSaison.forEach(function (set) { set.forEach(function (cle) { if (cle.indexOf('joueur:') === 0) cles.add(cle); }); });
 
-        const meilleurs = mesResultats.map(function (r) { return r.points_gagnes; }).sort(function (a, b) { return b - a; }).slice(0, n);
-        points.set(cle, meilleurs.reduce(function (s, x) { return s + x; }, 0));
+    const points = new Map();
+    cles.forEach(function (cle) {
+        const resultatsParTournoi = parEntite.get(cle) || new Map();
+
+        const estJoueur = cle.indexOf('joueur:') === 0;
+        const obligatoiresApplicables = estJoueur
+            ? tournoisObligatoires.filter(function (t) { return (top30ParSaison.get(t.saison) || new Set()).has(cle); })
+            : [];
+        const idsObligatoires = new Set(obligatoiresApplicables.map(function (t) { return t.id; }));
+
+        const valeursObligatoires = obligatoiresApplicables.map(function (t) { return resultatsParTournoi.get(t.id) || 0; });
+        const valeursVolontaires = [];
+        let qualifieFinalsWTA = false;
+        resultatsParTournoi.forEach(function (pts, tournoiId) {
+            if (idsObligatoires.has(tournoiId)) return;
+            valeursVolontaires.push(pts);
+            if (infoTournoi.get(tournoiId) && infoTournoi.get(tournoiId).categorie === 'finals') qualifieFinalsWTA = true;
+        });
+
+        let n = NB_RESULTATS_RETENUS[circuit];
+        if (circuit === 'WTA' && qualifieFinalsWTA) n += 1;
+
+        const slotsVolontairesRestants = Math.max(0, n - valeursObligatoires.length);
+        const meilleursVolontaires = valeursVolontaires.sort(function (a, b) { return b - a; }).slice(0, slotsVolontairesRestants);
+
+        const total = valeursObligatoires.reduce(function (s, x) { return s + x; }, 0) + meilleursVolontaires.reduce(function (s, x) { return s + x; }, 0);
+        points.set(cle, total);
     });
 
     return points;
-}
-
-// Au tirage au sort d'un Grand Chelem ou d'un Masters 1000 obligatoire, tout
-// joueur reel valide du Top 30 fixe de la saison (classement_top30, vide en
-// Saison 1) qui n'est pas encore inscrit y est ajoute directement - plus simple
-// et plus efficace qu'un bonus de calcul pour compenser une absence (demande
-// explicite de l'utilisateur, 2026-08-23, en remplacement du bonus retire ci-
-// dessus). Un joueur blesse reste exclu (inscrireJoueurAuTournoi refuse deja) ;
-// les rivaux persistants du Top 30 ne sont jamais concernes, ils n'ont pas de
-// coach pour "s'inscrire".
-function forcerInscriptionTop30Obligatoire(entree, semaine) {
-    const idsM1000Oblig = M1000_OBLIGATOIRE_TOP30[entree.circuit] || [];
-    const estObligatoire = entree.categorie === 'slam' || idsM1000Oblig.indexOf(entree.id) !== -1;
-    if (!estObligatoire) return;
-
-    const saisonAffichee = phaseAffichee(semaine).numeroSaison;
-    const top30 = db.prepare('SELECT cle FROM classement_top30 WHERE saison = ? AND circuit = ?').all(saisonAffichee, entree.circuit);
-    if (top30.length === 0) return;
-
-    const type = entree.circuit === 'ATP' ? 'joueur' : 'joueuse';
-    top30.forEach(function (ligne) {
-        if (ligne.cle.indexOf('joueur:') !== 0) return;
-        const playerId = Number(ligne.cle.slice('joueur:'.length));
-        const player = db.prepare("SELECT * FROM players WHERE id = ? AND type = ? AND statut = 'valide'").get(playerId, type);
-        if (!player) return;
-        const dejaInscrit = db.prepare('SELECT 1 FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ? AND player_id = ?').get(entree.id, semaine, playerId);
-        if (dejaInscrit) return;
-        inscrireJoueurAuTournoi(player.user_id, player, entree, semaine);
-    });
 }
 
 // Classement PARTAGE (tous coachs confondus, pas un seul) pour un circuit et une
@@ -4087,6 +4115,17 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
         const favoris = db.prepare('SELECT calendrier_id, semaine FROM tournoi_favoris WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, debut, finAnnee);
         const favoriSet = new Set(favoris.map(function (f) { return f.calendrier_id + '-' + f.semaine; }));
 
+        // estTop30 : le joueur est-il dans le Top 30 fixe de la saison en cours -
+        // detrmine si "estObligatoire" doit vraiment declencher l'avertissement pour
+        // CE coach (un tournoi obligatoire ne concerne que les joueurs Top 30, cf.
+        // pointsRetenusParEntiteCircuit). Plus d'inscription forcee depuis le
+        // 2026-08-24 (demande explicite de l'utilisateur) : ne pas participer reste
+        // possible, mais l'occurrence obligatoire comptera quand meme dans le
+        // classement Live/Race avec 0 point si le joueur etait Top 30.
+        const saisonAffichee = nombreSaisonAffichee();
+        const estTop30 = !!db.prepare('SELECT 1 FROM classement_top30 WHERE saison = ? AND circuit = ? AND cle = ?')
+            .get(saisonAffichee, circuit, 'joueur:' + playerId);
+
         eligibles.forEach(function (t) {
             const tournoi = tournoiMap.get(t.id + '-' + t.semaine);
             t.inscrit = inscritSet.has(t.id + '-' + t.semaine);
@@ -4095,6 +4134,7 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
             // de la fenetre de 5 semaines : coherent avec le vrai delai avant tirage au sort.
             t.inscriptionFermee = !!tournoi && tournoi.statut !== 'inscriptions';
             t.favori = favoriSet.has(t.id + '-' + t.semaine);
+            t.estObligatoire = !t.estCoupe && estTop30 && estTournoiObligatoireTop30(circuit, t.id, t.categorie);
         });
 
         res.json({ success: true, semaineActuelle: etat.semaine_actuelle, debut, finOuvert, tournois: eligibles });

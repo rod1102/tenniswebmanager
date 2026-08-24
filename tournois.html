@@ -343,8 +343,17 @@
                         actionHtml = `<button class="tournoi-coeur-btn ${t.favori ? 'active' : ''}" title="Programmer l'inscription dès l'ouverture">${t.favori ? '♥' : '♡'}</button>`;
                     }
 
+                    // Avertissement Top 30 fixe : ce tournoi (Grand Chelem ou M1000 designe)
+                    // est obligatoire pour ce joueur cette saison - ne pas s'y inscrire ne
+                    // bloque plus l'inscription (demande explicite de l'utilisateur,
+                    // 2026-08-24), mais compte quand meme comme un resultat a 0 point dans
+                    // le classement Live/Race (pointsRetenusParEntiteCircuit, server.js).
+                    const avertissementObligatoire = t.estObligatoire
+                        ? ` <span title="Tournoi obligatoire pour ton classement Top 30 : si tu n'y participes pas, il comptera quand même dans ton classement Live/Race avec 0 point.">⚠️</span>`
+                        : '';
+
                     carte.innerHTML = `
-                        <a class="tournoi-card-name ${nomClasse}" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>
+                        <a class="tournoi-card-name ${nomClasse}" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>${avertissementObligatoire}
                         <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Tableau de ${t.taille_tableau}</div>
                         ${actionHtml}
                     `;
