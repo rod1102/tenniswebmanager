@@ -342,6 +342,15 @@
                     `;
                     continue;
                 }
+                if (phaseInfo && phaseInfo.finDeSaison) {
+                    weeksHtml += `
+                        <div class="planning-week-card planning-week-tournoi">
+                            <label>${labelSemaine}</label>
+                            <div class="planning-tournoi-lock">Fin de saison : Moulinette</div>
+                        </div>
+                    `;
+                    continue;
+                }
                 const valeurActuelle = ordresExistants[s] || '';
                 const bientotPerdue = s === dataPlan.debut && valeurActuelle === '';
                 let optionsHtml = '';

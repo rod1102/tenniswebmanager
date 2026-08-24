@@ -956,8 +956,17 @@ app.get('/api/planification/:playerId', (req, res) => {
               AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
         `).all(debut, fin, playerId);
 
+        // finDeSaison : derniere semaine de type "tournoi" du cycle, juste avant que la
+        // moulinette s'applique a la bascule vers la Pre-saison suivante - rien a y
+        // planifier (aucun tournoi n'y tombe jamais), donc le select repos/entrainement
+        // n'a pas de sens la, contrairement aux autres semaines "tournoi" classiques
+        // (bug signale par l'utilisateur, 2026-08-24 : affichait un select vide avec
+        // l'alerte "bientot trop tard" au lieu d'expliquer qu'il n'y a rien a faire).
         const phases = {};
-        for (let s = debut; s <= fin; s++) phases[s] = phaseAffichee(s);
+        for (let s = debut; s <= fin; s++) {
+            const p = phaseAffichee(s);
+            phases[s] = Object.assign({}, p, { finDeSaison: p.type === 'tournoi' && p.positionSemaine === LONGUEUR_SAISON - 2 });
+        }
 
         res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournois, phases });
     } catch (err) {
