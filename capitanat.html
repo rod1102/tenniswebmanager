@@ -57,39 +57,58 @@
         }
 
         function formulaireSurface(tie, playerId) {
+            // Reste affiche (et modifiable) toute la semaine S-3, meme apres un premier
+            // choix - pre-selectionne la valeur actuelle le cas echeant. Avant, le
+            // formulaire disparaissait des la 1ere soumission (actionRequise ne servait
+            // qu'a l'alerte, pas a la visibilite du formulaire), rendant impossible de
+            // se raviser (bug signale par l'utilisateur, 2026-08-24). Le serveur refuse
+            // de toute facon toute modification une fois sorti de la semaine S-3.
             return `
                 <div class="form-group" style="margin-top:16px;">
                     <label>Surface (choix du capitaine de l'équipe à domicile)</label>
                     <select id="surface-select-${tie.id}">
-                        <option value="dur">Dur</option>
-                        <option value="terre">Terre battue</option>
-                        <option value="herbe">Herbe</option>
+                        <option value="dur" ${tie.surface === 'dur' ? 'selected' : ''}>Dur</option>
+                        <option value="terre" ${tie.surface === 'terre' ? 'selected' : ''}>Terre battue</option>
+                        <option value="herbe" ${tie.surface === 'herbe' ? 'selected' : ''}>Herbe</option>
                     </select>
-                    <button class="cta cta-primary surface-btn" data-tie-id="${tie.id}" data-player-id="${playerId}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider la surface</button>
+                    <button class="cta cta-primary surface-btn" data-tie-id="${tie.id}" data-player-id="${playerId}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">${tie.surface ? 'Changer la surface' : 'Valider la surface'}</button>
                 </div>
             `;
         }
 
-        function optionsJoueurs(liste) {
+        function optionsJoueursAvecSelection(liste, valeurActuelle) {
             return (liste || []).map(function (j) {
-                return `<option value="${j.estReel ? 'reel' : 'rival'}-${j.id}">${j.nom}${j.estReel ? '' : ' (rival)'}</option>`;
+                const val = `${j.estReel ? 'reel' : 'rival'}-${j.id}`;
+                return `<option value="${val}" ${val === valeurActuelle ? 'selected' : ''}>${j.nom}${j.estReel ? '' : ' (rival)'}</option>`;
             }).join('');
         }
 
-        function formulaireComposition(tie, nation, joueurs, playerId) {
-            const opts = optionsJoueurs(joueurs);
+        // compositionActuelle (optionnel) : ligne coupe_composition deja enregistree
+        // pour cette nation, le cas echeant - pre-selectionne les 4 postes pour
+        // pouvoir se raviser sans repartir de zero, meme raison que formulaireSurface
+        // ci-dessus (le formulaire reste modifiable toute la semaine S-2, pas
+        // seulement au premier essai).
+        function formulaireComposition(tie, nation, joueurs, playerId, compositionActuelle) {
+            function valeurPoste(estReelCle, idCle) {
+                if (!compositionActuelle || compositionActuelle[idCle] == null) return '';
+                return `${compositionActuelle[estReelCle] ? 'reel' : 'rival'}-${compositionActuelle[idCle]}`;
+            }
+            const valA = valeurPoste('joueur_a_est_reel', 'joueur_a_id');
+            const valB = valeurPoste('joueur_b_est_reel', 'joueur_b_id');
+            const valD1 = valeurPoste('double_j1_est_reel', 'double_j1_id');
+            const valD2 = valeurPoste('double_j2_est_reel', 'double_j2_id');
             return `
                 <div class="form-group" style="margin-top:16px;">
                     <label>Composition — ${nation}</label>
                     <label style="font-size:0.7rem;">Simple 1 (+ simple retour vs B adverse)</label>
-                    <select id="compo-a-${tie.id}"><option value="">—</option>${opts}</select>
+                    <select id="compo-a-${tie.id}"><option value="">—</option>${optionsJoueursAvecSelection(joueurs, valA)}</select>
                     <label style="font-size:0.7rem;">Simple 2 (+ simple retour vs A adverse)</label>
-                    <select id="compo-b-${tie.id}"><option value="">—</option>${opts}</select>
+                    <select id="compo-b-${tie.id}"><option value="">—</option>${optionsJoueursAvecSelection(joueurs, valB)}</select>
                     <label style="font-size:0.7rem;">Double — joueur 1</label>
-                    <select id="compo-d1-${tie.id}"><option value="">—</option>${opts}</select>
+                    <select id="compo-d1-${tie.id}"><option value="">—</option>${optionsJoueursAvecSelection(joueurs, valD1)}</select>
                     <label style="font-size:0.7rem;">Double — joueur 2</label>
-                    <select id="compo-d2-${tie.id}"><option value="">—</option>${opts}</select>
-                    <button class="cta cta-primary compo-btn" data-tie-id="${tie.id}" data-nation="${nation}" data-player-id="${playerId}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider la composition</button>
+                    <select id="compo-d2-${tie.id}"><option value="">—</option>${optionsJoueursAvecSelection(joueurs, valD2)}</select>
+                    <button class="cta cta-primary compo-btn" data-tie-id="${tie.id}" data-nation="${nation}" data-player-id="${playerId}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">${compositionActuelle ? 'Changer la composition' : 'Valider la composition'}</button>
                 </div>
             `;
         }
@@ -275,9 +294,17 @@
 
             container.innerHTML = sections.map(function (s) { return sectionNation(s.playerId, s.data); }).join('');
 
+            // Le formulaire reste affiche (et modifiable) pendant TOUTE la semaine de
+            // l'etape concernee (etape==='surface'/'composition'), pas seulement tant
+            // qu'aucun choix n'a encore ete fait - avant, des la 1ere soumission,
+            // actionRequise passait a false et le formulaire disparaissait
+            // completement, rendant impossible de se raviser avant la fin de la
+            // semaine (bug signale par l'utilisateur, 2026-08-24). actionRequise sert
+            // maintenant uniquement a l'encadre rouge "action attendue" (carteRencontre
+            // ci-dessus), pas a la visibilite du formulaire lui-meme.
             for (const s of sections) {
-                const tiesComposition = s.data.ties.filter(function (t) { return t.actionRequise && t.etape === 'composition'; });
-                const tiesSurface = s.data.ties.filter(function (t) { return t.actionRequise && t.etape === 'surface'; });
+                const tiesComposition = s.data.ties.filter(function (t) { return t.etape === 'composition'; });
+                const tiesSurface = s.data.ties.filter(function (t) { return t.etape === 'surface'; });
 
                 tiesSurface.forEach(function (t) {
                     document.getElementById('action-zone-' + t.id).innerHTML = formulaireSurface(t, s.playerId);
@@ -288,7 +315,8 @@
                     const detail = await detailResponse.json();
                     if (!detailResponse.ok) continue;
                     const joueurs = t.nation_domicile === s.data.nation ? detail.joueursDomicile : detail.joueursExterieur;
-                    document.getElementById('action-zone-' + t.id).innerHTML = formulaireComposition(t, s.data.nation, joueurs, s.playerId);
+                    const compositionActuelle = detail.composition.find(function (c) { return c.nation === s.data.nation; }) || null;
+                    document.getElementById('action-zone-' + t.id).innerHTML = formulaireComposition(t, s.data.nation, joueurs, s.playerId, compositionActuelle);
                 }
             }
 
