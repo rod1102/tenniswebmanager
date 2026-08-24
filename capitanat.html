@@ -113,34 +113,21 @@
             `;
         }
 
-        const LABELS_STYLE = {
-            sprinter: 'Sprinter', prudence: 'Prudence', en_avant: 'En avant', marathonien: 'Marathonien',
-            mental_acier: 'Mental d\'acier', reperage: 'Repérage', aucun: 'Aucun'
-        };
-
         function carteRubber(r) {
             const label = r.type === 'double' ? 'Double' : 'Simple ' + r.numero;
             return `<div class="stat-row"><span class="stat-label">${label}</span><span class="stat-value">${r.nation_vainqueur} — ${r.score || ''}</span></div>`;
         }
 
-        function formulaireStyle(tie, playerId) {
-            const options = Object.keys(LABELS_STYLE).map(function (s) { return `<option value="${s}">${LABELS_STYLE[s]}</option>`; }).join('');
-            return `
-                <div class="form-group" style="margin-top:12px;">
-                    <label>Ton style pour cette manche (simple + double si tu joues le double)</label>
-                    <select id="style-select-${tie.id}">${options}</select>
-                    <button class="cta cta-primary style-btn" data-tie-id="${tie.id}" data-player-id="${playerId}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider le style</button>
-                </div>
-            `;
-        }
-
-        // Details (styles/resultats) affiches directement sur cette page via un
-        // menu deroulant, sans jamais avoir besoin de cliquer vers coupe.html -
-        // demande explicite de l'utilisateur, 2026-08-24 ("pas besoin de cliquer sur
-        // un autre lien, tout doit etre fait directement sur cette page"). Recharge
+        // Resultats uniquement (menu deroulant, sans jamais avoir besoin de cliquer
+        // vers coupe.html - demande explicite de l'utilisateur, 2026-08-24 : "pas
+        // besoin de cliquer sur un autre lien, tout doit etre fait directement sur
+        // cette page"). Le style de jeu N'EST PAS un choix de capitaine - chaque
+        // coach dont le joueur participe le regle lui-meme depuis sa propre fiche
+        // (coupe.html), pas ici (demande explicite separee, meme jour : l'ancienne
+        // version affichait a tort un formulaire de style sur cette page). Recharge
         // a chaque ouverture plutot que de mettre en cache (etat simple, cout
         // negligeable a l'echelle de quelques rencontres par capitaine).
-        async function basculerDetails(tieId, playerId) {
+        async function basculerDetails(tieId) {
             const zone = document.getElementById('details-zone-' + tieId);
             const ouvert = zone.style.display !== 'none';
             if (ouvert) { zone.style.display = 'none'; return; }
@@ -155,28 +142,9 @@
                 return;
             }
 
-            let html = '';
-            if (data.rubbers.length > 0) {
-                html += data.rubbers.map(carteRubber).join('');
-            }
-            if (data.etape === 'styles') {
-                html += formulaireStyle(data.tie, playerId);
-            } else if (data.rubbers.length === 0) {
-                html += '<p class="match-hint">Rien à faire cette semaine pour cette rencontre.</p>';
-            }
-            zone.innerHTML = html;
-
-            const styleBtn = zone.querySelector('.style-btn');
-            if (styleBtn) styleBtn.addEventListener('click', async function () {
-                const style = document.getElementById('style-select-' + tieId).value;
-                const r = await fetch('/api/coupe/style', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tieId, playerId, style })
-                });
-                const d = await r.json();
-                if (!r.ok) { alert(d.error); return; }
-                alert('Style enregistré.');
-            });
+            zone.innerHTML = data.rubbers.length > 0
+                ? data.rubbers.map(carteRubber).join('')
+                : '<p class="match-hint">Aucun résultat pour le moment.</p>';
         }
 
         function carteRencontre(t, playerId) {
@@ -190,7 +158,7 @@
                     <div class="tournoi-card-meta">${t.manche} · Semaine ${t.positionSemaine} · ${scoreTxt}</div>
                     ${urgent ? `<div class="planning-alerte-texte" style="font-weight:700;">Une action est attendue de ta part cette semaine.</div>` : ''}
                     <div id="action-zone-${t.id}"></div>
-                    <button class="cta cta-secondary details-btn" data-tie-id="${t.id}" data-player-id="${playerId}" style="padding:6px 14px; font-size:0.7rem; margin-top:10px;">Styles / résultats détaillés</button>
+                    <button class="cta cta-secondary details-btn" data-tie-id="${t.id}" style="padding:6px 14px; font-size:0.7rem; margin-top:10px;">Voir les résultats</button>
                     <div id="details-zone-${t.id}" style="display:none; margin-top:10px;"></div>
                 </div>
             `;
@@ -211,7 +179,7 @@
         function attacherActionsDetails() {
             document.querySelectorAll('.details-btn').forEach(function (btn) {
                 btn.addEventListener('click', function () {
-                    basculerDetails(btn.dataset.tieId, btn.dataset.playerId);
+                    basculerDetails(btn.dataset.tieId);
                 });
             });
         }
