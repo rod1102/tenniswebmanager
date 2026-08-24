@@ -1442,7 +1442,18 @@ function executerAvancementSemaine() {
             // en reserve indefiniment, perdus s'ils ne sont pas utilises a temps).
             let pointsExperience = 0;
             let pointsEnergie = player.points_energie;
-            let pointsDispositionsAGagner = 0;
+            // EXCEPTION a la regle ci-dessus, uniquement pour les dispositions gagnees :
+            // en quittant une semaine de Pre-saison/Semaine 0 (phaseActuelle.type !==
+            // 'tournoi'), aucune planification n'est jamais possible - le coach n'a donc
+            // JAMAIS eu l'occasion de repartir un gain recu la (ex. le budget d'intersaison
+            // verse par appliquerResetPreSaison a l'entree en Pre-saison), contrairement a
+            // un credit hebdomadaire normal qu'il aurait pu choisir d'utiliser. Le remettre
+            // a 0 ici l'effacerait avant meme que le coach ait pu le voir, des le prochain
+            // avancement automatique (bug signale par l'utilisateur, 2026-08-24 : la
+            // moulinette ne proposait jamais de repartir de disposition). On le reporte
+            // donc tel quel tant qu'aucune semaine "tournoi" (avec planification reelle)
+            // n'a ete traversee.
+            let pointsDispositionsAGagner = phaseActuelle.type === 'tournoi' ? 0 : player.points_dispositions_a_gagner;
             let pointsDispositionsADeplacer = 0;
             // Recuperation : tant qu'aucune semaine de repos n'est faite, la condition
             // (En forme/Fatigue/Diminue/Blesse) reste degradee ; une semaine de repos
