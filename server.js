@@ -4317,10 +4317,22 @@ app.get('/api/tournois/:id', (req, res) => {
 // se retrouve, sous le calendrier ACTUEL, associe a une position plus tardive encore
 // a venir cette meme saison - sans ce garde-fou, il serait recree et rejoue une 2e
 // fois (ex. une 2e WTA Finals dans la meme saison, avec un 2e "vainqueur").
+// Distance absolue plutot que re-derivation du numero de saison via
+// phaseDeSemaine : un changement de LONGUEUR_SAISON (ex. 50->51 le 2026-08-24)
+// reinterprete RETROACTIVEMENT la saison de N'IMPORTE QUELLE semaine passee, y
+// compris une ligne creee des annees de jeu plus tot sous une autre valeur -
+// bug decouvert le 2026-08-25 : l'Open d'Australie et la semaine 7 de la saison 2
+// disparaissaient completement de "Tournois de l'annee" (et n'etaient jamais
+// recrees non plus) car une ligne bien plus ancienne se retrouvait par erreur
+// reinterpretee comme "meme saison" que l'occurrence a venir. Deux occurrences a
+// moins d'une demi-saison d'ecart sont presque certainement un doublon (decalage
+// de calendrier), deux occurrences a l'ecart d'une saison complete ou plus sont
+// deux editions differentes - stable quel que soit LONGUEUR_SAISON au moment de
+// la comparaison, contrairement au recalcul de saison.
 function tournoiDejaCreeCetteSaison(calendrierId, semaineReference) {
-    const numeroSaison = phaseDeSemaine(semaineReference).numeroSaison;
+    const seuil = LONGUEUR_SAISON / 2;
     return db.prepare('SELECT semaine FROM tournois WHERE calendrier_id = ?').all(calendrierId)
-        .some(function (r) { return phaseDeSemaine(r.semaine).numeroSaison === numeroSaison; });
+        .some(function (r) { return Math.abs(r.semaine - semaineReference) < seuil; });
 }
 
 // Cree un tournoi au stade "inscriptions" : le pool d'entrants existe (visible dans
