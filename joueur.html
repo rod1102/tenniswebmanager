@@ -808,7 +808,19 @@
 
             if (data.capitaine) {
                 const estMoi = Number(data.capitaine) === Number(player.id);
-                zone.innerHTML = `<div class="stat-row"><span class="stat-label">Capitaine Coupe Davis/Fed Cup</span><span class="stat-value">${estMoi ? 'Toi' : 'Désigné'}</span></div>${lienRencontres}`;
+                // "Toi" capitaine merite un vrai panneau bien visible (comme les autres
+                // panneaux d'action de la page) : le simple stat-row discret d'avant se
+                // perdait facilement au milieu de la fiche, entre "Main forte" et
+                // "Classement Live" - le coach passait a cote sans jamais le remarquer
+                // (bug signale par l'utilisateur, 2026-08-24), alors qu'il y a des
+                // formulaires a remplir avant chaque manche (surface/composition/styles).
+                zone.innerHTML = estMoi
+                    ? `<div class="xp-pool-panel">
+                        <div class="xp-pool-title">Tu es capitaine de la Coupe Davis / Fed Cup</div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Pense à passer régulièrement fixer la surface, la composition et les styles avant chaque manche.</div>
+                        ${lienRencontres}
+                    </div>`
+                    : `<div class="stat-row"><span class="stat-label">Capitaine Coupe Davis/Fed Cup</span><span class="stat-value">Désigné</span></div>${lienRencontres}`;
                 return;
             }
 
