@@ -1331,6 +1331,7 @@ function executerAvancementSemaine() {
             let tournoiRow = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaine);
 
             if (!tournoiRow) {
+                if (tournoiDejaCreeCetteSaison(entree.id, semaine)) return; // deja joue cette saison a une autre position (decalage de calendrier)
                 // Filet de securite : normalement le pool est cree a S-5 (inscriptions
                 // ouvertes) et tire au sort a S-1. Si ce n'est jamais arrive (partie
                 // commencee en cours de cycle, etc.), on rattrape les deux etapes ici.
@@ -1592,7 +1593,7 @@ function executerAvancementSemaine() {
                 .sort(function (a, b) { return b.taille_tableau - a.taille_tableau; })
                 .forEach(function (entree) {
                     const existe = db.prepare('SELECT id FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaineOuvertureEntrants);
-                    if (!existe) {
+                    if (!existe && !tournoiDejaCreeCetteSaison(entree.id, semaineOuvertureEntrants)) {
                         creerTournoi(entree, semaineOuvertureEntrants, rivauxUtilisesOuverture);
                     }
                 });
@@ -1607,6 +1608,7 @@ function executerAvancementSemaine() {
                 .forEach(function (entree) {
                     let tournoiRow = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaineTirage);
                     if (!tournoiRow) {
+                        if (tournoiDejaCreeCetteSaison(entree.id, semaineTirage)) return; // deja joue cette saison a une autre position (decalage de calendrier)
                         const nouveauId = creerTournoi(entree, semaineTirage, rivauxUtilisesTirage);
                         tournoiRow = { id: nouveauId, statut: 'inscriptions' };
                     }
@@ -3988,7 +3990,14 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
             const phase = phaseDeSemaine(semaine);
             if (phase.type !== 'tournoi') continue;
             CALENDRIER_TOURNOIS
-                .filter(function (t) { return t.circuit === circuit && t.semaine_debut === phase.positionSemaine; })
+                // !tournoiDejaCreeCetteSaison : un tournoi deja cree/joue cette saison a
+                // une AUTRE position (decalage de calendrier, cf. tournoiDejaCreeCetteSaison
+                // plus bas) ne doit pas reapparaitre ici comme "a venir" - sinon la liste
+                // annonce une 2e edition du meme tournoi (Stockholm/Finals...) qui ne sera
+                // jamais reellement creee (le meme garde-fou bloque sa creation reelle),
+                // laissant une inscription possible mais sans effet (bug signale par
+                // l'utilisateur, 2026-08-24, suite au decalage de calendrier du meme jour).
+                .filter(function (t) { return t.circuit === circuit && t.semaine_debut === phase.positionSemaine && !tournoiDejaCreeCetteSaison(t.id, semaine); })
                 .forEach(function (t) { eligibles.push(Object.assign({}, t, { semaine, positionSemaine: t.semaine_debut, ouvert: semaine <= finOuvert })); });
             SEMAINES_COUPES_EQUIPE
                 .filter(function (sc) { return sc.semaine === phase.positionSemaine; })
@@ -4197,6 +4206,19 @@ app.get('/api/tournois/:id', (req, res) => {
         res.status(500).json({ error: 'ERREUR : ' + err.message });
     }
 });
+
+// Un calendrier_id ne doit jamais avoir 2 editions creees la meme saison. Garde-fou
+// necessaire depuis le decalage de calendrier du 2026-08-24 (Cincinnati+1 et ses
+// consequences en cascade sur Stockholm/ATP Finals/WTA Finals, decales une 2e ou 3e
+// fois le meme jour) : un tournoi deja cree/joue cette saison a son ANCIENNE position
+// se retrouve, sous le calendrier ACTUEL, associe a une position plus tardive encore
+// a venir cette meme saison - sans ce garde-fou, il serait recree et rejoue une 2e
+// fois (ex. une 2e WTA Finals dans la meme saison, avec un 2e "vainqueur").
+function tournoiDejaCreeCetteSaison(calendrierId, semaineReference) {
+    const numeroSaison = phaseDeSemaine(semaineReference).numeroSaison;
+    return db.prepare('SELECT semaine FROM tournois WHERE calendrier_id = ?').all(calendrierId)
+        .some(function (r) { return phaseDeSemaine(r.semaine).numeroSaison === numeroSaison; });
+}
 
 // Cree un tournoi au stade "inscriptions" : le pool d'entrants existe (visible dans
 // l'onglet Inscrits) mais le tableau n'est pas encore tire au sort (ca arrive a S-1,
