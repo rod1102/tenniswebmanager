@@ -87,7 +87,7 @@
             return `
                 <a class="tournoi-card" href="coupe.html?playerId=${playerId}&tieId=${t.id}" style="display:block; text-decoration:none;">
                     <div class="tournoi-card-name">${t.nation_domicile} vs ${t.nation_exterieur}</div>
-                    <div class="tournoi-card-meta">${t.manche}${divisionTxt} · Semaine ${t.semaine} · ${scoreTxt}</div>
+                    <div class="tournoi-card-meta">${t.manche}${divisionTxt} · Semaine ${t.positionSemaine} · ${scoreTxt}</div>
                 </a>
             `;
         }
@@ -190,7 +190,7 @@
             const divisionTxt = data.nbDivisions > 1 ? ` · Division ${tie.division}` : '';
             let html = `
                 <div class="stats-header">${tie.nation_domicile} vs ${tie.nation_exterieur}</div>
-                <p class="match-hint" style="text-align:left; padding:0;">${tie.manche || ''}${divisionTxt} · Semaine ${tie.semaine} · Surface : ${tie.surface ? LABELS_SURFACE[tie.surface] : 'pas encore choisie'}</p>
+                <p class="match-hint" style="text-align:left; padding:0;">${tie.manche || ''}${divisionTxt} · Semaine ${tie.positionSemaine} · Surface : ${tie.surface ? LABELS_SURFACE[tie.surface] : 'pas encore choisie'}</p>
             `;
 
             if (tie.statut === 'termine') {

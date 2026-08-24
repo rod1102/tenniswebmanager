@@ -7578,7 +7578,15 @@ app.get('/api/coupe/mes-rencontres/:playerId', (req, res) => {
         `).all(saison, circuit, player.nationalite, player.nationalite);
         const nbDivisions = db.prepare('SELECT MAX(division) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ?').get(saison, circuit).n || 1;
 
-        res.json({ success: true, nbDivisions, ties: ties.map(function (t) { return Object.assign({}, t, { manche: LABELS_MANCHE[t.manche] || t.manche }); }) });
+        // positionSemaine : le numero absolu brut (t.semaine) n'a de sens que pour
+        // l'implementation - jamais a afficher tel quel, sinon "Semaine 58" au lieu de
+        // "Semaine 5" une fois hors saison 1 (bug signale par l'utilisateur, 2026-08-24,
+        // meme categorie que le badge "Semaine 56" deja corrige ailleurs le 2026-07-20 -
+        // coupe.html n'avait pas ete couvert par ce correctif-la).
+        res.json({
+            success: true, nbDivisions,
+            ties: ties.map(function (t) { return Object.assign({}, t, { manche: LABELS_MANCHE[t.manche] || t.manche, positionSemaine: positionSemaineAffichee(t.semaine) }); })
+        });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
@@ -7714,7 +7722,8 @@ app.get('/api/coupe/tie/:tieId', (req, res) => {
         const nbDivisions = db.prepare('SELECT MAX(division) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ?').get(tie.saison, tie.circuit).n || 1;
 
         res.json({
-            success: true, nbDivisions, tie: Object.assign({}, tie, { manche: LABELS_MANCHE[tie.manche] || tie.manche }),
+            success: true, nbDivisions,
+            tie: Object.assign({}, tie, { manche: LABELS_MANCHE[tie.manche] || tie.manche, positionSemaine: positionSemaineAffichee(tie.semaine) }),
             composition, rubbers, capitaineDomicile, capitaineExterieur,
             etape: etapeCoupe(tie),
             joueursDomicile: joueursEligiblesNation(tie.circuit, tie.nation_domicile),
