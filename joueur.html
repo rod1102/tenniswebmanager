@@ -24,6 +24,7 @@
                         <a href="pronostics.html">Pronostics</a>
                         <a href="presse.html">Presse</a>
                         <a href="annuaire.html">Annuaire</a>
+                        <a href="capitanat.html">Capitanat</a>
                         <a href="statistiques.html">Statistiques</a>
                         <a href="regles.html">Règles</a>
                         <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
@@ -807,26 +808,17 @@
             const lienRencontres = `<p class="match-hint" style="text-align:left; padding:8px 0 0;"><a class="lien-adversaire" href="coupe.html?playerId=${player.id}">Voir mes rencontres de Coupe Davis / Fed Cup</a></p>`;
 
             if (data.capitaine) {
+                // Demande explicite de l'utilisateur, 2026-08-24 : rien d'autre ici qu'un
+                // simple rappel quand une action est due cette semaine - tout le reste
+                // (statut de capitaine, liste des rencontres, formulaires surface/
+                // composition) vit desormais sur la page dediee capitanat.html,
+                // accessible depuis le menu de navigation comme les autres pages.
+                // data.alerteJoueur vient du serveur (etapeCoupe + verification que
+                // l'action n'est pas deja faite) - jamais recalcule cote client.
                 const estMoi = Number(data.capitaine) === Number(player.id);
-                // "Toi" capitaine merite un vrai panneau bien visible (comme les autres
-                // panneaux d'action de la page) : le simple stat-row discret d'avant se
-                // perdait facilement au milieu de la fiche, entre "Main forte" et
-                // "Classement Live" - le coach passait a cote sans jamais le remarquer
-                // (bug signale par l'utilisateur, 2026-08-24), alors qu'il y a des
-                // formulaires a remplir avant chaque manche (surface/composition/styles).
-                // data.alerte (texte rouge exact "S-3 : ..."/"S-2 : ...") vient du serveur
-                // (etapeCoupe + verification que l'action n'est pas deja faite) - jamais
-                // recalcule cote client.
-                const lienCapitanat = `<p class="match-hint" style="text-align:left; padding:4px 0 0;"><a class="lien-adversaire" href="capitanat.html?playerId=${player.id}">Gérer mon équipe</a></p>`;
-                zone.innerHTML = estMoi
-                    ? `<div class="xp-pool-panel">
-                        <div class="xp-pool-title">Tu es capitaine de la Coupe Davis / Fed Cup</div>
-                        ${data.alerte ? `<div class="planning-alerte-texte" style="font-weight:700; margin-bottom:8px;">${data.alerte}</div>` : ''}
-                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Pense à passer régulièrement fixer la surface, la composition et les styles avant chaque manche.</div>
-                        ${lienCapitanat}
-                        ${lienRencontres}
-                    </div>`
-                    : `<div class="stat-row"><span class="stat-label">Capitaine Coupe Davis/Fed Cup</span><span class="stat-value">Désigné</span></div>${lienRencontres}`;
+                zone.innerHTML = (estMoi && data.alerteJoueur)
+                    ? `<p class="match-hint" style="text-align:left; padding:8px 0 0; color:#E24B4A; font-weight:700;">${data.alerteJoueur}</p>`
+                    : '';
                 return;
             }
 

@@ -24,6 +24,7 @@
                         <a href="pronostics.html">Pronostics</a>
                         <a href="presse.html">Presse</a>
                         <a href="annuaire.html">Annuaire</a>
+                        <a href="capitanat.html">Capitanat</a>
                         <a href="statistiques.html">Statistiques</a>
                         <a href="regles.html">Règles</a>
                         <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
@@ -34,13 +35,8 @@
             </div>
 
             <h1 class="dashboard-title">Capitanat</h1>
-            <div style="text-align:center;">
-                <span class="week-badge" id="nation-badge">Chargement...</span>
-            </div>
 
-            <div id="rencontres-container" style="margin-top:20px;"><p class="match-hint">Chargement...</p></div>
-
-            <p style="text-align:center; margin-top:20px;"><a class="lien-adversaire" id="tableau-lien" href="#">Voir le tableau complet du groupe mondial</a></p>
+            <div id="capitanat-container" style="margin-top:20px;"><p class="match-hint">Chargement...</p></div>
         </div>
     </div>
 
@@ -48,12 +44,6 @@
         const userId = sessionStorage.getItem('currentUserId');
         if (!userId) {
             window.location.href = 'connexion.html';
-        }
-
-        const params = new URLSearchParams(window.location.search);
-        const playerId = params.get('playerId');
-        if (!playerId) {
-            window.location.href = 'joueur.html';
         }
 
         const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
@@ -66,7 +56,7 @@
             }
         }
 
-        function formulaireSurface(tie) {
+        function formulaireSurface(tie, playerId) {
             return `
                 <div class="form-group" style="margin-top:16px;">
                     <label>Surface (choix du capitaine de l'équipe à domicile)</label>
@@ -75,7 +65,7 @@
                         <option value="terre">Terre battue</option>
                         <option value="herbe">Herbe</option>
                     </select>
-                    <button class="cta cta-primary surface-btn" data-tie-id="${tie.id}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider la surface</button>
+                    <button class="cta cta-primary surface-btn" data-tie-id="${tie.id}" data-player-id="${playerId}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider la surface</button>
                 </div>
             `;
         }
@@ -86,7 +76,7 @@
             }).join('');
         }
 
-        function formulaireComposition(tie, nation, joueurs) {
+        function formulaireComposition(tie, nation, joueurs, playerId) {
             const opts = optionsJoueurs(joueurs);
             return `
                 <div class="form-group" style="margin-top:16px;">
@@ -99,12 +89,12 @@
                     <select id="compo-d1-${tie.id}"><option value="">—</option>${opts}</select>
                     <label style="font-size:0.7rem;">Double — joueur 2</label>
                     <select id="compo-d2-${tie.id}"><option value="">—</option>${opts}</select>
-                    <button class="cta cta-primary compo-btn" data-tie-id="${tie.id}" data-nation="${nation}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider la composition</button>
+                    <button class="cta cta-primary compo-btn" data-tie-id="${tie.id}" data-nation="${nation}" data-player-id="${playerId}" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider la composition</button>
                 </div>
             `;
         }
 
-        function carteRencontre(t, nation) {
+        function carteRencontre(t, playerId) {
             const scoreTxt = t.statut === 'termine'
                 ? `${t.victoires_domicile} - ${t.victoires_exterieur} (${t.nation_vainqueur} qualifié)`
                 : (t.surface ? LABELS_SURFACE[t.surface] : 'Surface pas encore choisie');
@@ -120,10 +110,23 @@
             `;
         }
 
+        function sectionNation(playerId, data) {
+            const lienTableau = `<p style="text-align:center; margin-top:10px;"><a class="lien-adversaire" href="coupe-tableau.html?circuit=${data.circuit}">Voir le tableau complet du groupe mondial</a></p>`;
+            const corps = data.ties.length === 0
+                ? '<p class="match-hint">Aucune rencontre programmée pour cette nation cette saison.</p>'
+                : data.ties.map(function (t) { return carteRencontre(t, playerId); }).join('');
+            return `
+                <div class="stats-header">${data.nation} (${data.circuit === 'ATP' ? 'Coupe Davis' : 'Fed Cup'})</div>
+                ${corps}
+                ${lienTableau}
+            `;
+        }
+
         function attacherActionsSurface() {
             document.querySelectorAll('.surface-btn').forEach(function (btn) {
                 btn.addEventListener('click', async function () {
                     const tieId = btn.dataset.tieId;
+                    const playerId = btn.dataset.playerId;
                     const surface = document.getElementById('surface-select-' + tieId).value;
                     const r = await fetch('/api/coupe/surface', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -141,6 +144,7 @@
                 btn.addEventListener('click', async function () {
                     const tieId = btn.dataset.tieId;
                     const nation = btn.dataset.nation;
+                    const playerId = btn.dataset.playerId;
                     function lireSelect(id) {
                         const val = document.getElementById(id).value;
                         if (!val) return null;
@@ -163,45 +167,54 @@
             });
         }
 
+        // Page nav-accessible comme "Classements"/"Tournois" (demande explicite de
+        // l'utilisateur, 2026-08-24) : plus de ?playerId= ni de garde qui redirige -
+        // elle regarde simplement les personnages du coach connecte et affiche une
+        // section par nation dont l'un d'eux est capitaine, ou un message neutre si
+        // aucun ne l'est (meme esprit que les autres pages du menu, qui ne redirigent
+        // jamais, se contentent d'afficher "rien a voir ici" le cas echeant). Le
+        // choix de la surface/composition ne s'active que la semaine correspondante
+        // (actionRequise, calcule cote serveur via etapeCoupe).
         async function charger() {
-            const response = await fetch('/api/coupe/capitanat/' + playerId);
-            const data = await response.json();
+            const container = document.getElementById('capitanat-container');
+            container.innerHTML = '<p class="match-hint">Chargement...</p>';
 
-            // Garde d'acces reelle (pas juste un lien cache) : quiconque n'est pas
-            // le capitaine designe de sa nation cette saison est renvoye ailleurs,
-            // meme esprit que verifierAcces() dans admin.html pour les non-admins
-            // (demande explicite de l'utilisateur, 2026-08-24 : "une vraie page
-            // accessible uniquement aux capitaines").
-            if (!response.ok) {
-                alert(data.error || 'Accès réservé aux capitaines.');
-                window.location.href = 'joueur.html';
+            const reponseJoueurs = await fetch('/api/joueurs/' + userId);
+            const dataJoueurs = await reponseJoueurs.json();
+            if (!reponseJoueurs.ok || !dataJoueurs.players || dataJoueurs.players.length === 0) {
+                container.innerHTML = '<p class="match-hint">Aucun personnage créé.</p>';
                 return;
             }
 
-            document.getElementById('nation-badge').textContent = data.nation + ' (' + (data.circuit === 'ATP' ? 'ATP' : 'WTA') + ')';
-            document.getElementById('tableau-lien').href = 'coupe-tableau.html?circuit=' + data.circuit;
+            const sections = [];
+            for (const player of dataJoueurs.players) {
+                const r = await fetch('/api/coupe/capitanat/' + player.id);
+                const data = await r.json();
+                if (r.ok) sections.push({ playerId: player.id, data });
+            }
 
-            const container = document.getElementById('rencontres-container');
-            if (data.ties.length === 0) {
-                container.innerHTML = '<p class="match-hint">Aucune rencontre programmée pour ta nation cette saison.</p>';
+            if (sections.length === 0) {
+                container.innerHTML = '<p class="match-hint">Tu n\'es capitaine d\'aucune nation cette saison. Le poste se décide en Pré-saison/Semaine 0 (candidature) puis en Semaine 1 (vote), depuis la fiche de ton joueur.</p>';
                 return;
             }
 
-            container.innerHTML = data.ties.map(function (t) { return carteRencontre(t, data.nation); }).join('');
+            container.innerHTML = sections.map(function (s) { return sectionNation(s.playerId, s.data); }).join('');
 
-            const tiesComposition = data.ties.filter(function (t) { return t.actionRequise && t.etape === 'composition'; });
-            const tiesSurface = data.ties.filter(function (t) { return t.actionRequise && t.etape === 'surface'; });
+            for (const s of sections) {
+                const tiesComposition = s.data.ties.filter(function (t) { return t.actionRequise && t.etape === 'composition'; });
+                const tiesSurface = s.data.ties.filter(function (t) { return t.actionRequise && t.etape === 'surface'; });
 
-            tiesSurface.forEach(function (t) {
-                document.getElementById('action-zone-' + t.id).innerHTML = formulaireSurface(t);
-            });
+                tiesSurface.forEach(function (t) {
+                    document.getElementById('action-zone-' + t.id).innerHTML = formulaireSurface(t, s.playerId);
+                });
 
-            for (const t of tiesComposition) {
-                const detailResponse = await fetch('/api/coupe/tie/' + t.id);
-                const detail = await detailResponse.json();
-                if (!detailResponse.ok) continue;
-                const joueurs = t.nation_domicile === data.nation ? detail.joueursDomicile : detail.joueursExterieur;
-                document.getElementById('action-zone-' + t.id).innerHTML = formulaireComposition(t, data.nation, joueurs);
+                for (const t of tiesComposition) {
+                    const detailResponse = await fetch('/api/coupe/tie/' + t.id);
+                    const detail = await detailResponse.json();
+                    if (!detailResponse.ok) continue;
+                    const joueurs = t.nation_domicile === s.data.nation ? detail.joueursDomicile : detail.joueursExterieur;
+                    document.getElementById('action-zone-' + t.id).innerHTML = formulaireComposition(t, s.data.nation, joueurs, s.playerId);
+                }
             }
 
             attacherActionsSurface();

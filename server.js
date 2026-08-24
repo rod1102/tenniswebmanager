@@ -7564,13 +7564,15 @@ app.get('/api/coupe/statut-capitaine/:playerId', (req, res) => {
         const monVote = db.prepare('SELECT candidat_player_id FROM coupe_votes WHERE saison = ? AND circuit = ? AND nation = ? AND votant_player_id = ?').get(saison, circuit, player.nationalite, player.id);
         const maCandidature = candidatures.some(function (c) { return c.player_id === player.id; });
         const estCapitaine = !!capitaine && Number(capitaine.player_id) === Number(player.id);
+        const etapeAction = estCapitaine ? etapeActionCapitaineEnAttente(saison, circuit, player.nationalite) : null;
 
         res.json({
             success: true, dansLeTableau, fenetreCandidature, fenetreVote,
             capitaine: capitaine ? capitaine.player_id : null,
             candidatures, maCandidature,
             monVote: monVote ? monVote.candidat_player_id : null,
-            alerte: estCapitaine ? alerteCapitaine(saison, circuit, player.nationalite) : null
+            alerte: etapeAction ? TEXTES_ALERTE_ACCUEIL[etapeAction] : null,
+            alerteJoueur: etapeAction ? TEXTES_ALERTE_JOUEUR[etapeAction] : null
         });
     } catch (err) {
         console.error(err);
@@ -7804,7 +7806,7 @@ function capitaineDe(saison, circuit, nation) {
 // boucle par securite et on retourne la premiere trouvee. Demande explicite de
 // l'utilisateur, 2026-08-24 : textes exacts, pas de 3e alerte pour les styles
 // (chaque joueur choisit le sien, ce n'est pas une action du capitaine).
-function alerteCapitaine(saison, circuit, nation) {
+function etapeActionCapitaineEnAttente(saison, circuit, nation) {
     const ties = db.prepare(`
         SELECT * FROM coupe_equipes
         WHERE saison = ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?) AND statut != 'termine'
@@ -7812,16 +7814,28 @@ function alerteCapitaine(saison, circuit, nation) {
 
     for (const tie of ties) {
         const etape = etapeCoupe(tie);
-        if (etape === 'surface' && tie.nation_domicile === nation && tie.surface == null) {
-            return 'S-3 : Attention tu dois choisir la surface cette semaine';
-        }
+        if (etape === 'surface' && tie.nation_domicile === nation && tie.surface == null) return 'surface';
         if (etape === 'composition') {
             const dejaCompo = db.prepare('SELECT 1 FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, nation);
-            if (!dejaCompo) return 'S-2 : Attention tu dois choisir les joueurs cette semaine';
+            if (!dejaCompo) return 'composition';
         }
     }
     return null;
 }
+
+// Deux formulations pour la meme etape ('surface'/'composition') : l'accueil garde
+// le format court "S-3 : ..."/"S-2 : ..." (demande explicite, 2026-08-24), la fiche
+// joueur une phrase narrative plus discrete (demande explicite separee, meme jour -
+// la fiche joueur ne doit plus rien montrer d'autre sur le capitanat, tout le reste
+// vit desormais sur la page dediee capitanat.html accessible depuis le menu).
+const TEXTES_ALERTE_ACCUEIL = {
+    surface: 'S-3 : Attention tu dois choisir la surface cette semaine',
+    composition: 'S-2 : Attention tu dois choisir les joueurs cette semaine'
+};
+const TEXTES_ALERTE_JOUEUR = {
+    surface: 'Cette semaine le capitaine doit choisir la surface du prochain match de Coupe Davis',
+    composition: 'Cette semaine le capitaine doit choisir les joueurs du prochain match de Coupe Davis'
+};
 
 app.get('/api/coupe/tie/:tieId', (req, res) => {
     try {
