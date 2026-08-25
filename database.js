@@ -92,6 +92,27 @@ db.exec(`
     )
 `);
 
+// Historique COMPLET (append-only, jamais modifie ni supprime) de chaque ordre de
+// planification soumis par un coach - contrairement a `plannings` (une seule ligne
+// par joueur/semaine, ecrasee a chaque changement d'avis, puis supprimee des sa
+// consommation par executerAvancementSemaine), qui ne garde donc aucune trace du
+// choix d'origine ni de la date de saisie. Demande explicite de l'utilisateur,
+// 2026-08-25, dans la continuite de l'historique physique (forme/energie/
+// competences/etc.) ajoute le meme jour : meme motivation, pouvoir repondre avec
+// certitude a "un ordre avait-il ete saisi pour ce joueur cette semaine-la, et
+// lequel" meme longtemps apres coup, plutot que de devoir le deduire ou constater
+// qu'il est introuvable.
+db.exec(`
+    CREATE TABLE IF NOT EXISTS planning_historique (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER NOT NULL,
+        semaine INTEGER NOT NULL,
+        action TEXT NOT NULL,
+        horodatage TEXT NOT NULL,
+        FOREIGN KEY (player_id) REFERENCES players(id)
+    )
+`);
+
 // Journal hebdomadaire : une ligne par joueur et par semaine "vecue", ecrite au
 // moment ou executerAvancementSemaine traite cette semaine - contrairement a
 // `plannings` (supprimee une fois consommee) et `points_experience` (remis a zero

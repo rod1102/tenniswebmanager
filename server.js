@@ -1147,6 +1147,14 @@ app.post('/api/planification', (req, res) => {
             ON CONFLICT(player_id, semaine) DO UPDATE SET action = excluded.action
         `).run(playerId, semaine, action);
 
+        // Trace permanente de la soumission (voir planning_historique, database.js) :
+        // contrairement a `plannings` ci-dessus (ecrasee a chaque changement d'avis,
+        // supprimee des consommation), cette ligne n'est jamais modifiee ni supprimee -
+        // meme un ordre change 3 fois avant la semaine concernee laisse une trace de
+        // chaque choix, avec sa date exacte.
+        db.prepare('INSERT INTO planning_historique (player_id, semaine, action, horodatage) VALUES (?, ?, ?, ?)')
+            .run(playerId, semaine, action, new Date().toISOString());
+
         res.json({ success: true });
     } catch (err) {
         console.error(err);
