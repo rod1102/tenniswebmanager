@@ -95,15 +95,21 @@
             }
             const valA = valeurPoste('joueur_a_est_reel', 'joueur_a_id');
             const valB = valeurPoste('joueur_b_est_reel', 'joueur_b_id');
+            const valC = valeurPoste('joueur_c_est_reel', 'joueur_c_id');
+            const valD = valeurPoste('joueur_d_est_reel', 'joueur_d_id');
             const valD1 = valeurPoste('double_j1_est_reel', 'double_j1_id');
             const valD2 = valeurPoste('double_j2_est_reel', 'double_j2_id');
             return `
                 <div class="form-group" style="margin-top:16px;">
                     <label>Composition — ${nation}</label>
-                    <label style="font-size:0.7rem;">Simple 1 (+ simple retour vs B adverse)</label>
+                    <label style="font-size:0.7rem;">Simple 1</label>
                     <select id="compo-a-${tie.id}"><option value="">—</option>${optionsJoueursAvecSelection(joueurs, valA)}</select>
-                    <label style="font-size:0.7rem;">Simple 2 (+ simple retour vs A adverse)</label>
+                    <label style="font-size:0.7rem;">Simple 2</label>
                     <select id="compo-b-${tie.id}"><option value="">—</option>${optionsJoueursAvecSelection(joueurs, valB)}</select>
+                    <label style="font-size:0.7rem;">Simple 3</label>
+                    <select id="compo-c-${tie.id}"><option value="">—</option>${optionsJoueursAvecSelection(joueurs, valC)}</select>
+                    <label style="font-size:0.7rem;">Simple 4</label>
+                    <select id="compo-d-${tie.id}"><option value="">—</option>${optionsJoueursAvecSelection(joueurs, valD)}</select>
                     <label style="font-size:0.7rem;">Double — joueur 1</label>
                     <select id="compo-d1-${tie.id}"><option value="">—</option>${optionsJoueursAvecSelection(joueurs, valD1)}</select>
                     <label style="font-size:0.7rem;">Double — joueur 2</label>
@@ -215,12 +221,14 @@
                     }
                     const joueurA = lireSelect('compo-a-' + tieId);
                     const joueurB = lireSelect('compo-b-' + tieId);
+                    const joueurC = lireSelect('compo-c-' + tieId);
+                    const joueurD = lireSelect('compo-d-' + tieId);
                     const doubleJ1 = lireSelect('compo-d1-' + tieId);
                     const doubleJ2 = lireSelect('compo-d2-' + tieId);
-                    if (!joueurA || !joueurB || !doubleJ1 || !doubleJ2) { alert('Choisis les 4 postes (simple 1, simple 2, double 1, double 2).'); return; }
+                    if (!joueurA || !joueurB || !joueurC || !joueurD || !doubleJ1 || !doubleJ2) { alert('Choisis les 6 postes (simple 1 à 4, double 1 et 2).'); return; }
                     const r = await fetch('/api/coupe/composition', {
                         method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ tieId, capitainePlayerId: playerId, nation, joueurA, joueurB, doubleJ1, doubleJ2 })
+                        body: JSON.stringify({ tieId, capitainePlayerId: playerId, nation, joueurA, joueurB, joueurC, joueurD, doubleJ1, doubleJ2 })
                     });
                     const d = await r.json();
                     if (!r.ok) { alert(d.error); return; }

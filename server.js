@@ -7433,9 +7433,12 @@ const LABELS_MANCHE = { '1er_tour': '1er tour', quarts: 'Quarts de finale', demi
 
 // Libelle d'une rencontre (numero 1-5) - partage entre l'ecriture des lignes matchs
 // (simulerMancheCoupe) et leur relecture sur la page Matchs (matchs.numero_tour).
+// 4 simples distincts (numeros 1-4) + 1 double (numero 5) - plus de "simple
+// retour" rejoue par les 2 memes joueurs (demande explicite de l'utilisateur,
+// 2026-08-25).
 function libelleRubber(numero) {
-    if (numero === 3) return 'Coupe - Double';
-    return 'Coupe - Simple ' + (numero <= 2 ? numero : numero - 1) + (numero > 2 ? ' (retour)' : '');
+    if (numero === 5) return 'Coupe - Double';
+    return 'Coupe - Simple ' + numero;
 }
 
 // Tous les joueurs eligibles pour representer une nation sur un circuit donne :
@@ -7455,7 +7458,43 @@ function identiteJoueurOuRival(estReel, id) {
     return r ? { nom: r.nom, nationalite: r.nationalite } : null;
 }
 
+// Complete le roster persistant de rivaux d'une nation si elle n'a pas assez de
+// joueurs (reels + rivaux existants) pour remplir une composition de Coupe Davis/
+// Fed Cup (4 simples distincts + 1 paire de double) - genere alors de nouveaux
+// rivaux PERSISTANTS (jamais jetables, contrairement aux lambdas de tournoi) avec
+// cette nationalite, une seule fois pour de bon. Necessaire car le roster de 200
+// rivaux/circuit genere a la creation du jeu tire une nationalite au hasard par
+// joueur (genererJoueurLambda) : sur 200 tirages, une grande partie des ~190
+// nationalites possibles du jeu n'a jamais ete tiree (22 seulement couvertes en
+// pratique) - demande explicite de l'utilisateur, 2026-08-25, plutot que des bots
+// jetables regeneres a chaque fois (qui ne laisseraient aucune trace stable dans
+// les classements/confrontations, contrairement aux rivaux habituels).
+const MINIMUM_JOUEURS_NATION_COUPE = 5;
+function assurerRosterMinimalNation(circuit, nation) {
+    const nbActuel = db.prepare(`
+        SELECT
+            (SELECT COUNT(*) FROM players WHERE statut = 'valide' AND type = ? AND nationalite = ?) +
+            (SELECT COUNT(*) FROM classement_joueurs WHERE circuit = ? AND nationalite = ?) AS n
+    `).get(circuit === 'ATP' ? 'joueur' : 'joueuse', nation, circuit, nation).n;
+    const manquants = MINIMUM_JOUEURS_NATION_COUPE - nbActuel;
+    if (manquants <= 0) return;
+
+    const estFeminin = circuit === 'WTA';
+    const nomsExistants = new Set(db.prepare('SELECT nom FROM classement_joueurs WHERE circuit = ?').all(circuit).map(function (r) { return r.nom; }));
+    const insert = db.prepare('INSERT INTO classement_joueurs (circuit, nom, nationalite, niveau) VALUES (?, ?, ?, ?)');
+    for (let i = 0; i < manquants; i++) {
+        const categorie = CATEGORIES_ROSTER[Math.floor(Math.random() * CATEGORIES_ROSTER.length)];
+        let rival;
+        do { rival = genererJoueurLambda(categorie, estFeminin); } while (nomsExistants.has(rival.nom));
+        nomsExistants.add(rival.nom);
+        const fourchette = NIVEAU_ROSTER_PAR_CATEGORIE[categorie];
+        const niveau = Math.round(fourchette.min + Math.random() * (fourchette.max - fourchette.min));
+        insert.run(circuit, rival.nom, nation, niveau);
+    }
+}
+
 function joueursEligiblesNation(circuit, nation) {
+    assurerRosterMinimalNation(circuit, nation);
     const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
     const reels = db.prepare("SELECT id, user_id, prenom, nom FROM players WHERE statut = 'valide' AND type = ? AND nationalite = ?").all(type, nation)
         .map(function (p) { return { estReel: true, id: p.id, userId: p.user_id, nom: p.prenom + ' ' + p.nom.toUpperCase() }; });
@@ -8034,7 +8073,7 @@ app.post('/api/coupe/surface', (req, res) => {
 
 app.post('/api/coupe/composition', (req, res) => {
     try {
-        const { tieId, capitainePlayerId, nation, joueurA, joueurB, doubleJ1, doubleJ2 } = req.body;
+        const { tieId, capitainePlayerId, nation, joueurA, joueurB, joueurC, joueurD, doubleJ1, doubleJ2 } = req.body;
 
         const monPlayer = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(capitainePlayerId, req.userId);
         if (!monPlayer) return res.status(403).json({ error: 'Ce personnage ne t\'appartient pas.' });
@@ -8055,13 +8094,21 @@ app.post('/api/coupe/composition', (req, res) => {
 
         const eligibles = joueursEligiblesNation(tie.circuit, nation);
         const estEligible = function (e) { return e && eligibles.some(function (j) { return j.estReel === !!e.estReel && j.id === Number(e.id); }); };
-        if (![joueurA, joueurB, doubleJ1, doubleJ2].every(estEligible)) {
+        if (![joueurA, joueurB, joueurC, joueurD, doubleJ1, doubleJ2].every(estEligible)) {
             return res.status(400).json({ error: 'Un ou plusieurs joueurs choisis ne font pas partie de l\'équipe éligible.' });
         }
 
         const memeJoueur = function (a, b) { return !!a.estReel === !!b.estReel && Number(a.id) === Number(b.id); };
-        if (memeJoueur(joueurA, joueurB)) {
-            return res.status(400).json({ error: 'Le simple 1 et le simple 2 doivent être joués par 2 joueurs différents.' });
+        // 4 simples distincts (demande explicite de l'utilisateur, 2026-08-25 : plus de
+        // "simple retour" rejoue par les 2 memes joueurs) - les 4 doivent donc etre
+        // 4 personnes differentes, verifie par toutes les paires.
+        const simples = [joueurA, joueurB, joueurC, joueurD];
+        for (let i = 0; i < simples.length; i++) {
+            for (let j = i + 1; j < simples.length; j++) {
+                if (memeJoueur(simples[i], simples[j])) {
+                    return res.status(400).json({ error: 'Les 4 simples doivent être joués par 4 joueurs différents.' });
+                }
+            }
         }
         if (memeJoueur(doubleJ1, doubleJ2)) {
             return res.status(400).json({ error: 'La paire de double doit être composée de 2 joueurs différents.' });
@@ -8069,9 +8116,14 @@ app.post('/api/coupe/composition', (req, res) => {
 
         db.prepare('DELETE FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').run(tie.id, nation);
         db.prepare(`
-            INSERT INTO coupe_composition (coupe_equipe_id, nation, joueur_a_est_reel, joueur_a_id, joueur_b_est_reel, joueur_b_id, double_j1_est_reel, double_j1_id, double_j2_est_reel, double_j2_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(tie.id, nation, joueurA.estReel ? 1 : 0, joueurA.id, joueurB.estReel ? 1 : 0, joueurB.id, doubleJ1.estReel ? 1 : 0, doubleJ1.id, doubleJ2.estReel ? 1 : 0, doubleJ2.id);
+            INSERT INTO coupe_composition (coupe_equipe_id, nation, joueur_a_est_reel, joueur_a_id, joueur_b_est_reel, joueur_b_id, joueur_c_est_reel, joueur_c_id, joueur_d_est_reel, joueur_d_id, double_j1_est_reel, double_j1_id, double_j2_est_reel, double_j2_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(
+            tie.id, nation,
+            joueurA.estReel ? 1 : 0, joueurA.id, joueurB.estReel ? 1 : 0, joueurB.id,
+            joueurC.estReel ? 1 : 0, joueurC.id, joueurD.estReel ? 1 : 0, joueurD.id,
+            doubleJ1.estReel ? 1 : 0, doubleJ1.id, doubleJ2.estReel ? 1 : 0, doubleJ2.id
+        );
 
         res.json({ success: true });
     } catch (err) {
@@ -8260,31 +8312,44 @@ function assurerCompositionAuto(tie, nation) {
         }
         return Object.assign({}, j, { niveauApprox: j.niveau });
     }).sort(function (a, b) { return b.niveauApprox - a.niveauApprox; });
-    if (eligibles.length === 0) return; // ne devrait jamais arriver (roster de rivaux toujours peuple)
+    if (eligibles.length === 0) return; // ne devrait jamais arriver (assurerRosterMinimalNation garantit au moins 5 joueurs)
 
+    // 4 simples distincts (a/b/c/d) + double (reprend a/b, comme avant) - replie sur
+    // le dernier joueur disponible si la nation en a moins de 4 malgre le roster
+    // minimal garanti par joueursEligiblesNation (ex. exactement 4-5 au total,
+    // aucune marge pour un 4e simple totalement distinct).
     const a = eligibles[0];
     const b = eligibles[1] || eligibles[0];
+    const c = eligibles[2] || eligibles[1] || eligibles[0];
+    const d = eligibles[3] || eligibles[2] || eligibles[1] || eligibles[0];
     db.prepare(`
-        INSERT INTO coupe_composition (coupe_equipe_id, nation, joueur_a_est_reel, joueur_a_id, joueur_b_est_reel, joueur_b_id, double_j1_est_reel, double_j1_id, double_j2_est_reel, double_j2_id)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(tie.id, nation, a.estReel ? 1 : 0, a.id, b.estReel ? 1 : 0, b.id, a.estReel ? 1 : 0, a.id, b.estReel ? 1 : 0, b.id);
+        INSERT INTO coupe_composition (coupe_equipe_id, nation, joueur_a_est_reel, joueur_a_id, joueur_b_est_reel, joueur_b_id, joueur_c_est_reel, joueur_c_id, joueur_d_est_reel, joueur_d_id, double_j1_est_reel, double_j1_id, double_j2_est_reel, double_j2_id)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+        tie.id, nation,
+        a.estReel ? 1 : 0, a.id, b.estReel ? 1 : 0, b.id,
+        c.estReel ? 1 : 0, c.id, d.estReel ? 1 : 0, d.id,
+        a.estReel ? 1 : 0, a.id, b.estReel ? 1 : 0, b.id
+    );
 }
 
-// Ordre standard d'une manche (2 simples/1 double/2 simples retour), commun a
-// simulerUnRubberCoupe et finaliserMancheCoupe. Les entrees simple referencent
-// directement A/B ; le double n'a pas besoin d'entrees ici (gere a part par
-// simulerRubberDouble, qui lit compoDomicile/compoExterieur directement).
+// Ordre standard d'une manche (4 simples distincts/1 double), commun a
+// simulerUnRubberCoupe et finaliserMancheCoupe. Chaque simple oppose le joueur du
+// meme poste (A vs A, B vs B, C vs C, D vs D) - plus de "simple retour" rejoue par
+// les 2 memes joueurs (demande explicite de l'utilisateur, 2026-08-25 : avant,
+// seuls A/B existaient et rejouaient une 2e fois chacun en position inversee pour
+// fournir les 5 rencontres). Le double n'a pas besoin d'entrees ici (gere a part
+// par simulerRubberDouble, qui lit compoDomicile/compoExterieur directement).
 function ordreRubbersCoupe(compoDomicile, compoExterieur) {
-    const A_d = { estReel: !!compoDomicile.joueur_a_est_reel, id: compoDomicile.joueur_a_id };
-    const B_d = { estReel: !!compoDomicile.joueur_b_est_reel, id: compoDomicile.joueur_b_id };
-    const A_e = { estReel: !!compoExterieur.joueur_a_est_reel, id: compoExterieur.joueur_a_id };
-    const B_e = { estReel: !!compoExterieur.joueur_b_est_reel, id: compoExterieur.joueur_b_id };
+    function poste(compo, lettre) {
+        return { estReel: !!compo['joueur_' + lettre + '_est_reel'], id: compo['joueur_' + lettre + '_id'] };
+    }
     return [
-        { numero: 1, type: 'simple', domicile: A_d, exterieur: A_e },
-        { numero: 2, type: 'simple', domicile: B_d, exterieur: B_e },
-        { numero: 3, type: 'double' },
-        { numero: 4, type: 'simple', domicile: A_d, exterieur: B_e },
-        { numero: 5, type: 'simple', domicile: B_d, exterieur: A_e }
+        { numero: 1, type: 'simple', domicile: poste(compoDomicile, 'a'), exterieur: poste(compoExterieur, 'a') },
+        { numero: 2, type: 'simple', domicile: poste(compoDomicile, 'b'), exterieur: poste(compoExterieur, 'b') },
+        { numero: 3, type: 'simple', domicile: poste(compoDomicile, 'c'), exterieur: poste(compoExterieur, 'c') },
+        { numero: 4, type: 'simple', domicile: poste(compoDomicile, 'd'), exterieur: poste(compoExterieur, 'd') },
+        { numero: 5, type: 'double' }
     ];
 }
 
@@ -8368,6 +8433,7 @@ function finaliserMancheCoupe(tieId) {
     [compoDomicile, compoExterieur].forEach(function (c) {
         if (!c) return;
         [[c.joueur_a_est_reel, c.joueur_a_id], [c.joueur_b_est_reel, c.joueur_b_id],
+         [c.joueur_c_est_reel, c.joueur_c_id], [c.joueur_d_est_reel, c.joueur_d_id],
          [c.double_j1_est_reel, c.double_j1_id], [c.double_j2_est_reel, c.double_j2_id]]
             .forEach(function (pair) { if (pair[0] && pair[1]) joueursImpliques.add(pair[1]); });
     });
@@ -8467,7 +8533,7 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
             exterieur_est_reel, exterieur_id, exterieur_id2,
             nation_vainqueur, score, match_id, match_id_j2
         )
-        VALUES (?, 3, 'double', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, 5, 'double', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         tie.id,
         compoDomicile.double_j1_est_reel, compoDomicile.double_j1_id, compoDomicile.double_j2_id,

@@ -459,6 +459,8 @@ db.exec(`
         nation TEXT NOT NULL,
         joueur_a_est_reel INTEGER, joueur_a_id INTEGER,
         joueur_b_est_reel INTEGER, joueur_b_id INTEGER,
+        joueur_c_est_reel INTEGER, joueur_c_id INTEGER,
+        joueur_d_est_reel INTEGER, joueur_d_id INTEGER,
         double_j1_est_reel INTEGER, double_j1_id INTEGER,
         double_j2_est_reel INTEGER, double_j2_id INTEGER
     )
@@ -704,7 +706,14 @@ const migrations = [
     // Moulinette differee jusqu'a la prochaine connexion du coach (demande explicite
     // de l'utilisateur, 2026-08-25) - voir marquerMoulinetteEnAttente/
     // appliquerMoulinettePourJoueur dans server.js.
-    "ALTER TABLE players ADD COLUMN moulinette_en_attente INTEGER DEFAULT 0"
+    "ALTER TABLE players ADD COLUMN moulinette_en_attente INTEGER DEFAULT 0",
+    // Coupe Davis/Fed Cup : 4 simples distincts (plus de "simple retour" rejoue par
+    // les 2 memes joueurs) + 1 double = 5 rencontres, demande explicite de
+    // l'utilisateur, 2026-08-25. joueur_a/joueur_b existaient deja.
+    "ALTER TABLE coupe_composition ADD COLUMN joueur_c_est_reel INTEGER",
+    "ALTER TABLE coupe_composition ADD COLUMN joueur_c_id INTEGER",
+    "ALTER TABLE coupe_composition ADD COLUMN joueur_d_est_reel INTEGER",
+    "ALTER TABLE coupe_composition ADD COLUMN joueur_d_id INTEGER"
 ];
 
 migrations.forEach(function (sql) {
