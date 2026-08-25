@@ -414,6 +414,14 @@ app.post('/api/connexion', (req, res) => {
             return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
         }
 
+        // Moulinette differee (voir marquerMoulinetteEnAttente/appliquerMoulinettePourJoueur) :
+        // applique maintenant, avec les competences A JOUR, a chaque joueur de ce coach
+        // qui attendait ce calcul depuis son dernier passage en S49 - peu importe la
+        // saison/semaine de jeu atteinte entretemps (demande explicite de l'utilisateur,
+        // 2026-08-25).
+        db.prepare("SELECT * FROM players WHERE user_id = ? AND moulinette_en_attente = 1").all(user.id)
+            .forEach(function (player) { appliquerMoulinettePourJoueur(player); });
+
         poserCookieSession(req, res, creerSession(user.id));
         res.json({ success: true, userId: user.id });
     } catch (err) {
@@ -1243,38 +1251,52 @@ function variationDispositionsIntersaison(indexIntersaison) {
 // Le rabotage de competences n'a pas ce risque : aucune autre logique ne touche
 // points_competences_a_repartir/cap_* en dehors de cette fonction et de la route de
 // repartition manuelle.
-function appliquerMoulinette(semaine49) {
-    const joueurs = db.prepare("SELECT * FROM players WHERE statut = 'valide'").all();
+//
+// Le CALCUL reel (ce que faisait cette fonction avant le 2026-08-25) est desormais
+// differe jusqu'a la prochaine connexion du coach, peu importe la saison/semaine a
+// laquelle il revient (demande explicite de l'utilisateur) : un coach absent au
+// moment ou son joueur franchit S49 se serait vu figer un budget/des plafonds
+// calcules sur des competences qui datent de plusieurs semaines, potentiellement
+// deja perimees par l'erosion hebdomadaire du temps qu'il etait absent. Ici, on se
+// contente donc de marquer chaque joueur valide comme "en attente" -
+// appliquerMoulinettePourJoueur (plus bas) fait le vrai calcul, avec les
+// competences A JOUR au moment ou le coach se reconnecte (voir POST /api/connexion).
+// Le reset physique de pre-saison (appliquerResetPreSaison), lui, continue de se
+// declencher automatiquement sans jamais attendre personne (demande explicite).
+function marquerMoulinetteEnAttente() {
+    db.prepare("UPDATE players SET moulinette_en_attente = 1 WHERE statut = 'valide'").run();
+}
 
-    const maj = db.prepare(`
+// Vrai calcul de la moulinette pour UN joueur (competences a jour au moment de
+// l'appel) - declenche a la connexion du coach si son joueur etait marque en
+// attente, voir marquerMoulinetteEnAttente ci-dessus.
+function appliquerMoulinettePourJoueur(player) {
+    const valeurs = {};
+    COMPETENCES.forEach(function (c) { valeurs[c] = player[c]; });
+    const xpTotale = COMPETENCES.reduce(function (s, c) { return s + valeurs[c]; }, 0);
+    const cible = ((xpTotale - 200) / 2.5) + 100;
+
+    // Moulinette : les competences ne bougent PAS ici - le coach les repartit
+    // lui-meme (route /api/joueurs/repartir-competences-moulinette), plafonne par
+    // ses valeurs actuelles (cap_*), pour un budget total = Math.floor(cible).
+    // En dessous du seuil (cible >= total), rien ne s'ouvre, comme avant.
+    const competencesARepartir = (xpTotale > 0 && cible < xpTotale) ? Math.floor(cible) : 0;
+    const caps = {};
+    COMPETENCES.forEach(function (c) { caps[c] = competencesARepartir > 0 ? valeurs[c] : 0; });
+
+    db.prepare(`
         UPDATE players SET
             points_competences_a_repartir = ?,
             cap_service = ?, cap_retour = ?, cap_coup_droit_revers = ?, cap_effet = ?,
-            cap_volee = ?, cap_deplacement = ?, cap_puissance = ?, cap_resistance = ?
+            cap_volee = ?, cap_deplacement = ?, cap_puissance = ?, cap_resistance = ?,
+            moulinette_en_attente = 0
         WHERE id = ?
-    `);
-
-    joueurs.forEach(function (player) {
-        const valeurs = {};
-        COMPETENCES.forEach(function (c) { valeurs[c] = player[c]; });
-        const xpTotale = COMPETENCES.reduce(function (s, c) { return s + valeurs[c]; }, 0);
-        const cible = ((xpTotale - 200) / 2.5) + 100;
-
-        // Moulinette : les competences ne bougent PAS ici - le coach les repartit
-        // lui-meme (route /api/joueurs/repartir-competences-moulinette), plafonne par
-        // ses valeurs de fin de saison (cap_*), pour un budget total = Math.floor(cible).
-        // En dessous du seuil (cible >= total), rien ne s'ouvre, comme avant.
-        const competencesARepartir = (xpTotale > 0 && cible < xpTotale) ? Math.floor(cible) : 0;
-        const caps = {};
-        COMPETENCES.forEach(function (c) { caps[c] = competencesARepartir > 0 ? valeurs[c] : 0; });
-
-        maj.run(
-            competencesARepartir,
-            caps.service, caps.retour, caps.coup_droit_revers, caps.effet,
-            caps.volee, caps.deplacement, caps.puissance, caps.resistance,
-            player.id
-        );
-    });
+    `).run(
+        competencesARepartir,
+        caps.service, caps.retour, caps.coup_droit_revers, caps.effet,
+        caps.volee, caps.deplacement, caps.puissance, caps.resistance,
+        player.id
+    );
 }
 
 // Bascule vers la Pre-saison : remise a zero physique du joueur (usure/forme/
@@ -1667,11 +1689,13 @@ function executerAvancementSemaine() {
 
         db.prepare('UPDATE jeu_etat SET semaine_actuelle = semaine_actuelle + 1 WHERE id = 1').run();
 
-        // Moulinette : declenche une seule fois, exactement a l'entree en semaine 49
-        // (derniere semaine de tournoi du cycle), pas a la bascule Pre-saison (demande
-        // explicite de l'utilisateur, 2026-08-24).
+        // Moulinette : marquee "en attente" une seule fois, exactement a l'entree en
+        // semaine 49 (derniere semaine de tournoi du cycle), pas a la bascule
+        // Pre-saison (demande explicite de l'utilisateur, 2026-08-24). Le vrai calcul
+        // est differe jusqu'a la prochaine connexion du coach (2026-08-25), voir
+        // marquerMoulinetteEnAttente plus haut.
         if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine === LONGUEUR_SAISON - 2) {
-            appliquerMoulinette(nouvelleSemaine);
+            marquerMoulinetteEnAttente();
         }
 
         // Remise a zero physique du joueur + verrou de saison : declenche exactement au

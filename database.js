@@ -700,7 +700,11 @@ const migrations = [
     "ALTER TABLE journal_semaine_joueur ADD COLUMN puissance_avant INTEGER",
     "ALTER TABLE journal_semaine_joueur ADD COLUMN puissance_apres INTEGER",
     "ALTER TABLE journal_semaine_joueur ADD COLUMN resistance_avant INTEGER",
-    "ALTER TABLE journal_semaine_joueur ADD COLUMN resistance_apres INTEGER"
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN resistance_apres INTEGER",
+    // Moulinette differee jusqu'a la prochaine connexion du coach (demande explicite
+    // de l'utilisateur, 2026-08-25) - voir marquerMoulinetteEnAttente/
+    // appliquerMoulinettePourJoueur dans server.js.
+    "ALTER TABLE players ADD COLUMN moulinette_en_attente INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {
