@@ -79,7 +79,7 @@
         function optionsJoueursAvecSelection(liste, valeurActuelle) {
             return (liste || []).map(function (j) {
                 const val = `${j.estReel ? 'reel' : 'rival'}-${j.id}`;
-                return `<option value="${val}" ${val === valeurActuelle ? 'selected' : ''}>${j.nom}${j.estReel ? '' : ' (rival)'}</option>`;
+                return `<option value="${val}" ${val === valeurActuelle ? 'selected' : ''}>${j.nom}${j.estReel ? '' : ' (bot)'}</option>`;
             }).join('');
         }
 

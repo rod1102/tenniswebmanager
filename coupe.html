@@ -130,7 +130,7 @@
 
         function optionsJoueurs(liste) {
             return liste.map(function (j) {
-                return `<option value="${j.estReel ? 'reel' : 'rival'}-${j.id}">${j.nom}${j.estReel ? '' : ' (rival)'}</option>`;
+                return `<option value="${j.estReel ? 'reel' : 'rival'}-${j.id}">${j.nom}${j.estReel ? '' : ' (bot)'}</option>`;
             }).join('');
         }
 
