@@ -660,7 +660,26 @@ const migrations = [
     "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_terre_avant INTEGER",
     "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_terre_apres INTEGER",
     "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_herbe_avant INTEGER",
-    "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_herbe_apres INTEGER"
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_herbe_apres INTEGER",
+    // Memes raisons que le bloc ci-dessus, mais pour les 8 competences techniques
+    // (service/retour/coup_droit_revers/effet/volee/deplacement/puissance/resistance) -
+    // demande explicite de l'utilisateur, 2026-08-25.
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN service_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN service_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN retour_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN retour_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN coup_droit_revers_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN coup_droit_revers_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN effet_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN effet_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN volee_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN volee_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN deplacement_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN deplacement_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN puissance_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN puissance_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN resistance_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN resistance_apres INTEGER"
 ];
 
 migrations.forEach(function (sql) {

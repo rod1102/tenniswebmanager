@@ -1462,6 +1462,8 @@ function executerAvancementSemaine() {
             const automatismesDurAvant = player.surface_dur_automatismes;
             const automatismesTerreAvant = player.surface_terre_automatismes;
             const automatismesHerbeAvant = player.surface_herbe_automatismes;
+            const competencesAvant = {};
+            COMPETENCES.forEach(function (cle) { competencesAvant[cle] = player[cle]; });
 
             let forme = player.forme;
             let mentalCourant = player.mental_courant;
@@ -1610,8 +1612,13 @@ function executerAvancementSemaine() {
                      forme_avant, forme_apres, energie_avant, energie_apres, usure_avant, usure_apres,
                      mental_avant, mental_apres, mental_max_avant, mental_max_apres, condition_avant, condition_apres,
                      automatismes_dur_avant, automatismes_dur_apres, automatismes_terre_avant, automatismes_terre_apres,
-                     automatismes_herbe_avant, automatismes_herbe_apres, horodatage)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     automatismes_herbe_avant, automatismes_herbe_apres,
+                     service_avant, service_apres, retour_avant, retour_apres,
+                     coup_droit_revers_avant, coup_droit_revers_apres, effet_avant, effet_apres,
+                     volee_avant, volee_apres, deplacement_avant, deplacement_apres,
+                     puissance_avant, puissance_apres, resistance_avant, resistance_apres,
+                     horodatage)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 player.id, nouvelleSemaine,
                 joueurEngageCetteSemaine ? 'tournoi' : (ordre ? ordre.action : null),
@@ -1623,6 +1630,14 @@ function executerAvancementSemaine() {
                 mentalAvant, mentalCourant, mentalMaxAvant, mentalMaxAvant, conditionAvant, condition,
                 automatismesDurAvant, automatismes.dur, automatismesTerreAvant, automatismes.terre,
                 automatismesHerbeAvant, automatismes.herbe,
+                competencesAvant.service, competencesErodees.service,
+                competencesAvant.retour, competencesErodees.retour,
+                competencesAvant.coup_droit_revers, competencesErodees.coup_droit_revers,
+                competencesAvant.effet, competencesErodees.effet,
+                competencesAvant.volee, competencesErodees.volee,
+                competencesAvant.deplacement, competencesErodees.deplacement,
+                competencesAvant.puissance, competencesErodees.puissance,
+                competencesAvant.resistance, competencesErodees.resistance,
                 new Date().toISOString()
             );
 
