@@ -638,7 +638,29 @@ const migrations = [
     "ALTER TABLE users ADD COLUMN dernier_refus_date TEXT",
     "ALTER TABLE players ADD COLUMN xp_repartition_en_attente TEXT",
     "ALTER TABLE players ADD COLUMN photo_avatar TEXT",
-    "ALTER TABLE tournoi_matchs ADD COLUMN manche_poules INTEGER"
+    "ALTER TABLE tournoi_matchs ADD COLUMN manche_poules INTEGER",
+    // Historique physique complet par joueur/semaine (energie/usure/mental/
+    // condition/automatismes, en plus de forme_avant/forme_apres deja existants) -
+    // permet de retrouver le veritable etat d'un joueur juste avant un evenement
+    // donne (bug de reset, etc.) au lieu de le perdre definitivement des qu'un
+    // champ est ecrase, comme c'est arrive le 2026-08-24 pour l'energie (aucune
+    // trace ne permettait de savoir ce qu'elle valait avant la remise a zero).
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN energie_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN energie_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN usure_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN usure_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN mental_avant REAL",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN mental_apres REAL",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN mental_max_avant REAL",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN mental_max_apres REAL",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN condition_avant TEXT",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN condition_apres TEXT",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_dur_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_dur_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_terre_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_terre_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_herbe_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN automatismes_herbe_apres INTEGER"
 ];
 
 migrations.forEach(function (sql) {

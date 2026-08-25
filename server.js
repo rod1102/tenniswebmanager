@@ -1296,10 +1296,28 @@ function appliquerResetPreSaison(nouvelleSemaine) {
         WHERE id = ?
     `);
 
+    // Corrige la ligne de journal_semaine_joueur deja inseree pour nouvelleSemaine
+    // (par la boucle hebdomadaire normale, juste avant l'appel a cette fonction) :
+    // sans ca, le journal continuait de montrer les valeurs D'AVANT ce reset comme
+    // etat "final" de la semaine, alors que le reset les change juste apres - un
+    // historique qui ne reflete pas l'etat reellement enregistre en base n'a
+    // aucune valeur de recours en cas de bug (constate le 2026-08-24 : impossible
+    // de savoir si/quand l'energie avait ete perdue faute d'un tel recoupement).
+    // L'energie n'est PAS incluse ici, coherent avec le reset lui-meme qui n'y
+    // touche pas.
+    const majJournal = db.prepare(`
+        UPDATE journal_semaine_joueur SET
+            forme_apres = 100, usure_apres = 0, mental_apres = 100, mental_max_apres = 100,
+            condition_apres = 'en_forme',
+            automatismes_dur_apres = 0, automatismes_terre_apres = 0, automatismes_herbe_apres = 0
+        WHERE player_id = ? AND semaine = ?
+    `);
+
     joueurs.forEach(function (player) {
         const dispositionsAGagner = player.points_dispositions_a_gagner + Math.max(0, variationDispositions);
         const dispositionsARetirer = player.points_dispositions_a_retirer + Math.max(0, -variationDispositions);
         maj.run(dispositionsAGagner, dispositionsARetirer, player.id);
+        majJournal.run(player.id, nouvelleSemaine);
     });
 
     // Coupe Davis / Fed Cup : tableau de 16 nations + ties du 1er tour genere une
@@ -1431,6 +1449,19 @@ function executerAvancementSemaine() {
                 ? db.prepare('SELECT action FROM plannings WHERE player_id = ? AND semaine = ?').get(player.id, nouvelleSemaine)
                 : null;
             const formeAvant = player.forme;
+            // Instantane complet avant traitement de la semaine (au-dela de la seule
+            // forme) - permet de retrouver le veritable etat d'un joueur juste avant
+            // un evenement donne au lieu de le perdre des qu'un champ est ecrase par
+            // erreur ailleurs (bug de reset d'energie du 2026-08-24, sans aucune trace
+            // de la valeur perdue faute d'un tel historique).
+            const energieAvant = player.points_energie;
+            const usureAvant = player.usure;
+            const mentalAvant = player.mental_courant;
+            const mentalMaxAvant = player.mental_max;
+            const conditionAvant = player.condition;
+            const automatismesDurAvant = player.surface_dur_automatismes;
+            const automatismesTerreAvant = player.surface_terre_automatismes;
+            const automatismesHerbeAvant = player.surface_herbe_automatismes;
 
             let forme = player.forme;
             let mentalCourant = player.mental_courant;
@@ -1575,8 +1606,12 @@ function executerAvancementSemaine() {
             // celle qu'on quitte, coherent avec le planning lu plus haut.
             db.prepare(`
                 INSERT OR IGNORE INTO journal_semaine_joueur
-                    (player_id, semaine, action_prevue, tournoi_nom, xp_credite, disposition_a_gagner_ajoutee, disposition_a_deplacer_ajoutee, forme_avant, forme_apres, horodatage)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (player_id, semaine, action_prevue, tournoi_nom, xp_credite, disposition_a_gagner_ajoutee, disposition_a_deplacer_ajoutee,
+                     forme_avant, forme_apres, energie_avant, energie_apres, usure_avant, usure_apres,
+                     mental_avant, mental_apres, mental_max_avant, mental_max_apres, condition_avant, condition_apres,
+                     automatismes_dur_avant, automatismes_dur_apres, automatismes_terre_avant, automatismes_terre_apres,
+                     automatismes_herbe_avant, automatismes_herbe_apres, horodatage)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 player.id, nouvelleSemaine,
                 joueurEngageCetteSemaine ? 'tournoi' : (ordre ? ordre.action : null),
@@ -1584,7 +1619,11 @@ function executerAvancementSemaine() {
                 pointsExperience,
                 ordre && ordre.action === 'coaching_mental' ? 1 : 0,
                 ordre && ordre.action === 'coaching_mental' ? 1 : 0,
-                formeAvant, forme, new Date().toISOString()
+                formeAvant, forme, energieAvant, pointsEnergie, usureAvant, usureAvant,
+                mentalAvant, mentalCourant, mentalMaxAvant, mentalMaxAvant, conditionAvant, condition,
+                automatismesDurAvant, automatismes.dur, automatismesTerreAvant, automatismes.terre,
+                automatismesHerbeAvant, automatismes.herbe,
+                new Date().toISOString()
             );
 
             if (ordre) {
