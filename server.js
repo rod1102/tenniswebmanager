@@ -114,7 +114,7 @@ function estRoutePublique(req) {
         return ['/api/inscription', '/api/connexion', '/api/deconnexion', '/api/mot-de-passe-oublie', '/api/reinitialiser-mot-de-passe'].includes(req.path);
     }
     if (req.method === 'GET') {
-        if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
+        if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/public/test-deploy-github', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
             '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce'].includes(req.path)) {
             return true;
@@ -5241,6 +5241,12 @@ app.get('/api/public/tournois-en-cours', (req, res) => {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
     }
+});
+
+// TEMPORAIRE - verifie que le deploiement automatique via GitHub fonctionne. A
+// retirer juste apres confirmation.
+app.get('/api/public/test-deploy-github', (req, res) => {
+    res.json({ ok: true, horodatage: new Date().toISOString() });
 });
 
 app.get('/api/public/classement', (req, res) => {
