@@ -198,7 +198,11 @@
             if (!compo || compo[idCle] == null) return '(pas encore fixé)';
             const j = (joueurs || []).find(function (x) { return x.estReel === !!compo[estReelCle] && Number(x.id) === Number(compo[idCle]); });
             if (!j) return '?';
-            return j.nom + (j.estReel ? '' : ' (bot)') + (compo.prevue ? ' (probable)' : '');
+            // Nom cliquable vers la fiche du joueur (reel ou bot), meme lien que sur
+            // matchs.html/annuaire.html - demande explicite de l'utilisateur, 2026-08-26.
+            const type = j.estReel ? 'reel' : 'rival';
+            const nomLie = `<a class="lien-adversaire" href="adversaire.html?type=${type}&id=${j.id}">${j.nom}</a>`;
+            return nomLie + (j.estReel ? '' : ' (bot)') + (compo.prevue ? ' (probable)' : '');
         }
 
         // Les 5 rencontres prevues d'une manche, meme avant qu'elles ne soient jouees
