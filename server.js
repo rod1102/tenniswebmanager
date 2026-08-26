@@ -7755,14 +7755,20 @@ app.get('/api/coupe/statut-capitaine/:playerId', (req, res) => {
         const maCandidature = candidatures.some(function (c) { return c.player_id === player.id; });
         const estCapitaine = !!capitaine && Number(capitaine.player_id) === Number(player.id);
         const etapeAction = estCapitaine ? etapeActionCapitaineEnAttente(saison, circuit, player.nationalite) : null;
+        // Rappel de style : independant du statut de capitaine, s'applique a tout
+        // joueur reel selectionne dans une composition (voir styleEnAttentePourJoueur
+        // plus bas). N'ecrase l'alerte capitaine que si celle-ci est absente (les 2
+        // ne devraient jamais se declencher la meme semaine pour la meme rencontre,
+        // mais un joueur peut etre capitaine d'une autre rencontre en parallele).
+        const styleDu = dansLeTableau && !etapeAction ? styleEnAttentePourJoueur(player.id, player.nationalite, circuit) : false;
 
         res.json({
             success: true, dansLeTableau, fenetreCandidature, fenetreVote,
             capitaine: capitaine ? capitaine.player_id : null,
             candidatures, maCandidature,
             monVote: monVote ? monVote.candidat_player_id : null,
-            alerte: etapeAction ? TEXTES_ALERTE_ACCUEIL[etapeAction] : null,
-            alerteJoueur: etapeAction ? TEXTES_ALERTE_JOUEUR[etapeAction] : null
+            alerte: etapeAction ? TEXTES_ALERTE_ACCUEIL[etapeAction] : (styleDu ? TEXTE_ALERTE_STYLE_ACCUEIL : null),
+            alerteJoueur: etapeAction ? TEXTES_ALERTE_JOUEUR[etapeAction] : (styleDu ? TEXTE_ALERTE_STYLE_JOUEUR : null)
         });
     } catch (err) {
         console.error(err);
@@ -8026,6 +8032,37 @@ const TEXTES_ALERTE_JOUEUR = {
     surface: 'Cette semaine le capitaine doit choisir la surface du prochain match de Coupe Davis',
     composition: 'Cette semaine le capitaine doit choisir les joueurs du prochain match de Coupe Davis'
 };
+
+// Rappel distinct de l'alerte capitaine ci-dessus : celui-ci s'adresse a N'IMPORTE
+// QUEL joueur reel selectionne dans une composition (pas seulement le capitaine),
+// pour qu'il pense a choisir SON PROPRE style avant le debut des matchs - sans
+// notification, un joueur selectionne pouvait completement rater la semaine S-1 et
+// se retrouver sans style choisi (bug signale par l'utilisateur, 2026-08-26).
+// N'entre pas en contradiction avec le choix du 2026-08-24 ("pas de 3e alerte
+// capitaine pour les styles") : ceci n'est pas une action du capitaine, c'est le
+// rappel individuel de chaque joueur concerne pour SA propre rencontre.
+function styleEnAttentePourJoueur(playerId, nationalite, circuit) {
+    const saison = nombreSaisonAffichee();
+    const ties = db.prepare(`
+        SELECT * FROM coupe_equipes
+        WHERE saison = ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?) AND statut != 'termine'
+    `).all(saison, circuit, nationalite, nationalite);
+
+    for (const tie of ties) {
+        if (etapeCoupe(tie) !== 'styles') continue;
+        const nation = tie.nation_domicile === nationalite ? tie.nation_domicile : tie.nation_exterieur;
+        const compo = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, nation);
+        if (!compo) continue;
+        const postes = [['joueur_a_est_reel', 'joueur_a_id'], ['joueur_b_est_reel', 'joueur_b_id'], ['double_j1_est_reel', 'double_j1_id'], ['double_j2_est_reel', 'double_j2_id']];
+        const selectionne = postes.some(function (poste) { return compo[poste[0]] && Number(compo[poste[1]]) === Number(playerId); });
+        if (!selectionne) continue;
+        const dejaChoisi = db.prepare('SELECT 1 FROM coupe_styles WHERE coupe_equipe_id = ? AND player_id = ?').get(tie.id, playerId);
+        if (!dejaChoisi) return true;
+    }
+    return false;
+}
+const TEXTE_ALERTE_STYLE_ACCUEIL = 'S-1 : Attention tu dois choisir ton style pour ta rencontre de Coupe Davis cette semaine';
+const TEXTE_ALERTE_STYLE_JOUEUR = 'Cette semaine tu dois choisir ton style pour ta rencontre de Coupe Davis';
 
 app.get('/api/coupe/tie/:tieId', (req, res) => {
     try {

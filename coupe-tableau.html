@@ -72,11 +72,11 @@
             const score = estTermine ? `<div class="bracket-score">${t.victoires_domicile} - ${t.victoires_exterieur}</div>` : '';
             return `
                 <div class="bracket-match-wrap">
-                    <div class="bracket-match">
+                    <a class="bracket-match" href="coupe.html?tieId=${t.id}" style="display:block; text-decoration:none; color:inherit;">
                         ${ligneDomicile}
                         ${ligneExterieur}
                         ${score}
-                    </div>
+                    </a>
                 </div>
             `;
         }

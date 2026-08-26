@@ -43,7 +43,7 @@
             </div>
 
             <div id="detail-container" style="display:none;">
-                <p><a class="lien-adversaire" id="retour-liste-lien" href="#">Retour à mes rencontres</a></p>
+                <p><a class="lien-adversaire" id="retour-liste-lien" href="#"></a></p>
                 <div id="detail-rencontre"><p class="match-hint">Chargement...</p></div>
             </div>
         </div>
@@ -58,7 +58,12 @@
         const params = new URLSearchParams(window.location.search);
         const playerId = params.get('playerId');
         const tieId = params.get('tieId');
-        if (!playerId) {
+        // playerId reste obligatoire pour "Mes rencontres" (chargerListe, qui a besoin
+        // d'un joueur pour savoir "ma nation"), mais pas pour consulter le detail d'une
+        // rencontre precise (tieId seul) - arrivee possible depuis coupe-tableau.html,
+        // qui n'a pas de notion de joueur courant (demande explicite de l'utilisateur,
+        // 2026-08-26 : rendre les rencontres du tableau cliquables).
+        if (!playerId && !tieId) {
             window.location.href = 'joueur.html';
         }
 
@@ -163,15 +168,52 @@
             `;
         }
 
-        function carteRubber(r) {
-            const label = r.type === 'double' ? 'Double' : 'Simple ' + r.numero;
-            return `<div class="stat-row"><span class="stat-label">${label}</span><span class="stat-value">${r.nation_vainqueur} — ${r.score || ''}</span></div>`;
+        // Nom d'un joueur (reel ou bot) a partir d'un poste de composition
+        // (joueur_x_est_reel/joueur_x_id) et de la liste des joueurs eligibles de sa
+        // nation (deja envoyee par /api/coupe/tie/:tieId).
+        function nomPosteCompo(compo, estReelCle, idCle, joueurs) {
+            if (!compo || compo[idCle] == null) return '(pas encore fixé)';
+            const j = (joueurs || []).find(function (x) { return x.estReel === !!compo[estReelCle] && Number(x.id) === Number(compo[idCle]); });
+            return j ? j.nom + (j.estReel ? '' : ' (bot)') : '?';
+        }
+
+        // Les 5 rencontres prevues d'une manche, meme avant qu'elles ne soient jouees
+        // (des que la composition des 2 nations est connue) - meme ordre que
+        // ordreRubbersCoupe cote serveur (2 simples, double, 2 simples retour).
+        // Chaque ligne affiche le score si la rencontre correspondante existe deja
+        // dans data.rubbers, sinon "a venir". Demande explicite de l'utilisateur,
+        // 2026-08-26 : pouvoir retrouver tous les matchs prevus des S-1, pas
+        // seulement ceux deja joues.
+        function tableauCinqRencontres(data) {
+            const compoDomicile = data.composition.find(function (c) { return c.nation === data.tie.nation_domicile; });
+            const compoExterieur = data.composition.find(function (c) { return c.nation === data.tie.nation_exterieur; });
+            const nomD = function (cle) { return nomPosteCompo(compoDomicile, cle + '_est_reel', cle + '_id', data.joueursDomicile); };
+            const nomE = function (cle) { return nomPosteCompo(compoExterieur, cle + '_est_reel', cle + '_id', data.joueursExterieur); };
+            const ordre = [
+                { numero: 1, label: 'Simple 1', domicile: nomD('joueur_a'), exterieur: nomE('joueur_a') },
+                { numero: 2, label: 'Simple 2', domicile: nomD('joueur_b'), exterieur: nomE('joueur_b') },
+                { numero: 3, label: 'Double', domicile: nomD('double_j1') + ' / ' + nomD('double_j2'), exterieur: nomE('double_j1') + ' / ' + nomE('double_j2') },
+                { numero: 4, label: 'Simple 1 (retour)', domicile: nomD('joueur_a'), exterieur: nomE('joueur_b') },
+                { numero: 5, label: 'Simple 2 (retour)', domicile: nomD('joueur_b'), exterieur: nomE('joueur_a') }
+            ];
+            return ordre.map(function (o) {
+                const joue = data.rubbers.find(function (r) { return r.numero === o.numero; });
+                // Une manche peut se terminer avant les 5 rencontres (qualification
+                // dès 3 points) - les rencontres jamais jouees dans ce cas ne sont pas
+                // "a venir" (elles n'auront jamais lieu), plutot "non jouee".
+                const statut = joue ? `${joue.nation_vainqueur} — ${joue.score || ''}` : (data.tie.statut === 'termine' ? 'non jouée (qualification acquise avant)' : 'à venir');
+                return `
+                    <div class="stat-row">
+                        <span class="stat-label">${o.label}</span>
+                        <span class="stat-value">${o.domicile} vs ${o.exterieur} · ${statut}</span>
+                    </div>
+                `;
+            }).join('');
         }
 
         async function chargerDetail() {
             document.getElementById('liste-container').style.display = 'none';
             document.getElementById('detail-container').style.display = 'block';
-            document.getElementById('retour-liste-lien').href = 'coupe.html?playerId=' + playerId;
 
             const response = await fetch('/api/coupe/tie/' + tieId);
             const data = await response.json();
@@ -183,6 +225,17 @@
             }
 
             const tie = data.tie;
+            // Sans playerId (arrivee depuis le tableau complet plutot que "Mes
+            // rencontres") : retour vers le tableau du circuit concerne plutot que
+            // vers une liste qui n'a pas de sens sans joueur.
+            const retourLien = document.getElementById('retour-liste-lien');
+            if (playerId) {
+                retourLien.href = 'coupe.html?playerId=' + playerId;
+                retourLien.textContent = 'Retour à mes rencontres';
+            } else {
+                retourLien.href = 'coupe-tableau.html?circuit=' + tie.circuit;
+                retourLien.textContent = 'Retour au tableau complet';
+            }
             const estCapitaineDomicile = Number(data.capitaineDomicile) === Number(playerId);
             const estCapitaineExterieur = Number(data.capitaineExterieur) === Number(playerId);
             const jeParticipe = Number(data.capitaineDomicile) === Number(playerId) || Number(data.capitaineExterieur) === Number(playerId)
@@ -199,7 +252,7 @@
                 html += `
                     <div class="tournoi-card" style="margin-top:16px;">
                         <div class="tournoi-card-name">${tie.nation_vainqueur} qualifié — ${tie.victoires_domicile} à ${tie.victoires_exterieur}</div>
-                        ${data.rubbers.map(carteRubber).join('')}
+                        ${tableauCinqRencontres(data)}
                     </div>
                 `;
             } else {
@@ -207,11 +260,14 @@
                 if (data.etape === 'composition' && estCapitaineDomicile) html += formulaireComposition(tie, tie.nation_domicile, data.joueursDomicile);
                 if (data.etape === 'composition' && estCapitaineExterieur) html += formulaireComposition(tie, tie.nation_exterieur, data.joueursExterieur);
                 if (data.etape === 'styles' && jeParticipe) html += formulaireStyle();
-                if (data.etape === 'matchs' || data.rubbers.length > 0) {
+                // Les 5 rencontres prevues s'affichent des que la composition est
+                // connue (a partir de S-1, demande explicite de l'utilisateur,
+                // 2026-08-26) - pas seulement une fois jouees.
+                if (data.etape === 'styles' || data.etape === 'matchs' || data.rubbers.length > 0) {
                     html += `
                         <div class="tournoi-card" style="margin-top:16px;">
-                            <div class="tournoi-card-name">Rencontre en cours — ${data.rubbers.length} / 5 rencontre${data.rubbers.length > 1 ? 's' : ''} jouée${data.rubbers.length > 1 ? 's' : ''}</div>
-                            ${data.rubbers.map(carteRubber).join('') || '<p class="match-hint" style="text-align:left; padding:8px 0 0;">Première rencontre pas encore jouée.</p>'}
+                            <div class="tournoi-card-name">${data.rubbers.length} / 5 rencontre${data.rubbers.length > 1 ? 's' : ''} jouée${data.rubbers.length > 1 ? 's' : ''}</div>
+                            ${tableauCinqRencontres(data)}
                         </div>
                     `;
                 } else if (!data.etape) {

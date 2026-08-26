@@ -813,11 +813,15 @@
                 // (statut de capitaine, liste des rencontres, formulaires surface/
                 // composition) vit desormais sur la page dediee capitanat.html,
                 // accessible depuis le menu de navigation comme les autres pages.
-                // data.alerteJoueur vient du serveur (etapeCoupe + verification que
-                // l'action n'est pas deja faite) - jamais recalcule cote client.
-                const estMoi = Number(data.capitaine) === Number(player.id);
-                zone.innerHTML = (estMoi && data.alerteJoueur)
-                    ? `<p class="match-hint" style="text-align:left; padding:8px 0 0; color:#E24B4A; font-weight:700;">${data.alerteJoueur}</p>`
+                // data.alerteJoueur vient du serveur, deja scope a CE joueur precis
+                // (etapeCoupe + verification que l'action n'est pas deja faite pour
+                // l'alerte capitaine, ou selection en composition + style pas encore
+                // choisi pour le rappel de style ajoute le 2026-08-26) - jamais
+                // recalcule cote client. Ne plus filtrer sur "suis-je le capitaine" :
+                // le rappel de style s'adresse a n'importe quel joueur selectionne,
+                // pas seulement au capitaine de sa nation.
+                zone.innerHTML = data.alerteJoueur
+                    ? `<p class="match-hint" style="text-align:left; padding:8px 0 0; color:#E24B4A; font-weight:700;">${data.alerteJoueur}</p>${lienRencontres}`
                     : '';
                 return;
             }
