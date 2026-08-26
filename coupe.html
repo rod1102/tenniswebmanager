@@ -157,13 +157,32 @@
             `;
         }
 
-        function formulaireStyle() {
-            const options = Object.keys(LABELS_STYLE).map(function (s) { return `<option value="${s}">${LABELS_STYLE[s]}</option>`; }).join('');
+        // Un style distinct par rencontre de simple (aller et retour comptent comme 2
+        // rencontres separees, comme 2 tours de tournoi) - jamais pour le double, qui
+        // n'a plus aucun style depuis le 2026-08-26 (demande explicite de
+        // l'utilisateur). `simples` vient de GET /api/coupe/style-en-attente/:playerId
+        // (deja filtre aux rencontres que CE joueur joue reellement), vide si ce
+        // joueur n'est que dans le double.
+        function formulaireStyle(simples) {
+            const options = function (valeurActuelle) {
+                return Object.keys(LABELS_STYLE).map(function (s) { return `<option value="${s}" ${s === valeurActuelle ? 'selected' : ''}>${LABELS_STYLE[s]}</option>`; }).join('');
+            };
+            const selectsHtml = simples.map(function (s) {
+                return `
+                    <div class="style-tour-card">
+                        <label>${s.label}</label>
+                        <select class="style-select" data-numero="${s.numero}">${options(s.styleActuel)}</select>
+                    </div>
+                `;
+            }).join('');
             return `
                 <div class="form-group" style="margin-top:16px;">
-                    <label>Ton style pour cette manche (simple + double si tu joues le double)</label>
-                    <select id="style-select">${options}</select>
-                    <button class="cta cta-primary" id="style-btn" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider le style</button>
+                    <p class="match-hint" style="text-align:left; padding:0; color:#E24B4A; font-weight:700;">Pour les doubles il n'y a pas de style à sélectionner. Tous les joueurs sont en style "Aucun".</p>
+                    ${simples.length > 0 ? `
+                        <label>Ton style pour chacune de tes rencontres de simple</label>
+                        <div class="style-tour-grid">${selectsHtml}</div>
+                        <button class="cta cta-primary style-btn" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider le(s) style(s)</button>
+                    ` : ''}
                 </div>
             `;
         }
@@ -264,7 +283,12 @@
                 if (data.etape === 'surface' && estCapitaineDomicile) html += formulaireSurface(tie);
                 if (data.etape === 'composition' && estCapitaineDomicile) html += formulaireComposition(tie, tie.nation_domicile, data.joueursDomicile);
                 if (data.etape === 'composition' && estCapitaineExterieur) html += formulaireComposition(tie, tie.nation_exterieur, data.joueursExterieur);
-                if (data.etape === 'styles' && jeParticipe) html += formulaireStyle();
+                if (data.etape === 'styles' && jeParticipe) {
+                    const reponseStyles = await fetch('/api/coupe/style-en-attente/' + playerId);
+                    const dataStyles = await reponseStyles.json();
+                    const monEntree = reponseStyles.ok && dataStyles.rencontres ? dataStyles.rencontres.find(function (r) { return Number(r.tieId) === Number(tieId); }) : null;
+                    html += formulaireStyle(monEntree ? monEntree.simples : []);
+                }
                 // Les 5 rencontres prevues s'affichent des que la composition est
                 // connue (a partir de S-1, demande explicite de l'utilisateur,
                 // 2026-08-26) - pas seulement une fois jouees.
@@ -319,15 +343,18 @@
                 });
             });
 
-            const styleBtn = document.getElementById('style-btn');
+            const styleBtn = document.querySelector('.style-btn');
             if (styleBtn) styleBtn.addEventListener('click', async function () {
-                const style = document.getElementById('style-select').value;
-                const r = await fetch('/api/coupe/style', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ tieId, playerId, style })
-                });
-                const d = await r.json();
-                if (!r.ok) { alert(d.error); return; }
+                const selects = Array.from(document.querySelectorAll('.style-select'));
+                for (const select of selects) {
+                    const r = await fetch('/api/coupe/style', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tieId, playerId, style: select.value, numero: Number(select.dataset.numero) })
+                    });
+                    const d = await r.json();
+                    if (!r.ok) { alert(d.error); return; }
+                }
+                alert('Style(s) enregistré(s).');
                 chargerDetail();
             });
         }

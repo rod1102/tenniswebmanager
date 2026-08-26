@@ -254,6 +254,12 @@
             const tournoisExistants = {};
             dataPlan.tournois.forEach(function (t) { tournoisExistants[t.semaine] = t.nom; });
 
+            // Meme principe pour une semaine de Coupe Davis/Fed Cup ou ce joueur est
+            // selectionne dans la composition de sa nation (dataPlan.coupes) - demande
+            // explicite de l'utilisateur, 2026-08-26.
+            const coupesExistantes = {};
+            (dataPlan.coupes || []).forEach(function (c) { coupesExistantes[c.semaine] = c.nom; });
+
             let xpHtml = '';
             if (player.points_experience > 0) {
                 let repartitionEnAttente = {};
@@ -330,6 +336,15 @@
                         <div class="planning-week-card planning-week-tournoi">
                             <label>${labelSemaine}</label>
                             <div class="planning-tournoi-lock">Tournoi : ${tournoisExistants[s]}</div>
+                        </div>
+                    `;
+                    continue;
+                }
+                if (coupesExistantes[s]) {
+                    weeksHtml += `
+                        <div class="planning-week-card planning-week-tournoi">
+                            <label>${labelSemaine}</label>
+                            <div class="planning-tournoi-lock">${coupesExistantes[s]}</div>
                         </div>
                     `;
                     continue;
@@ -638,20 +653,28 @@
             const data = await response.json();
             if (!response.ok || !data.rencontres || data.rencontres.length === 0) return;
 
+            // Un style distinct par rencontre de simple (aller/retour comptent comme 2
+            // rencontres separees, comme 2 tours de tournoi) - jamais pour le double
+            // (r.simples ne contient d'ailleurs jamais le double, deja filtre cote
+            // serveur) - demande explicite de l'utilisateur, 2026-08-26.
             const blocsHtml = data.rencontres.map(function (r) {
-                const options = Object.keys(STYLES_JEU_LABELS).map(function (cle) {
-                    return `<option value="${cle}" ${cle === r.styleActuel ? 'selected' : ''}>${STYLES_JEU_LABELS[cle]}</option>`;
+                const selectsHtml = r.simples.map(function (s) {
+                    const options = Object.keys(STYLES_JEU_LABELS).map(function (cle) {
+                        return `<option value="${cle}" ${cle === s.styleActuel ? 'selected' : ''}>${STYLES_JEU_LABELS[cle]}</option>`;
+                    }).join('');
+                    return `
+                        <div class="style-tour-card">
+                            <label>${s.label}</label>
+                            <select class="style-coupe-select" data-numero="${s.numero}">${options}</select>
+                        </div>
+                    `;
                 }).join('');
                 return `
                     <div class="style-tournoi-bloc" data-tie-id="${r.tieId}" style="margin-bottom:20px;">
                         <div class="match-hint">Coupe Davis / Fed Cup vs ${r.opposant} — ${r.manche} (semaine ${r.positionSemaine}) — à choisir avant le début des matchs.</div>
-                        <div class="style-tour-grid">
-                            <div class="style-tour-card">
-                                <label>Style</label>
-                                <select class="style-coupe-select">${options}</select>
-                            </div>
-                        </div>
-                        <button class="cta cta-primary style-coupe-valider-btn" style="padding:12px 24px; font-size:0.85rem;">Valider le style</button>
+                        <p class="match-hint" style="text-align:left; padding:4px 0; color:#E24B4A; font-weight:700;">Pour les doubles il n'y a pas de style à sélectionner. Tous les joueurs sont en style "Aucun".</p>
+                        <div class="style-tour-grid">${selectsHtml}</div>
+                        <button class="cta cta-primary style-coupe-valider-btn" style="padding:12px 24px; font-size:0.85rem;">Valider le(s) style(s)</button>
                     </div>
                 `;
             }).join('');
@@ -661,14 +684,16 @@
             data.rencontres.forEach(function (r) {
                 const panneau = container.querySelector('.style-tournoi-bloc[data-tie-id="' + r.tieId + '"]');
                 panneau.querySelector('.style-coupe-valider-btn').addEventListener('click', async function () {
-                    const style = panneau.querySelector('.style-coupe-select').value;
-                    const resp = await fetch('/api/coupe/style', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ tieId: r.tieId, playerId: player.id, style })
-                    });
-                    const d = await resp.json();
-                    if (!resp.ok) { alert(d.error); return; }
-                    alert('Style de Coupe Davis / Fed Cup enregistré.');
+                    const selects = Array.from(panneau.querySelectorAll('.style-coupe-select'));
+                    for (const select of selects) {
+                        const resp = await fetch('/api/coupe/style', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ tieId: r.tieId, playerId: player.id, style: select.value, numero: Number(select.dataset.numero) })
+                        });
+                        const d = await resp.json();
+                        if (!resp.ok) { alert(d.error); return; }
+                    }
+                    alert('Style(s) de Coupe Davis / Fed Cup enregistré(s).');
                     chargerStyleEnAttente(player);
                 });
             });

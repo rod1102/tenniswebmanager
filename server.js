@@ -939,11 +939,36 @@ app.get('/api/semaine', (req, res) => {
     }
 });
 
+// Semaines (dans [debut, fin]) ou ce joueur reel est selectionne dans la
+// composition de sa nation pour une rencontre de Coupe Davis/Fed Cup non
+// terminee - pas juste "sa nation joue cette semaine-la" (un joueur non retenu
+// dans la composition garde sa planification normale). Utilise par
+// /api/planification (fiche joueur) pour verrouiller la semaine, meme principe
+// que les tournois individuels. Demande explicite de l'utilisateur, 2026-08-26.
+function joueursEngagesCoupeDavis(player, debut, fin) {
+    const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
+    const ties = db.prepare(`
+        SELECT * FROM coupe_equipes
+        WHERE statut != 'termine' AND semaine BETWEEN ? AND ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?)
+    `).all(debut, fin, circuit, player.nationalite, player.nationalite);
+
+    const nomCoupe = circuit === 'ATP' ? 'Coupe Davis' : 'Fed Cup';
+    const resultats = [];
+    ties.forEach(function (tie) {
+        const compo = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, player.nationalite);
+        if (!compo) return;
+        const postes = [['joueur_a_est_reel', 'joueur_a_id'], ['joueur_b_est_reel', 'joueur_b_id'], ['double_j1_est_reel', 'double_j1_id'], ['double_j2_est_reel', 'double_j2_id']];
+        const selectionne = postes.some(function (poste) { return compo[poste[0]] && Number(compo[poste[1]]) === Number(player.id); });
+        if (selectionne) resultats.push({ semaine: tie.semaine, nom: nomCoupe });
+    });
+    return resultats;
+}
+
 app.get('/api/planification/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
 
-        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -964,6 +989,12 @@ app.get('/api/planification/:playerId', (req, res) => {
               AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
         `).all(debut, fin, playerId);
 
+        // Meme principe pour une semaine de Coupe Davis/Fed Cup ou ce joueur est
+        // selectionne dans la composition de sa nation (pas juste "sa nation joue" -
+        // un joueur non retenu cette manche-la garde sa planification normale).
+        // Demande explicite de l'utilisateur, 2026-08-26.
+        const coupes = joueursEngagesCoupeDavis(player, debut, fin);
+
         // finDeSaison : derniere semaine de type "tournoi" du cycle, juste avant que la
         // moulinette s'applique a la bascule vers la Pre-saison suivante - rien a y
         // planifier (aucun tournoi n'y tombe jamais), donc le select repos/entrainement
@@ -976,7 +1007,7 @@ app.get('/api/planification/:playerId', (req, res) => {
             phases[s] = Object.assign({}, p, { finDeSaison: p.type === 'tournoi' && p.positionSemaine === LONGUEUR_SAISON - 2 });
         }
 
-        res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournois, phases });
+        res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournois, coupes, phases });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
@@ -1109,7 +1140,7 @@ app.post('/api/planification', (req, res) => {
     try {
         const { playerId, semaine, action } = req.body;
 
-        const player = db.prepare('SELECT id, condition FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
+        const player = db.prepare('SELECT id, condition, type, nationalite FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
             return res.status(404).json({ error: 'Joueur introuvable.' });
         }
@@ -1148,6 +1179,13 @@ app.post('/api/planification', (req, res) => {
         `).get(semaine, playerId);
         if (inscritCetteSemaine) {
             return res.status(400).json({ error: 'Ce joueur est inscrit a un tournoi cette semaine-la, la planification ne s applique pas.' });
+        }
+        // Meme garde-fou pour une semaine de Coupe Davis/Fed Cup ou ce joueur est
+        // selectionne dans la composition de sa nation (demande explicite de
+        // l'utilisateur, 2026-08-26) - la fiche joueur ne propose deja plus le
+        // select pour cette semaine-la, ce garde-fou couvre un appel direct a l'API.
+        if (joueursEngagesCoupeDavis(player, semaine, semaine).length > 0) {
+            return res.status(400).json({ error: 'Ce joueur est engage en Coupe Davis/Fed Cup cette semaine-la, la planification ne s applique pas.' });
         }
 
         db.prepare(`
@@ -1716,6 +1754,20 @@ function executerAvancementSemaine() {
         if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine === 2) {
             resoudreCapitainesSaison(phaseAffichee(nouvelleSemaine).numeroSaison);
         }
+
+        // Coupe Davis / Fed Cup : a l'entree en semaine des styles (S-1), la surface
+        // et la composition doivent etre DEFINITIVES, jamais encore "probable" - si
+        // le capitaine n'a rien soumis pendant ses fenetres S-3/S-2, le repli
+        // automatique s'applique maintenant, pour de bon, plutot que d'attendre la
+        // toute premiere simulation de rubber (demande explicite de l'utilisateur,
+        // 2026-08-26 : a S-1 les joueurs ne doivent plus pouvoir changer).
+        db.prepare("SELECT * FROM coupe_equipes WHERE statut != 'termine' AND semaine = ?").all(nouvelleSemaine + 1)
+            .forEach(function (tie) {
+                assurerSurfaceAuto(tie);
+                const tieAJour = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tie.id);
+                assurerCompositionAuto(tieAJour, tieAJour.nation_domicile);
+                assurerCompositionAuto(tieAJour, tieAJour.nation_exterieur);
+            });
 
         const semaineOuvertureFavoris = nouvelleSemaine + 5;
         const semaineOuvertureEntrants = nouvelleSemaine + 5;
@@ -8052,12 +8104,13 @@ function styleEnAttentePourJoueur(playerId, nationalite, circuit) {
         if (etapeCoupe(tie) !== 'styles') continue;
         const nation = tie.nation_domicile === nationalite ? tie.nation_domicile : tie.nation_exterieur;
         const compo = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, nation);
-        if (!compo) continue;
-        const postes = [['joueur_a_est_reel', 'joueur_a_id'], ['joueur_b_est_reel', 'joueur_b_id'], ['double_j1_est_reel', 'double_j1_id'], ['double_j2_est_reel', 'double_j2_id']];
-        const selectionne = postes.some(function (poste) { return compo[poste[0]] && Number(compo[poste[1]]) === Number(playerId); });
-        if (!selectionne) continue;
-        const dejaChoisi = db.prepare('SELECT 1 FROM coupe_styles WHERE coupe_equipe_id = ? AND player_id = ?').get(tie.id, playerId);
-        if (!dejaChoisi) return true;
+        // Uniquement les 2 rencontres de simple (aller/retour) - plus aucun style en
+        // double depuis le 2026-08-26, jamais "en attente" pour ce poste-la.
+        const postes = postesSimpleDuJoueur(compo, playerId);
+        const unStyleManque = postes.some(function (p) {
+            return !db.prepare('SELECT 1 FROM coupe_styles WHERE coupe_equipe_id = ? AND player_id = ? AND numero = ?').get(tie.id, playerId, p.numero);
+        });
+        if (unStyleManque) return true;
     }
     return false;
 }
@@ -8187,9 +8240,27 @@ app.post('/api/coupe/composition', (req, res) => {
     }
 });
 
+// Les rencontres de simple (numero + libelle) qu'un joueur precis doit disputer
+// d'apres la composition de sa nation - joueur_a joue 1 (aller) et 4 (retour),
+// joueur_b joue 2 (aller) et 5 (retour). Jamais le double (numero 3, plus aucun
+// style depuis le 2026-08-26) : un joueur uniquement double_j1/j2 (jamais aussi
+// joueur_a/b) n'a donc aucune rencontre ici. Partage entre POST /api/coupe/style
+// (validation) et GET /api/coupe/style-en-attente/:playerId (liste a afficher).
+function postesSimpleDuJoueur(compo, playerId) {
+    if (!compo) return [];
+    const resultats = [];
+    if (compo.joueur_a_est_reel && Number(compo.joueur_a_id) === Number(playerId)) {
+        resultats.push({ numero: 1, label: 'Simple 1' }, { numero: 4, label: 'Simple 1 (retour)' });
+    }
+    if (compo.joueur_b_est_reel && Number(compo.joueur_b_id) === Number(playerId)) {
+        resultats.push({ numero: 2, label: 'Simple 2' }, { numero: 5, label: 'Simple 2 (retour)' });
+    }
+    return resultats;
+}
+
 app.post('/api/coupe/style', (req, res) => {
     try {
-        const { tieId, playerId, style } = req.body;
+        const { tieId, playerId, style, numero } = req.body;
         if (!STYLES_JEU.includes(style)) return res.status(400).json({ error: 'Style invalide.' });
 
         const tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tieId);
@@ -8203,10 +8274,21 @@ app.post('/api/coupe/style', (req, res) => {
             return res.status(400).json({ error: 'Ce joueur ne participe pas à cette rencontre.' });
         }
 
+        // Plus aucun style en double (toujours "aucun", demande explicite de
+        // l'utilisateur, 2026-08-26) : le numero doit correspondre a une des 2
+        // rencontres de simple REELLEMENT jouees par ce joueur precis d'apres la
+        // composition de sa nation - jamais 3 (double), jamais le poste de l'autre
+        // simple, jamais une rencontre non jouee par lui.
+        const compo = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, player.nationalite);
+        const postesValides = postesSimpleDuJoueur(compo, player.id).map(function (p) { return p.numero; });
+        if (!postesValides.includes(Number(numero))) {
+            return res.status(400).json({ error: 'Ce joueur ne joue pas cette rencontre-la, ou il s\'agit du double (pas de style a y choisir).' });
+        }
+
         db.prepare(`
-            INSERT INTO coupe_styles (coupe_equipe_id, player_id, style) VALUES (?, ?, ?)
-            ON CONFLICT(coupe_equipe_id, player_id) DO UPDATE SET style = excluded.style
-        `).run(tie.id, player.id, style);
+            INSERT INTO coupe_styles (coupe_equipe_id, player_id, style, numero) VALUES (?, ?, ?, ?)
+            ON CONFLICT(coupe_equipe_id, player_id, numero) DO UPDATE SET style = excluded.style
+        `).run(tie.id, player.id, style, Number(numero));
 
         res.json({ success: true });
     } catch (err) {
@@ -8215,10 +8297,12 @@ app.post('/api/coupe/style', (req, res) => {
     }
 });
 
-// Rencontres de Coupe Davis/Fed Cup dont ce joueur doit choisir le style CETTE
-// semaine (etape 'styles', S-1) - alimente le meme panneau que les styles de
+// Rencontres de simple de Coupe Davis/Fed Cup dont ce joueur doit choisir le style
+// CETTE semaine (etape 'styles', S-1) - alimente le meme panneau que les styles de
 // tournoi sur joueur.html, demande explicite de l'utilisateur, 2026-08-26 :
-// pouvoir choisir directement ici plutot que d'aller sur coupe.html.
+// pouvoir choisir directement ici plutot que d'aller sur coupe.html, et un style
+// distinct pour l'aller et le retour (comme 2 tours de tournoi), jamais pour le
+// double (aucun style possible, l'info le rappelle cote frontend).
 app.get('/api/coupe/style-en-attente/:playerId', (req, res) => {
     try {
         const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(req.params.playerId, req.userId);
@@ -8234,17 +8318,17 @@ app.get('/api/coupe/style-en-attente/:playerId', (req, res) => {
         const rencontres = [];
         ties.forEach(function (tie) {
             if (etapeCoupe(tie) !== 'styles') return;
-            const nation = tie.nation_domicile === player.nationalite ? tie.nation_domicile : tie.nation_exterieur;
-            const compo = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, nation);
-            if (!compo) return;
-            const postes = [['joueur_a_est_reel', 'joueur_a_id'], ['joueur_b_est_reel', 'joueur_b_id'], ['double_j1_est_reel', 'double_j1_id'], ['double_j2_est_reel', 'double_j2_id']];
-            const selectionne = postes.some(function (poste) { return compo[poste[0]] && Number(compo[poste[1]]) === Number(player.id); });
-            if (!selectionne) return;
-            const styleActuel = db.prepare('SELECT style FROM coupe_styles WHERE coupe_equipe_id = ? AND player_id = ?').get(tie.id, player.id);
+            const compo = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, player.nationalite);
+            const postes = postesSimpleDuJoueur(compo, player.id);
+            if (postes.length === 0) return; // uniquement dans le double (ou pas selectionne) : rien a choisir
+            const simples = postes.map(function (p) {
+                const styleActuel = db.prepare('SELECT style FROM coupe_styles WHERE coupe_equipe_id = ? AND player_id = ? AND numero = ?').get(tie.id, player.id, p.numero);
+                return { numero: p.numero, label: p.label, styleActuel: styleActuel ? styleActuel.style : 'aucun' };
+            });
             const opposant = tie.nation_domicile === player.nationalite ? tie.nation_exterieur : tie.nation_domicile;
             rencontres.push({
                 tieId: tie.id, opposant, manche: LABELS_MANCHE[tie.manche] || tie.manche,
-                positionSemaine: positionSemaineAffichee(tie.semaine), styleActuel: styleActuel ? styleActuel.style : 'aucun'
+                positionSemaine: positionSemaineAffichee(tie.semaine), simples
             });
         });
 
@@ -8264,8 +8348,14 @@ const BAREME_XP_COUPE = {
     defaitePersoEtEquipe: 9
 };
 
-function styleJoueur(tieId, playerId) {
-    const row = db.prepare('SELECT style FROM coupe_styles WHERE coupe_equipe_id = ? AND player_id = ?').get(tieId, playerId);
+// Style d'un joueur pour UNE rencontre precise (numero de coupe_rubbers, 1/2/4/5) -
+// dissocie par rencontre depuis le 2026-08-26 (demande explicite de l'utilisateur) :
+// un joueur de simple joue 2 rencontres (aller + retour), avec un style eventuellement
+// different pour chacune, comme les tours d'un tournoi. Le double n'a pas de numero
+// de style (jamais appele avec un numero par simulerRubberDouble, qui n'utilise plus
+// aucun style).
+function styleJoueur(tieId, playerId, numero) {
+    const row = db.prepare('SELECT style FROM coupe_styles WHERE coupe_equipe_id = ? AND player_id = ? AND numero = ?').get(tieId, playerId, numero);
     return row ? row.style : null;
 }
 
@@ -8283,8 +8373,8 @@ const LABEL_MANCHE_COUPE = { finale: 'Finale', demies: 'Demi-finale', quarts: '1
 // des donnees pour partager le meme code sans le rendre confus.
 function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libelleRubber) {
     const surface = tie.surface;
-    const styleDomicile = domicileEntree.estReel ? styleJoueur(tie.id, domicileEntree.id) : null;
-    const styleExterieur = exterieurEntree.estReel ? styleJoueur(tie.id, exterieurEntree.id) : null;
+    const styleDomicile = domicileEntree.estReel ? styleJoueur(tie.id, domicileEntree.id, numero) : null;
+    const styleExterieur = exterieurEntree.estReel ? styleJoueur(tie.id, exterieurEntree.id, numero) : null;
 
     function valeurs(entree) {
         if (entree.estReel) {
@@ -8578,13 +8668,16 @@ function finaliserMancheCoupe(tieId) {
 function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
     const surface = tie.surface;
 
+    // Plus aucun style en double (toujours "aucun") - demande explicite de
+    // l'utilisateur, 2026-08-26 : seuls les simples ont un style desormais, choisi
+    // separement pour l'aller et le retour. ajusterNiveauxStyle(..., null, ...) ne
+    // touche a rien (meme comportement que style === 'aucun').
     function valeurJoueur(estReel, id) {
         if (estReel) {
             const player = db.prepare('SELECT * FROM players WHERE id = ?').get(id);
             const normal = niveauDouble(player, surface);
             const mental = normal + player.mental_courant;
-            const style = styleJoueur(tie.id, id);
-            return Object.assign({ joueur: player, style: style }, ajusterNiveauxStyle(normal, mental, style, player.mental_courant, 1));
+            return Object.assign({ joueur: player, style: null }, ajusterNiveauxStyle(normal, mental, null, player.mental_courant, 1));
         }
         const rival = db.prepare('SELECT * FROM classement_joueurs WHERE id = ?').get(id);
         return { normal: rival.niveau, mental: rival.niveau + 100 };

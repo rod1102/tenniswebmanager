@@ -519,15 +519,20 @@ db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_coupe_votes_unique ON coupe_votes
 // Un style par VRAI joueur et par manche (pas par rencontre individuelle) - couvre
 // a la fois son/ses simple(s) et le double s'il y participe, decision explicite de
 // l'utilisateur (pas de "style d'equipe" separe).
+// numero (rencontre precise : 1/2/4/5, jamais 3=double) ajoute nativement ici pour
+// une base neuve - les bases existantes le recuperent via la migration ALTER TABLE
+// plus bas (colonne absente de coupe_styles a l'origine). L'index unique est cree
+// APRES le bloc de migrations, en bas de ce fichier, pour etre sur que la colonne
+// existe deja quel que soit le chemin (creation neuve ou migration).
 db.exec(`
     CREATE TABLE IF NOT EXISTS coupe_styles (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         coupe_equipe_id INTEGER NOT NULL,
         player_id INTEGER NOT NULL,
-        style TEXT NOT NULL
+        style TEXT NOT NULL,
+        numero INTEGER
     )
 `);
-db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_coupe_styles_unique ON coupe_styles(coupe_equipe_id, player_id)`);
 
 // Groupe mondial (2026-08-12, demande explicite) : composition PERSISTANTE des 16
 // nations d'un circuit pour une saison donnee - remplace le tirage integral chaque
@@ -712,6 +717,16 @@ const migrations = [
     // l'utilisateur, 2026-08-25. joueur_a/joueur_b existaient deja.
     "ALTER TABLE coupe_composition ADD COLUMN joueur_c_est_reel INTEGER",
     "ALTER TABLE coupe_composition ADD COLUMN joueur_c_id INTEGER",
+    // Style de Coupe Davis/Fed Cup dissocie PAR RENCONTRE (numero de coupe_rubbers) -
+    // un joueur de simple joue 2 rencontres (aller + retour), chacune avec son propre
+    // style desormais (comme les tours d'un tournoi), plutot qu'un seul style pour
+    // toute la manche. Le double n'a plus aucun style (toujours "aucun" a la
+    // simulation) - demande explicite de l'utilisateur, 2026-08-26. Les styles deja
+    // soumis avant ce changement (une ligne par joueur, sans numero) restent en base
+    // mais ne correspondent plus a aucune rencontre precise (numero NULL) : le joueur
+    // doit simplement re-choisir, cout de transition juge acceptable pour un
+    // changement de regle.
+    "ALTER TABLE coupe_styles ADD COLUMN numero INTEGER",
     "ALTER TABLE coupe_composition ADD COLUMN joueur_d_est_reel INTEGER",
     "ALTER TABLE coupe_composition ADD COLUMN joueur_d_id INTEGER"
 ];
@@ -723,6 +738,17 @@ migrations.forEach(function (sql) {
         // Colonne deja existante : rien a faire
     }
 });
+
+// Placee ici (apres les migrations) pour etre sure que coupe_styles.numero existe
+// deja, que la base soit neuve (colonne native dans le CREATE TABLE) ou existante
+// (colonne ajoutee par migration juste au-dessus). L'ancien index deux-colonnes
+// (coupe_equipe_id, player_id) - un seul style pour toute la manche - doit etre
+// explicitement supprime : `CREATE ... IF NOT EXISTS` ne remplace jamais un index
+// existant du meme nom meme si sa definition a change, une base deja en prod
+// garderait sinon l'ancienne contrainte et rejetterait le 2e style (aller ET
+// retour) d'un meme joueur. Demande explicite de l'utilisateur, 2026-08-26.
+db.exec(`DROP INDEX IF EXISTS idx_coupe_styles_unique`);
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_coupe_styles_unique_v2 ON coupe_styles(coupe_equipe_id, player_id, numero)`);
 
 // Nettoyage : avant le correctif du refus admin, un personnage refuse restait
 // fige sur statut='refuse' sans jamais etre supprime, empechant le coach de
