@@ -8192,6 +8192,46 @@ app.post('/api/coupe/style', (req, res) => {
     }
 });
 
+// Rencontres de Coupe Davis/Fed Cup dont ce joueur doit choisir le style CETTE
+// semaine (etape 'styles', S-1) - alimente le meme panneau que les styles de
+// tournoi sur joueur.html, demande explicite de l'utilisateur, 2026-08-26 :
+// pouvoir choisir directement ici plutot que d'aller sur coupe.html.
+app.get('/api/coupe/style-en-attente/:playerId', (req, res) => {
+    try {
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(req.params.playerId, req.userId);
+        if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+
+        const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
+        const saison = nombreSaisonAffichee();
+        const ties = db.prepare(`
+            SELECT * FROM coupe_equipes
+            WHERE saison = ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?) AND statut != 'termine'
+        `).all(saison, circuit, player.nationalite, player.nationalite);
+
+        const rencontres = [];
+        ties.forEach(function (tie) {
+            if (etapeCoupe(tie) !== 'styles') return;
+            const nation = tie.nation_domicile === player.nationalite ? tie.nation_domicile : tie.nation_exterieur;
+            const compo = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, nation);
+            if (!compo) return;
+            const postes = [['joueur_a_est_reel', 'joueur_a_id'], ['joueur_b_est_reel', 'joueur_b_id'], ['double_j1_est_reel', 'double_j1_id'], ['double_j2_est_reel', 'double_j2_id']];
+            const selectionne = postes.some(function (poste) { return compo[poste[0]] && Number(compo[poste[1]]) === Number(player.id); });
+            if (!selectionne) return;
+            const styleActuel = db.prepare('SELECT style FROM coupe_styles WHERE coupe_equipe_id = ? AND player_id = ?').get(tie.id, player.id);
+            const opposant = tie.nation_domicile === player.nationalite ? tie.nation_exterieur : tie.nation_domicile;
+            rencontres.push({
+                tieId: tie.id, opposant, manche: LABELS_MANCHE[tie.manche] || tie.manche,
+                positionSemaine: positionSemaineAffichee(tie.semaine), styleActuel: styleActuel ? styleActuel.style : 'aucun'
+            });
+        });
+
+        res.json({ success: true, rencontres });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // ---------- Simulation de la manche (5 rencontres) ----------
 
 const BAREME_XP_COUPE = {

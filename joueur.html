@@ -512,31 +512,27 @@
             const response = await fetch('/api/tournois/style-en-attente/' + player.id + '?userId=' + userId);
             const data = await response.json();
 
+            let htmlTournois;
+            let blocsAffiches = false;
+
             if (!response.ok) {
-                container.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger les styles de jeu.') + '</div>';
-                return;
-            }
-
-            if (!data.tournois || data.tournois.length === 0) {
-                container.innerHTML = '<div class="match-hint">Aucun tournoi en attente de style pour le moment — reviens ici une fois le tableau tiré (à S-1).</div>';
-                return;
-            }
-
-            // Un joueur/une joueuse blesse(e) est contraint(e) au forfait pour tous ses
-            // tournois en attente tant qu'il/elle ne s'est pas repose(e) - choisir un
-            // style ou miser de l'energie n'a alors plus aucun sens (bug signale par
-            // l'utilisateur, 2026-08-23 : ces controles restaient actifs et suggeraient
-            // a tort qu'ils servaient encore a quelque chose).
-            if (player.condition === 'blesse') {
-                container.innerHTML = '<div class="match-hint" style="color:#E24B4A; font-weight:700;">Votre joueur ou joueuse est blessé(e), il sera donc forfait pour le tournoi prévu la semaine prochaine.</div>';
-                return;
-            }
-
-            // Un joueur peut avoir plusieurs tournois "a_venir" en meme temps (celui en
-            // cours + le suivant deja tire a S-1) - un panneau independant par tournoi,
-            // chacun avec ses propres selecteurs/boutons scopes par tournoi.id pour ne
-            // jamais se marcher dessus (demande explicite de l'utilisateur, 2026-08-20).
-            container.innerHTML = data.tournois.map(function (bloc) {
+                htmlTournois = '<div class="match-hint">' + (data.error || 'Impossible de charger les styles de jeu.') + '</div>';
+            } else if (!data.tournois || data.tournois.length === 0) {
+                htmlTournois = '<div class="match-hint">Aucun tournoi en attente de style pour le moment — reviens ici une fois le tableau tiré (à S-1).</div>';
+            } else if (player.condition === 'blesse') {
+                // Un joueur/une joueuse blesse(e) est contraint(e) au forfait pour tous ses
+                // tournois en attente tant qu'il/elle ne s'est pas repose(e) - choisir un
+                // style ou miser de l'energie n'a alors plus aucun sens (bug signale par
+                // l'utilisateur, 2026-08-23 : ces controles restaient actifs et suggeraient
+                // a tort qu'ils servaient encore a quelque chose).
+                htmlTournois = '<div class="match-hint" style="color:#E24B4A; font-weight:700;">Votre joueur ou joueuse est blessé(e), il sera donc forfait pour le tournoi prévu la semaine prochaine.</div>';
+            } else {
+                blocsAffiches = true;
+                // Un joueur peut avoir plusieurs tournois "a_venir" en meme temps (celui en
+                // cours + le suivant deja tire a S-1) - un panneau independant par tournoi,
+                // chacun avec ses propres selecteurs/boutons scopes par tournoi.id pour ne
+                // jamais se marcher dessus (demande explicite de l'utilisateur, 2026-08-20).
+                htmlTournois = data.tournois.map(function (bloc) {
                 const stylesInterdits = bloc.stylesInterdits || [];
                 const tournoiDemarre = bloc.verrouille;
                 const plafondMise = bloc.plafondMiseEnergie || 0;
@@ -579,49 +575,102 @@
                         <button class="cta cta-primary style-valider-btn" style="padding:12px 24px; font-size:0.85rem;" ${tournoiDemarre ? 'disabled' : ''}>Valider les styles</button>
                     </div>
                 `;
+                }).join('');
+            }
+
+            container.innerHTML = htmlTournois;
+
+            if (blocsAffiches) {
+                data.tournois.forEach(function (bloc) {
+                    const panneau = container.querySelector('.style-tournoi-bloc[data-tournoi-id="' + bloc.tournoi.id + '"]');
+
+                    if (!bloc.verrouille && bloc.plafondMiseEnergie > 0) {
+                        panneau.querySelector('.mise-energie-btn').addEventListener('click', async function () {
+                            const inputMise = panneau.querySelector('.mise-energie-input');
+                            const energieMisee = Math.floor(Number(inputMise.value) || 0);
+
+                            const responseMise = await fetch('/api/tournois/mise-energie', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ userId, playerId: player.id, tournoiId: bloc.tournoi.id, energieMisee })
+                            });
+                            const dataMise = await responseMise.json();
+                            if (!responseMise.ok) {
+                                alert(dataMise.error);
+                                return;
+                            }
+                            alert('Mise d\'énergie enregistrée.');
+                            chargerStyleEnAttente(player);
+                        });
+                    }
+
+                    if (!bloc.verrouille) {
+                        panneau.querySelector('.style-valider-btn').addEventListener('click', async function () {
+                            const styles = Array.from(panneau.querySelectorAll('.style-tour-select')).map(function (s) { return s.value; });
+
+                            const responseValider = await fetch('/api/tournois/style', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ userId, playerId: player.id, tournoiId: bloc.tournoi.id, styles })
+                            });
+                            const dataValider = await responseValider.json();
+                            if (!responseValider.ok) {
+                                alert(dataValider.error);
+                                return;
+                            }
+                            alert('Styles de jeu enregistrés.');
+                            chargerStyleEnAttente(player);
+                        });
+                    }
+                });
+            }
+
+            // Coupe Davis/Fed Cup : toujours tente en plus de ce qui precede (un joueur
+            // peut n'avoir aucun tournoi en attente mais un style de Coupe Davis a
+            // choisir, ou l'inverse) - demande explicite de l'utilisateur, 2026-08-26,
+            // pouvoir choisir directement ici plutot que d'aller sur coupe.html.
+            await chargerStyleCoupeEnAttente(player);
+        }
+
+        async function chargerStyleCoupeEnAttente(player) {
+            const container = document.getElementById('style-container');
+            const response = await fetch('/api/coupe/style-en-attente/' + player.id);
+            const data = await response.json();
+            if (!response.ok || !data.rencontres || data.rencontres.length === 0) return;
+
+            const blocsHtml = data.rencontres.map(function (r) {
+                const options = Object.keys(STYLES_JEU_LABELS).map(function (cle) {
+                    return `<option value="${cle}" ${cle === r.styleActuel ? 'selected' : ''}>${STYLES_JEU_LABELS[cle]}</option>`;
+                }).join('');
+                return `
+                    <div class="style-tournoi-bloc" data-tie-id="${r.tieId}" style="margin-bottom:20px;">
+                        <div class="match-hint">Coupe Davis / Fed Cup vs ${r.opposant} — ${r.manche} (semaine ${r.positionSemaine}) — à choisir avant le début des matchs.</div>
+                        <div class="style-tour-grid">
+                            <div class="style-tour-card">
+                                <label>Style</label>
+                                <select class="style-coupe-select">${options}</select>
+                            </div>
+                        </div>
+                        <button class="cta cta-primary style-coupe-valider-btn" style="padding:12px 24px; font-size:0.85rem;">Valider le style</button>
+                    </div>
+                `;
             }).join('');
 
-            data.tournois.forEach(function (bloc) {
-                const panneau = container.querySelector('.style-tournoi-bloc[data-tournoi-id="' + bloc.tournoi.id + '"]');
+            container.innerHTML += blocsHtml;
 
-                if (!bloc.verrouille && bloc.plafondMiseEnergie > 0) {
-                    panneau.querySelector('.mise-energie-btn').addEventListener('click', async function () {
-                        const inputMise = panneau.querySelector('.mise-energie-input');
-                        const energieMisee = Math.floor(Number(inputMise.value) || 0);
-
-                        const responseMise = await fetch('/api/tournois/mise-energie', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ userId, playerId: player.id, tournoiId: bloc.tournoi.id, energieMisee })
-                        });
-                        const dataMise = await responseMise.json();
-                        if (!responseMise.ok) {
-                            alert(dataMise.error);
-                            return;
-                        }
-                        alert('Mise d\'énergie enregistrée.');
-                        chargerStyleEnAttente(player);
+            data.rencontres.forEach(function (r) {
+                const panneau = container.querySelector('.style-tournoi-bloc[data-tie-id="' + r.tieId + '"]');
+                panneau.querySelector('.style-coupe-valider-btn').addEventListener('click', async function () {
+                    const style = panneau.querySelector('.style-coupe-select').value;
+                    const resp = await fetch('/api/coupe/style', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ tieId: r.tieId, playerId: player.id, style })
                     });
-                }
-
-                if (!bloc.verrouille) {
-                    panneau.querySelector('.style-valider-btn').addEventListener('click', async function () {
-                        const styles = Array.from(panneau.querySelectorAll('.style-tour-select')).map(function (s) { return s.value; });
-
-                        const responseValider = await fetch('/api/tournois/style', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ userId, playerId: player.id, tournoiId: bloc.tournoi.id, styles })
-                        });
-                        const dataValider = await responseValider.json();
-                        if (!responseValider.ok) {
-                            alert(dataValider.error);
-                            return;
-                        }
-                        alert('Styles de jeu enregistrés.');
-                        chargerStyleEnAttente(player);
-                    });
-                }
+                    const d = await resp.json();
+                    if (!resp.ok) { alert(d.error); return; }
+                    alert('Style de Coupe Davis / Fed Cup enregistré.');
+                    chargerStyleEnAttente(player);
+                });
             });
         }
 
