@@ -56,6 +56,14 @@
 
         const ORDRE_MANCHES = ['1er_tour', 'quarts', 'demies', 'finale'];
         const LABELS_MANCHES = { '1er_tour': '1er tour', quarts: 'Quarts de finale', demies: 'Demi-finales', finale: 'Finale', barrage: 'Barrage de maintien' };
+        // Nombre de rencontres fixe par manche (16 nations, elimination directe) -
+        // permet d'afficher des cases "a determiner" pour les tours pas encore
+        // atteints plutot qu'un seul message a la place de toute la colonne, pour que
+        // l'alignement vertical forme un vrai arbre comme un tableau de tournoi
+        // (justify-content: space-around sur .bracket-round ne "marche" que si le bon
+        // nombre de cases existe a chaque tour). Demande explicite de l'utilisateur,
+        // 2026-08-26.
+        const TAILLE_MANCHE = { '1er_tour': 8, quarts: 4, demies: 2, finale: 1 };
 
         // Nationalite du joueur ATP / de la joueuse WTA du coach connecte - surligne
         // sa propre nation en jaune (.bracket-moi, meme classe/couleur que "mon
@@ -71,6 +79,11 @@
                 if (p.type === 'joueur') maNationaliteATP = p.nationalite;
                 if (p.type === 'joueuse') maNationaliteWTA = p.nationalite;
             });
+        }
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
         }
 
         async function verifierAdmin() {
@@ -89,8 +102,8 @@
                 if (maNationalite && nation === maNationalite) cls += ' bracket-moi';
                 return cls;
             };
-            const ligneDomicile = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_domicile ? ' bracket-vainqueur' : ''}"><span class="${classeJoueur(t.nation_domicile)}">${t.nation_domicile}</span></div>`;
-            const ligneExterieur = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_exterieur ? ' bracket-vainqueur' : ''}"><span class="${classeJoueur(t.nation_exterieur)}">${t.nation_exterieur}</span></div>`;
+            const ligneDomicile = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_domicile ? ' bracket-vainqueur' : ''}">${flagImg(t.nation_domicile_drapeau)}<span class="${classeJoueur(t.nation_domicile)}">${t.nation_domicile}</span></div>`;
+            const ligneExterieur = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_exterieur ? ' bracket-vainqueur' : ''}">${flagImg(t.nation_exterieur_drapeau)}<span class="${classeJoueur(t.nation_exterieur)}">${t.nation_exterieur}</span></div>`;
             const score = estTermine ? `<div class="bracket-score">${t.victoires_domicile} - ${t.victoires_exterieur}</div>` : '';
             return `
                 <div class="bracket-match-wrap">
@@ -103,10 +116,27 @@
             `;
         }
 
+        // Case vide (tour pas encore atteint) - meme principe que .bracket-tbd-label
+        // sur le tableau de tournoi classique, pour garder le meme nombre de cases
+        // par tour et donc le meme alignement vertical en arbre.
+        function carteTBD() {
+            return `
+                <div class="bracket-match-wrap">
+                    <div class="bracket-match">
+                        <div class="bracket-match-row bracket-tbd-label">À déterminer</div>
+                        <div class="bracket-match-row bracket-tbd-label">À déterminer</div>
+                    </div>
+                </div>
+            `;
+        }
+
         function colonneManche(manche, ties) {
-            const contenu = (ties && ties.length > 0)
-                ? ties.map(carteRencontre).join('')
-                : '<p class="match-hint" style="padding:12px 0; font-size:0.7rem;">Pas encore déterminé</p>';
+            const taille = TAILLE_MANCHE[manche] || (ties ? ties.length : 0);
+            const parPosition = new Array(taille).fill(null);
+            (ties || []).forEach(function (t) {
+                if (t.position != null && t.position < taille) parPosition[t.position] = t;
+            });
+            const contenu = parPosition.map(function (t) { return t ? carteRencontre(t) : carteTBD(); }).join('');
             return `
                 <div class="bracket-round">
                     <div class="bracket-round-title">${LABELS_MANCHES[manche]}</div>

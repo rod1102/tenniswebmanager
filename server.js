@@ -7916,7 +7916,12 @@ app.get('/api/coupe/tableau/:circuit', (req, res) => {
         const echelle = {};
         const barrage = [];
         ties.forEach(function (t) {
-            const ligne = Object.assign({}, t, { mancheLabel: LABELS_MANCHE[t.manche] || t.manche, positionSemaine: positionSemaineAffichee(t.semaine) });
+            const ligne = Object.assign({}, t, {
+                mancheLabel: LABELS_MANCHE[t.manche] || t.manche, positionSemaine: positionSemaineAffichee(t.semaine),
+                // Drapeaux (memes codes flagcdn.com que partout ailleurs sur le site) -
+                // demande explicite de l'utilisateur, 2026-08-26.
+                nation_domicile_drapeau: drapeau(t.nation_domicile), nation_exterieur_drapeau: drapeau(t.nation_exterieur)
+            });
             if (t.manche === 'barrage') { barrage.push(ligne); return; }
             if (!echelle[t.manche]) echelle[t.manche] = [];
             echelle[t.manche].push(ligne);
