@@ -57,6 +57,22 @@
         const ORDRE_MANCHES = ['1er_tour', 'quarts', 'demies', 'finale'];
         const LABELS_MANCHES = { '1er_tour': '1er tour', quarts: 'Quarts de finale', demies: 'Demi-finales', finale: 'Finale', barrage: 'Barrage de maintien' };
 
+        // Nationalite du joueur ATP / de la joueuse WTA du coach connecte - surligne
+        // sa propre nation en jaune (.bracket-moi, meme classe/couleur que "mon
+        // joueur" dans un tableau de tournoi classique) partout ou elle apparait dans
+        // le tableau, meme si son personnage n'est pas convoque pour la rencontre en
+        // cours. Demande explicite de l'utilisateur, 2026-08-26.
+        let maNationaliteATP = null, maNationaliteWTA = null;
+        async function chargerMesNationalites() {
+            const response = await fetch('/api/joueurs/' + userId);
+            const data = await response.json();
+            if (!response.ok || !data.players) return;
+            data.players.forEach(function (p) {
+                if (p.type === 'joueur') maNationaliteATP = p.nationalite;
+                if (p.type === 'joueuse') maNationaliteWTA = p.nationalite;
+            });
+        }
+
         async function verifierAdmin() {
             const response = await fetch('/api/utilisateur/' + userId);
             const data = await response.json();
@@ -67,8 +83,14 @@
 
         function carteRencontre(t) {
             const estTermine = t.statut === 'termine';
-            const ligneDomicile = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_domicile ? ' bracket-vainqueur' : ''}"><span class="bracket-joueur">${t.nation_domicile}</span></div>`;
-            const ligneExterieur = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_exterieur ? ' bracket-vainqueur' : ''}"><span class="bracket-joueur">${t.nation_exterieur}</span></div>`;
+            const maNationalite = circuit === 'ATP' ? maNationaliteATP : maNationaliteWTA;
+            const classeJoueur = function (nation) {
+                let cls = 'bracket-joueur';
+                if (maNationalite && nation === maNationalite) cls += ' bracket-moi';
+                return cls;
+            };
+            const ligneDomicile = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_domicile ? ' bracket-vainqueur' : ''}"><span class="${classeJoueur(t.nation_domicile)}">${t.nation_domicile}</span></div>`;
+            const ligneExterieur = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_exterieur ? ' bracket-vainqueur' : ''}"><span class="${classeJoueur(t.nation_exterieur)}">${t.nation_exterieur}</span></div>`;
             const score = estTermine ? `<div class="bracket-score">${t.victoires_domicile} - ${t.victoires_exterieur}</div>` : '';
             return `
                 <div class="bracket-match-wrap">
@@ -139,7 +161,7 @@
         });
 
         verifierAdmin();
-        charger();
+        chargerMesNationalites().then(function () { charger(); });
     </script>
 </body>
 </html>
