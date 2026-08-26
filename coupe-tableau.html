@@ -94,7 +94,7 @@
             }
         }
 
-        function carteRencontre(t) {
+        function carteRencontre(t, roundIndex, ordre) {
             const estTermine = t.statut === 'termine';
             const maNationalite = circuit === 'ATP' ? maNationaliteATP : maNationaliteWTA;
             const classeJoueur = function (nation) {
@@ -105,8 +105,9 @@
             const ligneDomicile = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_domicile ? ' bracket-vainqueur' : ''}">${flagImg(t.nation_domicile_drapeau)}<span class="${classeJoueur(t.nation_domicile)}">${t.nation_domicile}</span></div>`;
             const ligneExterieur = `<div class="bracket-match-row${estTermine && t.nation_vainqueur === t.nation_exterieur ? ' bracket-vainqueur' : ''}">${flagImg(t.nation_exterieur_drapeau)}<span class="${classeJoueur(t.nation_exterieur)}">${t.nation_exterieur}</span></div>`;
             const score = estTermine ? `<div class="bracket-score">${t.victoires_domicile} - ${t.victoires_exterieur}</div>` : '';
+            const attrs = roundIndex != null ? ` data-round-index="${roundIndex}" data-ordre="${ordre}" data-key="${roundIndex}-${ordre}"` : '';
             return `
-                <div class="bracket-match-wrap">
+                <div class="bracket-match-wrap"${attrs}>
                     <a class="bracket-match" href="coupe.html?tieId=${t.id}" style="display:block; text-decoration:none; color:inherit;">
                         ${ligneDomicile}
                         ${ligneExterieur}
@@ -116,15 +117,19 @@
             `;
         }
 
-        // Case vide (tour pas encore atteint) - meme principe que .bracket-tbd-label
-        // sur le tableau de tournoi classique, pour garder le meme nombre de cases
-        // par tour et donc le meme alignement vertical en arbre.
-        function carteTBD() {
+        // Case vide (tour pas encore atteint) - "?" comme les cases pas encore
+        // determinees d'un tableau de tournoi classique (nomJoueurCase), plutot
+        // qu'un texte "A determiner" : garde le meme nombre de cases par tour (donc
+        // le meme alignement vertical en arbre) tout en restant coherent avec le
+        // reste du site. Recoit aussi des coordonnees round/ordre pour beneficier de
+        // la meme surbrillance de parcours au survol qu'un vrai match.
+        function carteTBD(roundIndex, ordre) {
+            const attrs = roundIndex != null ? ` data-round-index="${roundIndex}" data-ordre="${ordre}" data-key="${roundIndex}-${ordre}"` : '';
             return `
-                <div class="bracket-match-wrap">
+                <div class="bracket-match-wrap"${attrs}>
                     <div class="bracket-match">
-                        <div class="bracket-match-row bracket-tbd-label">À déterminer</div>
-                        <div class="bracket-match-row bracket-tbd-label">À déterminer</div>
+                        <div class="bracket-match-row"><span class="bracket-joueur bracket-tbd">?</span></div>
+                        <div class="bracket-match-row"><span class="bracket-joueur bracket-tbd">?</span></div>
                     </div>
                 </div>
             `;
@@ -132,17 +137,55 @@
 
         function colonneManche(manche, ties) {
             const taille = TAILLE_MANCHE[manche] || (ties ? ties.length : 0);
+            const roundIndex = ORDRE_MANCHES.indexOf(manche); // -1 pour le barrage (pas de surbrillance)
             const parPosition = new Array(taille).fill(null);
             (ties || []).forEach(function (t) {
                 if (t.position != null && t.position < taille) parPosition[t.position] = t;
             });
-            const contenu = parPosition.map(function (t) { return t ? carteRencontre(t) : carteTBD(); }).join('');
+            const contenu = parPosition.map(function (t, ordre) {
+                const ri = roundIndex === -1 ? null : roundIndex;
+                return t ? carteRencontre(t, ri, ordre) : carteTBD(ri, ordre);
+            }).join('');
             return `
                 <div class="bracket-round">
                     <div class="bracket-round-title">${LABELS_MANCHES[manche]}</div>
                     ${contenu}
                 </div>
             `;
+        }
+
+        // Identique a tournoi-detail.html : au survol d'un match, remonte les tours
+        // precedents dont il descend (vainqueur 1er tour -> quarts -> demies ->
+        // finale) et les surligne tous ensemble (.bracket-parcours, deja stylee dans
+        // style.css). Pas de JS partage entre pages (convention du projet) - fonction
+        // dupliquee ici a l'identique.
+        function calculerAncetres(roundIndex, ordre) {
+            const resultats = [];
+            for (let k = 1; roundIndex - k >= 0; k++) {
+                const largeur = Math.pow(2, k);
+                const debut = ordre * largeur;
+                for (let i = 0; i < largeur; i++) {
+                    resultats.push((roundIndex - k) + '-' + (debut + i));
+                }
+            }
+            return resultats;
+        }
+
+        function activerSurbrillanceParcours(panneau) {
+            panneau.querySelectorAll('.bracket-match-wrap[data-round-index]').forEach(function (wrap) {
+                wrap.addEventListener('mouseenter', function () {
+                    const roundIndex = parseInt(wrap.dataset.roundIndex, 10);
+                    const ordre = parseInt(wrap.dataset.ordre, 10);
+                    const cles = [roundIndex + '-' + ordre].concat(calculerAncetres(roundIndex, ordre));
+                    cles.forEach(function (cle) {
+                        const cible = panneau.querySelector('.bracket-match-wrap[data-key="' + cle + '"]');
+                        if (cible) cible.classList.add('bracket-parcours');
+                    });
+                });
+                wrap.addEventListener('mouseleave', function () {
+                    panneau.querySelectorAll('.bracket-parcours').forEach(function (el) { el.classList.remove('bracket-parcours'); });
+                });
+            });
         }
 
         async function charger() {
@@ -164,6 +207,7 @@
             const colonneBarrage = data.barrage.length > 0 ? colonneManche('barrage', data.barrage) : '';
 
             container.innerHTML = `<div class="bracket">${colonnesEchelle}${colonneBarrage}</div>`;
+            activerSurbrillanceParcours(container);
         }
 
         document.querySelectorAll('#circuit-nav .tab-btn').forEach(function (btn) {
