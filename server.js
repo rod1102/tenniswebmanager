@@ -7493,12 +7493,12 @@ const LABELS_MANCHE = { '1er_tour': '1er tour', quarts: 'Quarts de finale', demi
 
 // Libelle d'une rencontre (numero 1-5) - partage entre l'ecriture des lignes matchs
 // (simulerMancheCoupe) et leur relecture sur la page Matchs (matchs.numero_tour).
-// Retour au format 2 simples (chacun rejoue une 2e fois en position inversee) +
-// 1 double, sur demande explicite de l'utilisateur, 2026-08-26 (revient sur le
-// format "4 simples distincts" du 2026-08-25).
+// Format 2 simples (chacun rejoue une 2e fois en position inversee) + 1 double.
+// Les 2 simples retour se nomment "Simple 3"/"Simple 4" plutot que "Simple 1/2
+// (retour)" (demande explicite de l'utilisateur, 2026-08-26).
 function libelleRubber(numero) {
     if (numero === 3) return 'Coupe - Double';
-    return 'Coupe - Simple ' + (numero <= 2 ? numero : numero - 1) + (numero > 2 ? ' (retour)' : '');
+    return 'Coupe - Simple ' + (numero < 3 ? numero : numero - 1);
 }
 
 // Tous les joueurs eligibles pour representer une nation sur un circuit donne :
@@ -8122,33 +8122,45 @@ app.get('/api/coupe/tie/:tieId', (req, res) => {
         const tie = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(req.params.tieId);
         if (!tie) return res.status(404).json({ error: 'Rencontre introuvable.' });
 
-        const composition = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ?').all(tie.id);
+        let composition = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ?').all(tie.id);
         const rubbers = db.prepare('SELECT * FROM coupe_rubbers WHERE coupe_equipe_id = ? ORDER BY numero').all(tie.id);
         const capitaineDomicile = capitaineDe(tie.saison, tie.circuit, tie.nation_domicile);
         const capitaineExterieur = capitaineDe(tie.saison, tie.circuit, tie.nation_exterieur);
         const nbDivisions = db.prepare('SELECT MAX(division) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ?').get(tie.saison, tie.circuit).n || 1;
 
-        // Tant que le tableau n'est pas encore joue (statut != 'termine'), une nation
-        // qui n'a pas encore soumis sa composition (capitaine absent, ou tout
-        // simplement pas encore soumise) affiche un apercu genere sur le meme repli
-        // automatique que assurerCompositionAuto (2 meilleurs joueurs eligibles),
-        // marque prevue:true pour que le front l'affiche comme un "probable" plutot
-        // que comme une composition arretee - demande explicite de l'utilisateur,
-        // 2026-08-26 : ne plus laisser "(pas encore fixe)" quand personne n'a agi.
         if (tie.statut !== 'termine') {
-            [tie.nation_domicile, tie.nation_exterieur].forEach(function (nation) {
-                if (composition.some(function (c) { return c.nation === nation; })) return;
-                const meilleurs = meilleursJoueursNation(tie.circuit, nation, tie.surface || 'dur');
-                if (!meilleurs) return;
-                const a = meilleurs.a, b = meilleurs.b;
-                composition.push({
-                    coupe_equipe_id: tie.id, nation, prevue: true,
-                    joueur_a_est_reel: a.estReel ? 1 : 0, joueur_a_id: a.id,
-                    joueur_b_est_reel: b.estReel ? 1 : 0, joueur_b_id: b.id,
-                    double_j1_est_reel: a.estReel ? 1 : 0, double_j1_id: a.id,
-                    double_j2_est_reel: b.estReel ? 1 : 0, double_j2_id: b.id
+            const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
+            // La fenetre de soumission de la composition (S-2) est fermee des que l'on
+            // atteint S-1 (diff <= 1) - a ce stade elle DOIT etre definitive, jamais
+            // encore "probable" (l'entree en S-1 la verrouille normalement pour de bon,
+            // voir executerAvancementSemaine, mais une rencontre deja a ce stade AVANT
+            // le deploiement de ce verrou n'a jamais ete rattrapee) : on force alors le
+            // repli automatique reel (ecriture en base), pas un simple apercu - demande
+            // explicite de l'utilisateur, 2026-08-26.
+            if (tie.semaine - semaineActuelle <= 1) {
+                assurerSurfaceAuto(tie);
+                const tieAJour = db.prepare('SELECT * FROM coupe_equipes WHERE id = ?').get(tie.id);
+                [tieAJour.nation_domicile, tieAJour.nation_exterieur].forEach(function (nation) { assurerCompositionAuto(tieAJour, nation); });
+                composition = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ?').all(tie.id);
+            } else {
+                // Encore dans la fenetre normale (surface/composition pas encore due ou
+                // en cours) : simple apercu non enregistre, marque prevue:true pour que
+                // le front l'affiche comme un "probable" plutot que comme une
+                // composition arretee.
+                [tie.nation_domicile, tie.nation_exterieur].forEach(function (nation) {
+                    if (composition.some(function (c) { return c.nation === nation; })) return;
+                    const meilleurs = meilleursJoueursNation(tie.circuit, nation, tie.surface || 'dur');
+                    if (!meilleurs) return;
+                    const a = meilleurs.a, b = meilleurs.b;
+                    composition.push({
+                        coupe_equipe_id: tie.id, nation, prevue: true,
+                        joueur_a_est_reel: a.estReel ? 1 : 0, joueur_a_id: a.id,
+                        joueur_b_est_reel: b.estReel ? 1 : 0, joueur_b_id: b.id,
+                        double_j1_est_reel: a.estReel ? 1 : 0, double_j1_id: a.id,
+                        double_j2_est_reel: b.estReel ? 1 : 0, double_j2_id: b.id
+                    });
                 });
-            });
+            }
         }
 
         res.json({
@@ -8250,10 +8262,10 @@ function postesSimpleDuJoueur(compo, playerId) {
     if (!compo) return [];
     const resultats = [];
     if (compo.joueur_a_est_reel && Number(compo.joueur_a_id) === Number(playerId)) {
-        resultats.push({ numero: 1, label: 'Simple 1' }, { numero: 4, label: 'Simple 1 (retour)' });
+        resultats.push({ numero: 1, label: 'Simple 1' }, { numero: 4, label: 'Simple 3' });
     }
     if (compo.joueur_b_est_reel && Number(compo.joueur_b_id) === Number(playerId)) {
-        resultats.push({ numero: 2, label: 'Simple 2' }, { numero: 5, label: 'Simple 2 (retour)' });
+        resultats.push({ numero: 2, label: 'Simple 2' }, { numero: 5, label: 'Simple 4' });
     }
     return resultats;
 }

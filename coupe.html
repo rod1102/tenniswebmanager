@@ -144,9 +144,9 @@
             return `
                 <div class="form-group" style="margin-top:16px;">
                     <label>Composition — ${nation}</label>
-                    <label style="font-size:0.7rem;">Simple 1 (+ simple retour vs B adverse)</label>
+                    <label style="font-size:0.7rem;">Simple 1 (+ Simple 3, vs B adverse)</label>
                     <select id="compo-a-${nation}"><option value="">—</option>${opts}</select>
-                    <label style="font-size:0.7rem;">Simple 2 (+ simple retour vs A adverse)</label>
+                    <label style="font-size:0.7rem;">Simple 2 (+ Simple 4, vs A adverse)</label>
                     <select id="compo-b-${nation}"><option value="">—</option>${opts}</select>
                     <label style="font-size:0.7rem;">Double — joueur 1</label>
                     <select id="compo-d1-${nation}"><option value="">—</option>${opts}</select>
@@ -217,8 +217,8 @@
                 { numero: 1, label: 'Simple 1', domicile: nomD('joueur_a'), exterieur: nomE('joueur_a') },
                 { numero: 2, label: 'Simple 2', domicile: nomD('joueur_b'), exterieur: nomE('joueur_b') },
                 { numero: 3, label: 'Double', domicile: nomD('double_j1') + ' / ' + nomD('double_j2'), exterieur: nomE('double_j1') + ' / ' + nomE('double_j2') },
-                { numero: 4, label: 'Simple 1 (retour)', domicile: nomD('joueur_a'), exterieur: nomE('joueur_b') },
-                { numero: 5, label: 'Simple 2 (retour)', domicile: nomD('joueur_b'), exterieur: nomE('joueur_a') }
+                { numero: 4, label: 'Simple 3', domicile: nomD('joueur_a'), exterieur: nomE('joueur_b') },
+                { numero: 5, label: 'Simple 4', domicile: nomD('joueur_b'), exterieur: nomE('joueur_a') }
             ];
             return ordre.map(function (o) {
                 const joue = data.rubbers.find(function (r) { return r.numero === o.numero; });
