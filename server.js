@@ -3385,14 +3385,22 @@ function perteMentalCourant(categorie, label) {
 // condition) selon SON PROPRE style. Taux de perte de forme (Prudence 0.08 / En
 // Avant 0.12 / defaut 0.10), de gain de mental max (Mental d'acier 0.15 / defaut
 // 0.1) et de gain d'automatisme (Reperage 6 / defaut 3) cf. tournoi_joueurs.style_choisi.
-function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants, categorie, label, conditionFinale) {
-    const tauxPerteForme = style === 'prudence' ? 0.08 : (style === 'en_avant' ? 0.12 : 0.10);
-    const tauxGainMentalMax = style === 'mental_acier' ? 0.15 : 0.1;
+// moitie (optionnel, utilise par simulerRubberDouble en Coupe Davis/Fed Cup,
+// demande explicite de l'utilisateur, 2026-08-26) : divise par 2 la perte de
+// forme, la perte de mental courant et le gain de mental max - PAS l'usure, qui
+// reste +1 dans tous les cas. Arrondi a 2 decimales au lieu d'1 dans ce cas (une
+// valeur normalement a 1 decimale, une fois divisee par 2, peut tomber sur 2 -
+// ex. 12,094 -> 12,10 plutot que 12,1 ou 12,0).
+function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants, categorie, label, conditionFinale, moitie) {
+    const facteur = moitie ? 0.5 : 1;
+    const decimales = moitie ? 100 : 10;
+    const tauxPerteForme = (style === 'prudence' ? 0.08 : (style === 'en_avant' ? 0.12 : 0.10)) * facteur;
+    const tauxGainMentalMax = (style === 'mental_acier' ? 0.15 : 0.1) * facteur;
     const gainAutomatisme = style === 'reperage' ? 6 : 3;
     const nouvelleForme = Math.max(0, player.forme - totalJeux * tauxPerteForme);
     const nouvelleUsure = player.usure + 1;
-    const nouveauMentalMax = Math.round((player.mental_max + pointsImportants * tauxGainMentalMax) * 10) / 10;
-    const nouveauMentalCourant = Math.max(0, Math.round((player.mental_courant - perteMentalCourant(categorie, label)) * 10) / 10);
+    const nouveauMentalMax = Math.round((player.mental_max + pointsImportants * tauxGainMentalMax) * decimales) / decimales;
+    const nouveauMentalCourant = Math.max(0, Math.round((player.mental_courant - perteMentalCourant(categorie, label) * facteur) * decimales) / decimales);
     const cleAutomatisme = 'surface_' + surface + '_automatismes';
     const nouvelAutomatisme = Math.min(30, player[cleAutomatisme] + gainAutomatisme);
     // La condition finale est desormais determinee PENDANT le match (simulerMatch,
@@ -3401,7 +3409,7 @@ function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImporta
     // reellement ete raconte dans le teletexte.
     const nouvelleCondition = conditionFinale || player.condition || 'en_forme';
     db.prepare(`UPDATE players SET forme = ?, usure = ?, mental_max = ?, mental_courant = ?, ${cleAutomatisme} = ?, condition = ? WHERE id = ?`).run(
-        Math.round(nouvelleForme * 10) / 10, nouvelleUsure, nouveauMentalMax, nouveauMentalCourant, nouvelAutomatisme, nouvelleCondition, player.id
+        Math.round(nouvelleForme * decimales) / decimales, nouvelleUsure, nouveauMentalMax, nouveauMentalCourant, nouvelAutomatisme, nouvelleCondition, player.id
     );
     const kineIntervenu = conditionSestDegradee(player.condition, nouvelleCondition);
     // PDF : une degradation reelle de condition (pas juste "deja diminue en arrivant")
@@ -8161,6 +8169,13 @@ function styleJoueur(tieId, playerId) {
     return row ? row.style : null;
 }
 
+// Meme bareme de perte de mental courant que les tournois (PERTE_MENTAL_COURANT),
+// faute de bareme dedie a la Coupe Davis dans le PDF - mappe la manche de la
+// rencontre sur le label attendu par perteMentalCourant (categorie 250 toujours
+// utilisee, la moins punitive, choix assume en l'absence de bareme officiel).
+// Partage entre simulerRubberCoupe et simulerRubberDouble.
+const LABEL_MANCHE_COUPE = { finale: 'Finale', demies: 'Demi-finale', quarts: '1/4 finale' };
+
 // Simule UNE rencontre (simple ou double) et ecrit les lignes matchs necessaires
 // (une par cote reel, aucune si les 2 cotes sont des rivaux) + la ligne coupe_rubbers.
 // Simple uniquement - le double a sa propre fonction (simulerRubberDouble), les 2
@@ -8224,11 +8239,6 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
         etatPhysiqueDomicile, etatPhysiqueExterieur
     );
 
-    // Meme bareme de perte de mental courant que les tournois (PERTE_MENTAL_COURANT),
-    // faute de bareme dedie a la Coupe Davis dans le PDF - mappe la manche de la
-    // rencontre sur le label/categorie attendus par perteMentalCourant, categorie 250
-    // par defaut (la moins punitive, choix assume en l'absence de bareme officiel).
-    const LABEL_MANCHE_COUPE = { finale: 'Finale', demies: 'Demi-finale', quarts: '1/4 finale' };
     const labelPourEtatPostMatch = LABEL_MANCHE_COUPE[tie.manche] || 'premier tour';
     const kineDomicile = vDomicile.joueur
         ? appliquerEtatPostMatch(vDomicile.joueur, surface, styleDomicile, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleA).kineIntervenu
@@ -8466,7 +8476,7 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
             const normal = niveauDouble(player, surface);
             const mental = normal + player.mental_courant;
             const style = styleJoueur(tie.id, id);
-            return ajusterNiveauxStyle(normal, mental, style, player.mental_courant, 1);
+            return Object.assign({ joueur: player, style: style }, ajusterNiveauxStyle(normal, mental, style, player.mental_courant, 1));
         }
         const rival = db.prepare('SELECT * FROM classement_joueurs WHERE id = ?').get(id);
         return { normal: rival.niveau, mental: rival.niveau + 100 };
@@ -8485,6 +8495,22 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
     const resultat = simulerMatch(niveauEquipeDomicileNormal, niveauEquipeDomicileMental, niveauEquipeExterieurNormal, niveauEquipeExterieurMental);
     const nationVainqueur = resultat.vainqueur === 'A' ? tie.nation_domicile : tie.nation_exterieur;
     const domicileGagne = resultat.vainqueur === 'A';
+
+    // Consequences physiques (forme/mental/usure/automatismes/condition) pour chaque
+    // vrai joueur de la paire, a moitie du taux normal pour la perte de forme, la
+    // perte de mental courant et le gain de mental max - PAS l'usure, qui reste +1
+    // dans tous les cas (demande explicite de l'utilisateur, 2026-08-26 : un match de
+    // double se joue a 2 contre 2, chacun porte "la moitie" de l'effort individuel
+    // d'un simple). Categorie 250 comme les simples de Coupe Davis (labelPourEtatPostMatch
+    // partage, voir LABEL_MANCHE_COUPE), pas de kine/perte de caracteristique geree ici
+    // separement - appliquerEtatPostMatch s'en charge deja pour chaque joueur.
+    const labelPourEtatPostMatch = LABEL_MANCHE_COUPE[tie.manche] || 'premier tour';
+    [[d1, resultat.conditionFinaleA], [d2, resultat.conditionFinaleA], [e1, resultat.conditionFinaleB], [e2, resultat.conditionFinaleB]]
+        .forEach(function (pair) {
+            const j = pair[0];
+            if (!j.joueur) return;
+            appliquerEtatPostMatch(j.joueur, surface, j.style, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, pair[1], true);
+        });
 
     function ecrireMatch(estReel, id, userId, monNiveau, adversaireNiveau, jaiGagne, score, evenements) {
         if (!estReel) return null;
