@@ -43,7 +43,7 @@
             </div>
 
             <div id="detail-container" style="display:none;">
-                <p><a class="lien-adversaire" id="retour-liste-lien" href="#"></a></p>
+                <p><a class="lien-adversaire" id="retour-liste-lien" href="#" style="color:#fff;"></a></p>
                 <div id="detail-rencontre"><p class="match-hint">Chargement...</p></div>
             </div>
         </div>
@@ -116,7 +116,7 @@
                 : '<div class="tournoi-list">' + data.ties.map(function (t) { return carteRencontre(t, data.nbDivisions); }).join('') + '</div>';
 
             const zone = document.getElementById('tableau-complet-zone');
-            if (zone) zone.innerHTML = `<a class="lien-adversaire" href="coupe-tableau.html?circuit=${data.circuit}">Voir le tableau complet du groupe mondial</a>`;
+            if (zone) zone.innerHTML = `<a class="lien-adversaire" href="coupe-tableau.html?circuit=${data.circuit}" style="color:#fff;">Voir le tableau complet du groupe mondial</a>`;
         }
 
         function formulaireSurface(tie) {
@@ -170,11 +170,16 @@
 
         // Nom d'un joueur (reel ou bot) a partir d'un poste de composition
         // (joueur_x_est_reel/joueur_x_id) et de la liste des joueurs eligibles de sa
-        // nation (deja envoyee par /api/coupe/tie/:tieId).
+        // nation (deja envoyee par /api/coupe/tie/:tieId). compo.prevue (ajoute par le
+        // serveur quand la vraie composition n'a pas encore ete soumise) affiche un
+        // suffixe "(probable)" plutot que de laisser un vide - demande explicite de
+        // l'utilisateur, 2026-08-26 : ne jamais montrer "pas encore fixe" tant qu'un
+        // apercu base sur les meilleurs joueurs eligibles peut etre calcule.
         function nomPosteCompo(compo, estReelCle, idCle, joueurs) {
             if (!compo || compo[idCle] == null) return '(pas encore fixé)';
             const j = (joueurs || []).find(function (x) { return x.estReel === !!compo[estReelCle] && Number(x.id) === Number(compo[idCle]); });
-            return j ? j.nom + (j.estReel ? '' : ' (bot)') : '?';
+            if (!j) return '?';
+            return j.nom + (j.estReel ? '' : ' (bot)') + (compo.prevue ? ' (probable)' : '');
         }
 
         // Les 5 rencontres prevues d'une manche, meme avant qu'elles ne soient jouees

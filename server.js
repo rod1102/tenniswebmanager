@@ -8075,6 +8075,29 @@ app.get('/api/coupe/tie/:tieId', (req, res) => {
         const capitaineExterieur = capitaineDe(tie.saison, tie.circuit, tie.nation_exterieur);
         const nbDivisions = db.prepare('SELECT MAX(division) AS n FROM coupe_equipes WHERE saison = ? AND circuit = ?').get(tie.saison, tie.circuit).n || 1;
 
+        // Tant que le tableau n'est pas encore joue (statut != 'termine'), une nation
+        // qui n'a pas encore soumis sa composition (capitaine absent, ou tout
+        // simplement pas encore soumise) affiche un apercu genere sur le meme repli
+        // automatique que assurerCompositionAuto (2 meilleurs joueurs eligibles),
+        // marque prevue:true pour que le front l'affiche comme un "probable" plutot
+        // que comme une composition arretee - demande explicite de l'utilisateur,
+        // 2026-08-26 : ne plus laisser "(pas encore fixe)" quand personne n'a agi.
+        if (tie.statut !== 'termine') {
+            [tie.nation_domicile, tie.nation_exterieur].forEach(function (nation) {
+                if (composition.some(function (c) { return c.nation === nation; })) return;
+                const meilleurs = meilleursJoueursNation(tie.circuit, nation, tie.surface || 'dur');
+                if (!meilleurs) return;
+                const a = meilleurs.a, b = meilleurs.b;
+                composition.push({
+                    coupe_equipe_id: tie.id, nation, prevue: true,
+                    joueur_a_est_reel: a.estReel ? 1 : 0, joueur_a_id: a.id,
+                    joueur_b_est_reel: b.estReel ? 1 : 0, joueur_b_id: b.id,
+                    double_j1_est_reel: a.estReel ? 1 : 0, double_j1_id: a.id,
+                    double_j2_est_reel: b.estReel ? 1 : 0, double_j2_id: b.id
+                });
+            });
+        }
+
         res.json({
             success: true, nbDivisions,
             tie: Object.assign({}, tie, { manche: LABELS_MANCHE[tie.manche] || tie.manche, positionSemaine: positionSemaineAffichee(tie.semaine) }),
@@ -8374,25 +8397,33 @@ function assurerSurfaceAuto(tie) {
     return choix;
 }
 
-function assurerCompositionAuto(tie, nation) {
-    const existe = db.prepare('SELECT 1 FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, nation);
-    if (existe) return;
-
-    const surface = tie.surface || 'dur';
-    const eligibles = joueursEligiblesNation(tie.circuit, nation).map(function (j) {
+// Les 2 meilleurs joueurs eligibles d'une nation (classes par niveau approx sur la
+// surface donnee) - coeur du repli automatique (assurerCompositionAuto) ET de
+// l'apercu de composition non encore soumise (voir compositionPrevue plus bas,
+// GET /api/coupe/tie/:tieId), factorise pour ne pas dupliquer le tri.
+function meilleursJoueursNation(circuit, nation, surface) {
+    const eligibles = joueursEligiblesNation(circuit, nation).map(function (j) {
         if (j.estReel) {
             const player = db.prepare('SELECT * FROM players WHERE id = ?').get(j.id);
             return Object.assign({}, j, { niveauApprox: niveauNormal(player, surface) });
         }
         return Object.assign({}, j, { niveauApprox: j.niveau });
     }).sort(function (a, b) { return b.niveauApprox - a.niveauApprox; });
-    if (eligibles.length === 0) return; // ne devrait jamais arriver (assurerRosterMinimalNation garantit au moins 5 joueurs)
+    if (eligibles.length === 0) return null; // ne devrait jamais arriver (assurerRosterMinimalNation garantit au moins 5 joueurs)
+    return { a: eligibles[0], b: eligibles[1] || eligibles[0] };
+}
+
+function assurerCompositionAuto(tie, nation) {
+    const existe = db.prepare('SELECT 1 FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, nation);
+    if (existe) return;
+
+    const meilleurs = meilleursJoueursNation(tie.circuit, nation, tie.surface || 'dur');
+    if (!meilleurs) return;
 
     // Retour au format Simple 1/Simple 2/Double (double reprend 1/2, comme avant),
     // sur demande explicite de l'utilisateur, 2026-08-26 (revient sur le format
     // "4 simples distincts" du 2026-08-25).
-    const a = eligibles[0];
-    const b = eligibles[1] || eligibles[0];
+    const a = meilleurs.a, b = meilleurs.b;
     db.prepare(`
         INSERT INTO coupe_composition (coupe_equipe_id, nation, joueur_a_est_reel, joueur_a_id, joueur_b_est_reel, joueur_b_id, double_j1_est_reel, double_j1_id, double_j2_est_reel, double_j2_id)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
