@@ -658,9 +658,11 @@
             // (r.simples ne contient d'ailleurs jamais le double, deja filtre cote
             // serveur) - demande explicite de l'utilisateur, 2026-08-26.
             const blocsHtml = data.rencontres.map(function (r) {
+                const stylesInterdits = r.stylesInterdits || [];
                 const selectsHtml = r.simples.map(function (s) {
                     const options = Object.keys(STYLES_JEU_LABELS).map(function (cle) {
-                        return `<option value="${cle}" ${cle === s.styleActuel ? 'selected' : ''}>${STYLES_JEU_LABELS[cle]}</option>`;
+                        const interdit = stylesInterdits.includes(cle);
+                        return `<option value="${cle}" ${cle === s.styleActuel ? 'selected' : ''} ${interdit ? 'disabled' : ''}>${STYLES_JEU_LABELS[cle]}${interdit ? ' (déjà utilisé au tournoi/à la rencontre précédent(e))' : ''}</option>`;
                     }).join('');
                     return `
                         <div class="style-tour-card">
@@ -669,9 +671,12 @@
                         </div>
                     `;
                 }).join('');
+                const texteInterdits = stylesInterdits.length > 0
+                    ? ` Interdit(s) car déjà utilisé(s) au tournoi/à la rencontre précédent(e) : ${stylesInterdits.map(function (s) { return STYLES_JEU_LABELS[s] || s; }).join(', ')}.`
+                    : '';
                 return `
                     <div class="style-tournoi-bloc" data-tie-id="${r.tieId}" style="margin-bottom:20px;">
-                        <div class="match-hint">Coupe Davis / Fed Cup vs ${r.opposant} — ${r.manche} (semaine ${r.positionSemaine}) — à choisir avant le début des matchs.</div>
+                        <div class="match-hint">Coupe Davis / Fed Cup vs ${r.opposant} — ${r.manche} (semaine ${r.positionSemaine}) — à choisir avant le début des matchs.${texteInterdits}</div>
                         <p class="match-hint" style="text-align:left; padding:4px 0; color:#E24B4A; font-weight:700;">Pour les doubles il n'y a pas de style à sélectionner. Tous les joueurs sont en style "Aucun".</p>
                         <div class="style-tour-grid">${selectsHtml}</div>
                         <button class="cta cta-primary style-coupe-valider-btn" style="padding:12px 24px; font-size:0.85rem;">Valider le(s) style(s)</button>

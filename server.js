@@ -4792,33 +4792,54 @@ app.post('/api/tournois/desinscription', (req, res) => {
     }
 });
 
-// Styles interdits pour un tournoi donne : l'ensemble (sans doublon, "aucun" exclu)
-// de tous les styles utilises a n'importe quel tour du tournoi PRECEDENT joue par ce
-// joueur CETTE MEME SAISON (le plus recent par semaine, strictement avant
-// `semaineTournoiActuel` mais pas avant la Pre-saison en cours, avec un
-// style_choisi non nul) - une nouvelle saison repart avec tous les styles
-// disponibles, y compris ceux utilises au dernier tournoi de la saison precedente
-// (demande explicite de l'utilisateur, 2026-08-24). Pas de restriction a l'interieur
-// d'un meme tournoi : on peut tres bien garder le meme style a tous les tours, y
-// compris consecutifs.
-function stylesInterditsDuTournoiPrecedent(playerId, semaineTournoiActuel) {
-    // Debut de saison (semaine de Semaine 0, exclue) - meme convention que
-    // genererEntrantsFinals pour delimiter une saison.
-    const positionSaisonBrute = ((semaineTournoiActuel - 1) % LONGUEUR_SAISON) + 1;
-    const debutSaison = semaineTournoiActuel - positionSaisonBrute + 2;
+// Styles interdits pour un tournoi OU une rencontre de Coupe Davis/Fed Cup donne(e) :
+// l'ensemble (sans doublon, "aucun" exclu) de tous les styles utilises a
+// l'evenement PRECEDENT joue par ce joueur CETTE MEME SAISON (le plus recent par
+// semaine, strictement avant `semaineActuelle` mais pas avant la Pre-saison en
+// cours) - une rencontre de Coupe Davis/Fed Cup compte desormais comme un
+// tournoi pour cette restriction, dans les 2 sens (demande explicite de
+// l'utilisateur, 2026-08-26 : "la CD/FC compte comme un tournoi"). Une nouvelle
+// saison repart avec tous les styles disponibles (demande explicite,
+// 2026-08-24). Pas de restriction a l'interieur d'un meme tournoi/d'une meme
+// rencontre : on peut tres bien garder le meme style partout, y compris
+// consecutif (simple aller ET retour d'une meme rencontre CD/FC par exemple).
+function stylesInterditsEvenementPrecedent(playerId, semaineActuelle) {
+    const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+    const debutSaison = semaineActuelle - positionSaisonBrute + 2;
 
-    const precedent = db.prepare(`
-        SELECT tj.style_choisi
+    const dernierTournoi = db.prepare(`
+        SELECT t.semaine AS semaine, tj.style_choisi AS styles
         FROM tournois t
         JOIN tournoi_joueurs tj ON tj.tournoi_id = t.id AND tj.player_id = ? AND tj.est_reel = 1
         WHERE t.semaine < ? AND t.semaine > ? AND tj.style_choisi IS NOT NULL
         ORDER BY t.semaine DESC
         LIMIT 1
-    `).get(playerId, semaineTournoiActuel, debutSaison);
+    `).get(playerId, semaineActuelle, debutSaison);
 
-    if (!precedent) return [];
+    const player = db.prepare('SELECT nationalite, type FROM players WHERE id = ?').get(playerId);
+    let dernierTie = null;
+    if (player) {
+        const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
+        dernierTie = db.prepare(`
+            SELECT ce.id AS tieId, ce.semaine AS semaine
+            FROM coupe_equipes ce
+            WHERE ce.circuit = ? AND (ce.nation_domicile = ? OR ce.nation_exterieur = ?)
+              AND ce.semaine < ? AND ce.semaine > ?
+              AND EXISTS (SELECT 1 FROM coupe_styles cs WHERE cs.coupe_equipe_id = ce.id AND cs.player_id = ?)
+            ORDER BY ce.semaine DESC
+            LIMIT 1
+        `).get(circuit, player.nationalite, player.nationalite, semaineActuelle, debutSaison, playerId);
+    }
+
+    if (!dernierTournoi && !dernierTie) return [];
+    // Le plus RECENT des 2 (semaine la plus proche de semaineActuelle) l'emporte -
+    // c'est lui, et lui seul, qui interdit ses propres styles.
+    if (dernierTie && (!dernierTournoi || dernierTie.semaine > dernierTournoi.semaine)) {
+        const lignes = db.prepare('SELECT style FROM coupe_styles WHERE coupe_equipe_id = ? AND player_id = ?').all(dernierTie.tieId, playerId);
+        return Array.from(new Set(lignes.map(function (r) { return r.style; }).filter(function (s) { return s !== 'aucun'; })));
+    }
     let stylesPrecedents = [];
-    try { stylesPrecedents = JSON.parse(precedent.style_choisi || '[]'); } catch (e) { stylesPrecedents = []; }
+    try { stylesPrecedents = JSON.parse(dernierTournoi.styles || '[]'); } catch (e) { stylesPrecedents = []; }
     return Array.from(new Set(stylesPrecedents.filter(function (s) { return s !== 'aucun'; })));
 }
 
@@ -4851,9 +4872,9 @@ app.post('/api/tournois/style', (req, res) => {
             return res.status(400).json({ error: 'Les styles de jeu ne peuvent etre choisis qu une fois le tableau tire, et avant le debut du tournoi.' });
         }
 
-        const stylesInterdits = stylesInterditsDuTournoiPrecedent(playerId, tournoi.semaine);
+        const stylesInterdits = stylesInterditsEvenementPrecedent(playerId, tournoi.semaine);
         if (styles.some(function (s) { return stylesInterdits.includes(s); })) {
-            return res.status(400).json({ error: 'Impossible d utiliser un style deja utilise au tournoi precedent.' });
+            return res.status(400).json({ error: 'Impossible d utiliser un style deja utilise au tournoi ou a la rencontre de Coupe Davis/Fed Cup precedent(e).' });
         }
 
         const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
@@ -4926,7 +4947,7 @@ app.get('/api/tournois/style-en-attente/:playerId', (req, res) => {
             let stylesActuels = [];
             try { stylesActuels = JSON.parse(ligneReelle.style_choisi || '[]'); } catch (e) { stylesActuels = []; }
 
-            const stylesInterdits = stylesInterditsDuTournoiPrecedent(playerId, tournoi.semaine);
+            const stylesInterdits = stylesInterditsEvenementPrecedent(playerId, tournoi.semaine);
 
             return {
                 tournoi: { id: tournoi.id, nom: tournoi.nom, calendrierId: tournoi.calendrier_id, semaine: tournoi.semaine, positionSemaine: positionSemaineAffichee(tournoi.semaine), tour_actuel: tournoi.tour_actuel },
@@ -8302,6 +8323,17 @@ app.post('/api/coupe/style', (req, res) => {
             return res.status(400).json({ error: 'Ce joueur ne joue pas cette rencontre-la, ou il s\'agit du double (pas de style a y choisir).' });
         }
 
+        // Meme restriction que pour un tournoi : impossible de reprendre un style
+        // deja utilise a l'evenement precedent (tournoi OU rencontre de Coupe Davis/
+        // Fed Cup, le plus recent des deux) - demande explicite de l'utilisateur,
+        // 2026-08-26 ("la CD/FC compte comme un tournoi"). Aucune restriction entre
+        // le simple aller et le simple retour d'une MEME rencontre (tie.semaine
+        // identique pour les 2, donc jamais son propre "precedent").
+        const stylesInterdits = stylesInterditsEvenementPrecedent(player.id, tie.semaine);
+        if (stylesInterdits.includes(style)) {
+            return res.status(400).json({ error: 'Impossible d utiliser un style deja utilise au tournoi ou a la rencontre de Coupe Davis/Fed Cup precedent(e).' });
+        }
+
         db.prepare(`
             INSERT INTO coupe_styles (coupe_equipe_id, player_id, style, numero) VALUES (?, ?, ?, ?)
             ON CONFLICT(coupe_equipe_id, player_id, numero) DO UPDATE SET style = excluded.style
@@ -8345,7 +8377,11 @@ app.get('/api/coupe/style-en-attente/:playerId', (req, res) => {
             const opposant = tie.nation_domicile === player.nationalite ? tie.nation_exterieur : tie.nation_domicile;
             rencontres.push({
                 tieId: tie.id, opposant, manche: LABELS_MANCHE[tie.manche] || tie.manche,
-                positionSemaine: positionSemaineAffichee(tie.semaine), simples
+                positionSemaine: positionSemaineAffichee(tie.semaine), simples,
+                // Comme pour un tournoi : impossible de reprendre un style deja utilise
+                // a l'evenement precedent (tournoi OU rencontre CD/FC) - demande
+                // explicite de l'utilisateur, 2026-08-26.
+                stylesInterdits: stylesInterditsEvenementPrecedent(player.id, tie.semaine)
             });
         });
 

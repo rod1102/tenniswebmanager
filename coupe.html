@@ -163,9 +163,13 @@
         // l'utilisateur). `simples` vient de GET /api/coupe/style-en-attente/:playerId
         // (deja filtre aux rencontres que CE joueur joue reellement), vide si ce
         // joueur n'est que dans le double.
-        function formulaireStyle(simples) {
+        function formulaireStyle(simples, stylesInterdits) {
+            stylesInterdits = stylesInterdits || [];
             const options = function (valeurActuelle) {
-                return Object.keys(LABELS_STYLE).map(function (s) { return `<option value="${s}" ${s === valeurActuelle ? 'selected' : ''}>${LABELS_STYLE[s]}</option>`; }).join('');
+                return Object.keys(LABELS_STYLE).map(function (s) {
+                    const interdit = stylesInterdits.includes(s);
+                    return `<option value="${s}" ${s === valeurActuelle ? 'selected' : ''} ${interdit ? 'disabled' : ''}>${LABELS_STYLE[s]}${interdit ? ' (déjà utilisé au tournoi/à la rencontre précédent(e))' : ''}</option>`;
+                }).join('');
             };
             const selectsHtml = simples.map(function (s) {
                 return `
@@ -175,11 +179,14 @@
                     </div>
                 `;
             }).join('');
+            const texteInterdits = stylesInterdits.length > 0
+                ? ` Interdit(s) car déjà utilisé(s) au tournoi/à la rencontre précédent(e) : ${stylesInterdits.map(function (s) { return LABELS_STYLE[s] || s; }).join(', ')}.`
+                : '';
             return `
                 <div class="form-group" style="margin-top:16px;">
                     <p class="match-hint" style="text-align:left; padding:0; color:#E24B4A; font-weight:700;">Pour les doubles il n'y a pas de style à sélectionner. Tous les joueurs sont en style "Aucun".</p>
                     ${simples.length > 0 ? `
-                        <label>Ton style pour chacune de tes rencontres de simple</label>
+                        <label>Ton style pour chacune de tes rencontres de simple${texteInterdits}</label>
                         <div class="style-tour-grid">${selectsHtml}</div>
                         <button class="cta cta-primary style-btn" style="padding:8px 16px; font-size:0.75rem; margin-top:8px;">Valider le(s) style(s)</button>
                     ` : ''}
@@ -291,7 +298,7 @@
                     const reponseStyles = await fetch('/api/coupe/style-en-attente/' + playerId);
                     const dataStyles = await reponseStyles.json();
                     const monEntree = reponseStyles.ok && dataStyles.rencontres ? dataStyles.rencontres.find(function (r) { return Number(r.tieId) === Number(tieId); }) : null;
-                    html += formulaireStyle(monEntree ? monEntree.simples : []);
+                    html += formulaireStyle(monEntree ? monEntree.simples : [], monEntree ? monEntree.stylesInterdits : []);
                 }
                 // Les 5 rencontres prevues s'affichent des que la composition est
                 // connue (a partir de S-1, demande explicite de l'utilisateur,
