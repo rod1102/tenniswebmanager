@@ -116,7 +116,8 @@ function estRoutePublique(req) {
     if (req.method === 'GET') {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
-            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce'].includes(req.path)) {
+            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce',
+            '/api/public/fix-barrage-premature'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -8951,6 +8952,23 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
 
     return { nationVainqueur, domicileGagne };
 }
+
+// Route temporaire (2026-08-27) : nettoie le barrage de maintien genere trop tot
+// en production par le bug corrige le meme jour (genererBarrage se declenchait des
+// la fin du 1er tour, S5-S6, au lieu d'attendre S29 - voir genererMancheSuivante).
+// Supprime uniquement les rencontres de barrage PAS ENCORE JOUEES (statut !=
+// 'termine') : le nouveau code les regenerera proprement a l'entree en S29, avec
+// des challengers bases sur un classement stabilise. A retirer juste apres usage.
+app.get('/api/public/fix-barrage-premature', (req, res) => {
+    try {
+        const avant = db.prepare("SELECT id, saison, circuit, nation_domicile, nation_exterieur, statut FROM coupe_equipes WHERE manche = 'barrage'").all();
+        const supprimees = db.prepare("DELETE FROM coupe_equipes WHERE manche = 'barrage' AND statut != 'termine'").run();
+        res.json({ success: true, avant, lignesSupprimees: supprimees.changes });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
 
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
