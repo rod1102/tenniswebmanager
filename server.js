@@ -1505,7 +1505,22 @@ function executerAvancementSemaine() {
                 ORDER BY t.semaine ASC
                 LIMIT 1
             `).get(player.id);
-            const joueurEngageCetteSemaine = !!tournoiEngage;
+            // Coupe Davis/Fed Cup : meme principe "engage" qu'un tournoi individuel -
+            // un joueur selectionne dans la composition d'une rencontre non terminee
+            // CETTE semaine (nouvelleSemaine, celle qu'on credite) ne doit pas cumuler
+            // l'XP/consequences d'un entrainement planifie EN PLUS de sa rencontre
+            // (bug signale par l'utilisateur, 2026-08-27 : XP creditee pour les deux a
+            // la fois). Contrairement aux tournois, une manche de Coupe Davis se joue
+            // integralement sur UNE seule semaine (pas de notion de tour_elimine à
+            // cheval sur 2 semaines), donc verifier juste la semaine en cours suffit.
+            const coupeEngagee = joueursEngagesCoupeDavis(player, nouvelleSemaine, nouvelleSemaine)[0] || null;
+            const tieCoupeEngage = coupeEngagee
+                ? db.prepare(`
+                    SELECT surface FROM coupe_equipes
+                    WHERE circuit = ? AND semaine = ? AND statut != 'termine' AND (nation_domicile = ? OR nation_exterieur = ?)
+                `).get(player.type === 'joueur' ? 'ATP' : 'WTA', nouvelleSemaine, player.nationalite, player.nationalite)
+                : null;
+            const joueurEngageCetteSemaine = !!tournoiEngage || !!coupeEngagee;
 
             if (joueurEngageCetteSemaine) {
                 player = db.prepare('SELECT * FROM players WHERE id = ?').get(player.id);
@@ -1604,8 +1619,9 @@ function executerAvancementSemaine() {
             // journal de la semaine qu'on quitte (ecrit lors de la transition
             // precedente) pour savoir si un entrainement de surface y avait ete credite.
             let surfaceProtegeeErosion = null;
-            if (joueurEngageCetteSemaine && tournoiEngage.surface && SURFACES.includes(tournoiEngage.surface)) {
-                surfaceProtegeeErosion = tournoiEngage.surface;
+            const surfaceEngagee = (tournoiEngage && tournoiEngage.surface) || (tieCoupeEngage && tieCoupeEngage.surface) || null;
+            if (joueurEngageCetteSemaine && surfaceEngagee && SURFACES.includes(surfaceEngagee)) {
+                surfaceProtegeeErosion = surfaceEngagee;
             } else {
                 const journalSemaineQuittee = db.prepare('SELECT action_prevue FROM journal_semaine_joueur WHERE player_id = ? AND semaine = ?').get(player.id, semaine);
                 if (journalSemaineQuittee && journalSemaineQuittee.action_prevue && journalSemaineQuittee.action_prevue.indexOf('surface_') === 0) {
@@ -1690,7 +1706,7 @@ function executerAvancementSemaine() {
             `).run(
                 player.id, nouvelleSemaine,
                 joueurEngageCetteSemaine ? 'tournoi' : (ordre ? ordre.action : null),
-                tournoiEngage ? tournoiEngage.nom : null,
+                tournoiEngage ? tournoiEngage.nom : (coupeEngagee ? coupeEngagee.nom : null),
                 pointsExperience,
                 ordre && ordre.action === 'coaching_mental' ? 1 : 0,
                 ordre && ordre.action === 'coaching_mental' ? 1 : 0,
@@ -1734,6 +1750,19 @@ function executerAvancementSemaine() {
         // marquerMoulinetteEnAttente plus haut.
         if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine === LONGUEUR_SAISON - 2) {
             marquerMoulinetteEnAttente();
+        }
+
+        // Coupe Davis / Fed Cup : barrage de maintien genere a l'entree en S29 (pas
+        // juste apres le 1er tour, S5-S6 - beaucoup trop tot pour designer
+        // equitablement les 8 nations challengers hors Groupe mondial sur une
+        // classement Live qui reflete a peine 5-6 semaines de saison). S29 laisse le
+        // classement des outsiders se stabiliser jusqu'a la fin de S28 avant de
+        // figer les challengers - demande explicite de l'utilisateur, 2026-08-27.
+        // Idempotent (genererBarrage ne fait rien si deja generee cette saison).
+        if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine === 29) {
+            const saisonCourante = nombreSaisonAffichee();
+            genererBarrage(saisonCourante, 'ATP');
+            genererBarrage(saisonCourante, 'WTA');
         }
 
         // Remise a zero physique du joueur + verrou de saison : declenche exactement au
@@ -1933,6 +1962,109 @@ app.post('/api/admin/pauser-saison', (req, res) => {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
     }
+});
+
+// Reset total avant le vrai lancement (cf. memoire project-test-beta-avant-lancement) :
+// supprime tous les personnages/tournois/classements/Coupe Davis/pronostics/presse
+// de la phase de test beta, mais PRESERVE les comptes coach (users : email, mot de
+// passe, pseudo, role, droit de redaction Presse) - decision explicite de
+// l'utilisateur, les testeurs n'auront pas besoin de se reinscrire. Rejoue ensuite
+// une saison complete (LONGUEUR_SAISON semaines) entierement par des bots, exactement
+// comme le tout premier peuplement du jeu (voir memoire project-saison-0-bots,
+// 2026-07-19) : sans aucun joueur reel, creerTournoi/tirerAuSort/simulerUnTour
+// composent chaque tableau a 100% de rivaux/lambdas, ce qui repeuple les classements
+// Live avant que les coachs ne recreent leurs vrais personnages. Meme decalage
+// d'affichage (saison_offset=1) pour que leur toute premiere vraie saison s'affiche
+// "Saison 1", pas "Saison 2".
+function executerResetTotal() {
+    const tablesAVider = [
+        'players', 'plannings', 'planning_historique', 'journal_semaine_joueur',
+        'matchs', 'tournois', 'tournoi_joueurs', 'tournoi_matchs', 'tournoi_favoris',
+        'tournoi_liste_attente', 'classement_joueurs', 'pronostics',
+        'classement_historique', 'classement_top30', 'coupe_equipes',
+        'coupe_composition', 'coupe_rubbers', 'coupe_capitaines',
+        'coupe_candidatures', 'coupe_votes', 'coupe_styles', 'coupe_groupe_mondial',
+        'semaines_reelles', 'articles_presse', 'evenements_globaux'
+    ];
+    // PRAGMA foreign_keys=ON par defaut sur ce projet (cf. commentaire plus haut
+    // dans database.js, piege RENAME+FK) : players est reference par plannings/
+    // planning_historique/journal_semaine_joueur/matchs/tournoi_favoris, donc un
+    // simple ordre de suppression ne suffit pas partout (ex. tournoi_favoris peut
+    // aussi referencer tournois). Desactive le temps du reset, comme les migrations
+    // de reparation existantes le font deja.
+    db.exec('PRAGMA foreign_keys = OFF');
+    tablesAVider.forEach(function (table) { db.prepare('DELETE FROM ' + table).run(); });
+    db.exec('PRAGMA foreign_keys = ON');
+    // users, sessions, annonce_admin : volontairement intouches.
+
+    db.prepare('UPDATE jeu_etat SET semaine_actuelle = 1, saison_offset = 0, saison_lancee = 0, derniere_avancee_auto = NULL WHERE id = 1').run();
+
+    // Rejoue semaine par semaine (jamais "hors du temps") : tirerAuSort seed les
+    // tetes de serie via le classement Live courant, qui depend de semaine_actuelle,
+    // et un tournoi sur 2 semaines a besoin que l'ancre reelle de sa 2e semaine
+    // existe deja avant de pouvoir jouer ses derniers tours (executerAvancementTour).
+    for (let semaine = 0; semaine < LONGUEUR_SAISON; semaine++) {
+        executerAvancementSemaine();
+        for (let garde = 0; garde < 50; garde++) {
+            const simuleTournoi = executerAvancementTour(true);
+            const simuleCoupe = executerAvancementTourCoupe(true);
+            if (!simuleTournoi && !simuleCoupe) break;
+        }
+    }
+
+    db.prepare('UPDATE jeu_etat SET saison_offset = 1 WHERE id = 1').run();
+
+    return db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
+}
+
+// Operation volontairement lourde (rejoue tout un cycle de calendrier complet,
+// ~5 minutes mesure en test) : bien trop long pour une requete HTTP synchrone
+// classique (risque de timeout du proxy Railway avant la fin, alors meme que le
+// traitement continuerait correctement cote serveur). La route repond donc
+// IMMEDIATEMENT et lance le travail apres coup (setImmediate) ; l'avancement se
+// suit via GET /api/admin/reset-total/statut (poll cote admin.html). Etat en
+// memoire seulement (pas en base) : un redemarrage du serveur pendant l'operation
+// perdrait juste le suivi de progression, jamais la coherence de la base
+// elle-meme (chaque etape de executerResetTotal est deja ecrite/commitee au fur
+// et a mesure par better-sqlite3, synchrone par nature).
+let resetTotalStatut = null;
+
+app.post('/api/admin/reset-total', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        if (req.body.confirmation !== 'RESET') {
+            return res.status(400).json({ error: 'Confirmation manquante ou incorrecte.' });
+        }
+        if (resetTotalStatut && resetTotalStatut.etat === 'en_cours') {
+            return res.status(409).json({ error: 'Une reinitialisation est deja en cours.' });
+        }
+
+        resetTotalStatut = { etat: 'en_cours', demarreA: new Date().toISOString() };
+        res.json({ success: true, demarre: true });
+
+        setImmediate(function () {
+            try {
+                const semaineFinale = executerResetTotal();
+                resetTotalStatut = { etat: 'termine', semaineFinale, termineA: new Date().toISOString() };
+                console.log('Reset total termine, semaineFinale=' + semaineFinale);
+            } catch (err) {
+                console.error('Erreur pendant le reset total (execution differee) :', err);
+                resetTotalStatut = { etat: 'erreur', erreur: err.message };
+            }
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.get('/api/admin/reset-total/statut', (req, res) => {
+    if (!estAdmin(req.userId)) {
+        return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+    }
+    res.json({ success: true, statut: resetTotalStatut });
 });
 
 // Route temporaire (2026-08-20) : restaure manuellement le coaching mental perdu
@@ -7751,7 +7883,13 @@ function genererBarrage(saison, circuit) {
 // a plusieurs) est traitee independamment : une division peut generer sa manche
 // suivante sans attendre qu'une autre division ait fini la sienne.
 function genererMancheSuivante(saison, circuit, mancheActuelle) {
-    if (mancheActuelle === '1er_tour') genererBarrage(saison, circuit);
+    // Le barrage n'est PLUS genere ici (retire le 2026-08-27, demande explicite de
+    // l'utilisateur) : le 1er tour se joue et se termine des la semaine S5-S6,
+    // beaucoup trop tot pour designer equitablement les 8 nations challengers hors
+    // Groupe mondial (classementNationsTop4 aurait alors reflete a peine 5-6
+    // semaines de saison). Genere desormais depuis executerAvancementSemaine, a
+    // l'entree en S29 (une fois le classement des outsiders "stabilise" a la fin
+    // de S28), voir plus bas.
 
     const indexManche = MANCHES_COUPE.indexOf(mancheActuelle);
     if (indexManche === -1 || indexManche === MANCHES_COUPE.length - 1) return; // pas de manche apres la finale

@@ -53,6 +53,14 @@
                 </div>
             </div>
 
+            <div class="tournoi-card" style="border-color:#E24B4A; margin:0 auto 32px; max-width:600px;">
+                <div class="tournoi-card-name" style="color:#E24B4A;">Zone dangereuse — avant le vrai lancement</div>
+                <p class="match-hint" style="text-align:left; padding:8px 0 0;">
+                    Supprime définitivement tous les personnages, tournois, classements, Coupe Davis/Fed Cup, pronostics et articles de presse créés pendant la phase de test — les comptes coach (e-mail/mot de passe/pseudo) sont conservés, personne n'aura besoin de se réinscrire. Rejoue ensuite une saison complète simulée entièrement par des bots pour repeupler les classements, exactement comme au tout premier lancement du jeu. Opération irréversible qui prend environ 5 minutes une fois lancée (le site peut répondre plus lentement pendant ce temps pour tout le monde) ; la partie reste en pause à la fin, le temps de cliquer sur "Lancer la saison" quand les coachs seront prêts.
+                </p>
+                <button id="reset-total-btn" class="cta cta-secondary" style="border-color:#E24B4A; color:#E24B4A; margin-top:12px;">Tout remettre à zéro</button>
+            </div>
+
             <h1 class="dashboard-title" style="font-size:1.8rem;">Inscriptions en attente</h1>
 
             <div class="players-grid" id="admin-grid"></div>
@@ -319,6 +327,71 @@
             chargerSemaine();
         });
 
+        // Double confirmation (un confirm() ne suffit pas vu le caractere irreversible) :
+        // le second garde-fou oblige a taper le mot "RESET" a l'identique, exactement
+        // comme le confirme la route cote serveur (POST /api/admin/reset-total).
+        document.getElementById('reset-total-btn').addEventListener('click', async function () {
+            const etape1 = confirm('Ceci va supprimer DÉFINITIVEMENT tous les personnages, tournois, classements, Coupe Davis/Fed Cup, pronostics et articles de presse — et rejouer une saison complète par des bots. Les comptes coach sont conservés. Cette action est IRRÉVERSIBLE. Continuer ?');
+            if (!etape1) return;
+
+            const saisie = prompt('Pour confirmer, tape exactement RESET (en majuscules) :');
+            if (saisie !== 'RESET') { alert('Annulé — le mot tapé ne correspond pas.'); return; }
+
+            const btn = this;
+            btn.disabled = true;
+            const texteOriginal = btn.textContent;
+            btn.textContent = 'Lancement...';
+
+            try {
+                const response = await fetch('/api/admin/reset-total', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ adminId, confirmation: 'RESET' })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    alert(data.error || 'Échec du lancement de la réinitialisation.');
+                    btn.disabled = false;
+                    btn.textContent = texteOriginal;
+                    return;
+                }
+                // La reponse revient immediatement (le vrai travail continue cote
+                // serveur, ~5 minutes) - on interroge ensuite periodiquement l'etat
+                // d'avancement plutot que de laisser une requete HTTP ouverte aussi
+                // longtemps (risque de timeout du proxy avant la fin reelle).
+                btn.textContent = 'Réinitialisation en cours... (~5 minutes, ne quitte pas cette page)';
+                surveillerResetTotal(btn, texteOriginal);
+            } catch (err) {
+                alert('Erreur réseau pendant le lancement de la réinitialisation : ' + err.message);
+                btn.disabled = false;
+                btn.textContent = texteOriginal;
+            }
+        });
+
+        function surveillerResetTotal(btn, texteOriginal) {
+            const intervalle = setInterval(async function () {
+                try {
+                    const r = await fetch('/api/admin/reset-total/statut');
+                    const d = await r.json();
+                    if (!r.ok || !d.statut) return; // reessaie au prochain tick
+                    if (d.statut.etat === 'en_cours') return;
+
+                    clearInterval(intervalle);
+                    btn.disabled = false;
+                    btn.textContent = texteOriginal;
+                    if (d.statut.etat === 'termine') {
+                        alert('Réinitialisation terminée. Nouvelle saison prête à démarrer (semaine ' + d.statut.semaineFinale + '). Pense à cliquer sur "Lancer la saison" quand les coachs seront prêts.');
+                        chargerSemaine();
+                        chargerEnAttente();
+                    } else if (d.statut.etat === 'erreur') {
+                        alert('La réinitialisation a échoué : ' + d.statut.erreur);
+                    }
+                } catch (err) {
+                    // Erreur reseau ponctuelle pendant le sondage - reessaie au prochain tick.
+                }
+            }, 5000);
+        }
+
         document.getElementById('nav-toggle').addEventListener('click', function (e) {
             e.stopPropagation();
             this.classList.toggle('open');
@@ -329,6 +402,23 @@
             document.getElementById('nav-dropdown').classList.remove('open');
         });
 
+        // Si une reinitialisation totale est deja en cours (lancee avant un rechargement
+        // de cette page, par exemple), reprend l'affichage "en cours" + le sondage
+        // plutot que de laisser le bouton reapparaitre comme si de rien n'etait.
+        async function reprendreSuiviResetTotalSiEnCours() {
+            try {
+                const r = await fetch('/api/admin/reset-total/statut');
+                const d = await r.json();
+                if (r.ok && d.statut && d.statut.etat === 'en_cours') {
+                    const btn = document.getElementById('reset-total-btn');
+                    btn.disabled = true;
+                    const texteOriginal = 'Tout remettre à zéro';
+                    btn.textContent = 'Réinitialisation en cours... (~5 minutes, ne quitte pas cette page)';
+                    surveillerResetTotal(btn, texteOriginal);
+                }
+            } catch (err) { /* tant pis, le bouton reste disponible normalement */ }
+        }
+
         (async function () {
             const ok = await verifierAcces();
             if (ok) {
@@ -336,6 +426,7 @@
                 chargerSemaine();
                 chargerEnAttente();
                 chargerRedacteurs();
+                reprendreSuiviResetTotalSiEnCours();
             }
         })();
     </script>

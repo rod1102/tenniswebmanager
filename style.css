@@ -1956,9 +1956,11 @@ table.points td.pts {
 }
 
 .classement-separateur td {
-    text-align: center;
-    color: #57697A;
-    padding: 4px;
+    text-align: left;
+    color: #D4F000;
+    font-size: 1.15rem;
+    font-weight: 700;
+    padding: 14px 4px 6px;
 }
 
 /* ---------- Accueil : classement swipeable ---------- */
@@ -2224,6 +2226,19 @@ table.points td.pts {
     h1 { font-size: clamp(2.5rem, 14vw, 4rem); }
     .subtitle { font-size: 1rem; }
     .ball-track { display: none; }
+
+    /* Sous 600px, .dashboard-header (flex + justify-content:space-between) passe
+       sur 2 lignes (le logo est trop long pour tenir a cote du bouton Menu) : une
+       fois seul sur sa ligne, .nav-menu se retrouve colle a GAUCHE de l'ecran (seul
+       element de sa ligne, space-between le traite comme flex-start). Le menu
+       deroulant, ancre en `right:0` (pense pour un bouton a droite sur desktop),
+       debordait alors presque entierement hors de l'ecran a gauche - illisible sur
+       telephone (signale par l'utilisateur, capture Chrome Android, 2026-08-27).
+       Ancre desormais a gauche du bouton sur mobile, la ou il se trouve reellement. */
+    .nav-menu-dropdown {
+        left: 0;
+        right: auto;
+    }
 }
 
 /* ---------- Presse ---------- */
