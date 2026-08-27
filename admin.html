@@ -46,6 +46,13 @@
                 <div id="saison-active-badge" style="display:none; margin-top:12px;">
                     <button id="pauser-saison-btn" class="cta cta-secondary" style="margin-top:10px;">Mettre en pause l'avancement automatique</button>
                 </div>
+                <div id="inscriptions-fermees-badge" style="display:none; margin-top:12px;">
+                    <div class="planning-alerte-texte" style="color:#E24B4A;">Inscriptions fermées — personne ne peut créer de nouveau compte coach.</div>
+                    <button id="autoriser-inscriptions-btn" class="cta cta-primary" style="margin-top:10px;">Rouvrir les inscriptions</button>
+                </div>
+                <div id="inscriptions-ouvertes-badge" style="display:none; margin-top:12px;">
+                    <button id="bloquer-inscriptions-btn" class="cta cta-secondary" style="margin-top:10px;">Fermer les inscriptions</button>
+                </div>
                 <div style="display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
                     <button id="avancer-btn" class="cta cta-primary" style="margin-top:12px;">Faire avancer la semaine</button>
                     <button id="avancer-tour-btn" class="cta cta-secondary" style="margin-top:12px;">Avancer un tour</button>
@@ -128,6 +135,8 @@
                     'Prochain avancement automatique : ' + prochain.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
                 document.getElementById('saison-pause-badge').style.display = data.saisonLancee ? 'none' : 'block';
                 document.getElementById('saison-active-badge').style.display = data.saisonLancee ? 'block' : 'none';
+                document.getElementById('inscriptions-fermees-badge').style.display = data.inscriptionsOuvertes ? 'none' : 'block';
+                document.getElementById('inscriptions-ouvertes-badge').style.display = data.inscriptionsOuvertes ? 'block' : 'none';
             }
         }
 
@@ -324,6 +333,28 @@
                 return;
             }
             alert('Saison mise en pause — l\'avancement automatique est arrêté.');
+            chargerSemaine();
+        });
+
+        document.getElementById('bloquer-inscriptions-btn').addEventListener('click', async function () {
+            const response = await fetch('/api/admin/inscriptions/bloquer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId })
+            });
+            const data = await response.json();
+            if (!response.ok) { alert(data.error); return; }
+            chargerSemaine();
+        });
+
+        document.getElementById('autoriser-inscriptions-btn').addEventListener('click', async function () {
+            const response = await fetch('/api/admin/inscriptions/autoriser', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId })
+            });
+            const data = await response.json();
+            if (!response.ok) { alert(data.error); return; }
             chargerSemaine();
         });
 

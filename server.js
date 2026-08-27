@@ -234,6 +234,11 @@ function ipReelle(req) {
 
 app.post('/api/inscription', (req, res) => {
     try {
+        const etatInscriptions = db.prepare('SELECT inscriptions_ouvertes FROM jeu_etat WHERE id = 1').get();
+        if (!etatInscriptions.inscriptions_ouvertes) {
+            return res.status(403).json({ error: 'Les inscriptions sont temporairement fermées. Réessaie un peu plus tard.' });
+        }
+
         const { email, password, pseudo } = req.body;
 
         if (!email || !password) {
@@ -927,11 +932,12 @@ function positionSemaineAffichee(semaine) {
 
 app.get('/api/semaine', (req, res) => {
     try {
-        const etat = db.prepare('SELECT semaine_actuelle, saison_lancee FROM jeu_etat WHERE id = 1').get();
+        const etat = db.prepare('SELECT semaine_actuelle, saison_lancee, inscriptions_ouvertes FROM jeu_etat WHERE id = 1').get();
         res.json({
             success: true, semaine_actuelle: etat.semaine_actuelle, phase: phaseAffichee(etat.semaine_actuelle),
             prochainAvancementAuto: prochaineEcheanceApres(new Date()).toISOString(),
-            saisonLancee: !!etat.saison_lancee
+            saisonLancee: !!etat.saison_lancee,
+            inscriptionsOuvertes: !!etat.inscriptions_ouvertes
         });
     } catch (err) {
         console.error(err);
@@ -1957,6 +1963,36 @@ app.post('/api/admin/pauser-saison', (req, res) => {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
         db.prepare('UPDATE jeu_etat SET saison_lancee = 0 WHERE id = 1').run();
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Verrou manuel independant de saison_lancee : bloque uniquement la CREATION de
+// nouveaux comptes (POST /api/inscription), jamais la connexion ni le jeu des
+// comptes deja crees. Demande explicite de l'utilisateur, 2026-08-27, le temps de
+// brancher le nom de domaine tenniswebmanager.com.
+app.post('/api/admin/inscriptions/bloquer', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        db.prepare('UPDATE jeu_etat SET inscriptions_ouvertes = 0 WHERE id = 1').run();
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/admin/inscriptions/autoriser', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        db.prepare('UPDATE jeu_etat SET inscriptions_ouvertes = 1 WHERE id = 1').run();
         res.json({ success: true });
     } catch (err) {
         console.error(err);

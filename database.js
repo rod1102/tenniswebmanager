@@ -728,7 +728,14 @@ const migrations = [
     // changement de regle.
     "ALTER TABLE coupe_styles ADD COLUMN numero INTEGER",
     "ALTER TABLE coupe_composition ADD COLUMN joueur_d_est_reel INTEGER",
-    "ALTER TABLE coupe_composition ADD COLUMN joueur_d_id INTEGER"
+    "ALTER TABLE coupe_composition ADD COLUMN joueur_d_id INTEGER",
+    // Verrou manuel des inscriptions (admin.html), independant de saison_lancee -
+    // demande explicite de l'utilisateur, 2026-08-27, le temps de brancher le nom
+    // de domaine tenniswebmanager.com. DEFAULT 0 (ferme) deliberement : sur la base
+    // de production deja existante, cette migration met donc immediatement la
+    // ligne jeu_etat existante a 0 des le prochain demarrage - effet recherche,
+    // pas un hasard du DEFAULT SQLite habituel.
+    "ALTER TABLE jeu_etat ADD COLUMN inscriptions_ouvertes INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {
