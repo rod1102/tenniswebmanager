@@ -113,20 +113,50 @@
             `;
         }
 
-        function carteRubber(r) {
-            const label = r.type === 'double' ? 'Double' : 'Simple ' + r.numero;
-            return `<div class="stat-row"><span class="stat-label">${label}</span><span class="stat-value">${r.nation_vainqueur} — ${r.score || ''}</span></div>`;
+        // Nom d'un joueur (reel ou bot) a partir d'un poste de composition - meme
+        // logique que coupe.html (nomPosteCompo), dupliquee ici (pas de JS partage
+        // entre pages, convention du projet). Pas de lien cliquable ici (a la
+        // difference de coupe.html) : cette page reste un tableau de bord de
+        // capitaine, le detail/la fiche adversaire restent a un clic via "Voir les
+        // resultats" -> coupe.html si besoin.
+        function nomPosteCompo(compo, estReelCle, idCle, joueurs) {
+            if (!compo || compo[idCle] == null) return '(pas encore fixé)';
+            const j = (joueurs || []).find(function (x) { return x.estReel === !!compo[estReelCle] && Number(x.id) === Number(compo[idCle]); });
+            if (!j) return '?';
+            return j.nom + (j.estReel ? '' : ' (bot)') + (compo.prevue ? ' (probable)' : '');
         }
 
-        // Resultats uniquement (menu deroulant, sans jamais avoir besoin de cliquer
-        // vers coupe.html - demande explicite de l'utilisateur, 2026-08-24 : "pas
-        // besoin de cliquer sur un autre lien, tout doit etre fait directement sur
-        // cette page"). Le style de jeu N'EST PAS un choix de capitaine - chaque
-        // coach dont le joueur participe le regle lui-meme depuis sa propre fiche
-        // (coupe.html), pas ici (demande explicite separee, meme jour : l'ancienne
-        // version affichait a tort un formulaire de style sur cette page). Recharge
-        // a chaque ouverture plutot que de mettre en cache (etat simple, cout
-        // negligeable a l'echelle de quelques rencontres par capitaine).
+        // Les 5 rencontres de la manche avec le nom des joueurs (pas juste "Simple
+        // 1") - demande explicite de l'utilisateur, 2026-08-27 : identique a
+        // tableauCinqRencontres sur coupe.html, dupliquee ici (pas de JS partage).
+        function tableauCinqRencontres(data) {
+            const compoDomicile = data.composition.find(function (c) { return c.nation === data.tie.nation_domicile; });
+            const compoExterieur = data.composition.find(function (c) { return c.nation === data.tie.nation_exterieur; });
+            const nomD = function (cle) { return nomPosteCompo(compoDomicile, cle + '_est_reel', cle + '_id', data.joueursDomicile); };
+            const nomE = function (cle) { return nomPosteCompo(compoExterieur, cle + '_est_reel', cle + '_id', data.joueursExterieur); };
+            const ordre = [
+                { numero: 1, label: 'Simple 1', domicile: nomD('joueur_a'), exterieur: nomE('joueur_a') },
+                { numero: 2, label: 'Simple 2', domicile: nomD('joueur_b'), exterieur: nomE('joueur_b') },
+                { numero: 3, label: 'Double', domicile: nomD('double_j1') + ' / ' + nomD('double_j2'), exterieur: nomE('double_j1') + ' / ' + nomE('double_j2') },
+                { numero: 4, label: 'Simple 3', domicile: nomD('joueur_a'), exterieur: nomE('joueur_b') },
+                { numero: 5, label: 'Simple 4', domicile: nomD('joueur_b'), exterieur: nomE('joueur_a') }
+            ];
+            return ordre.map(function (o) {
+                const joue = data.rubbers.find(function (r) { return r.numero === o.numero; });
+                const statut = joue ? `${joue.nation_vainqueur} — ${joue.score || ''}` : (data.tie.statut === 'termine' ? 'non jouée (qualification acquise avant)' : 'à venir');
+                return `<div class="stat-row"><span class="stat-label">${o.label}</span><span class="stat-value">${o.domicile} vs ${o.exterieur} · ${statut}</span></div>`;
+            }).join('');
+        }
+
+        // Menu deroulant, sans jamais avoir besoin de cliquer vers coupe.html
+        // (demande explicite de l'utilisateur, 2026-08-24 : "pas besoin de cliquer
+        // sur un autre lien, tout doit etre fait directement sur cette page"). Le
+        // style de jeu N'EST PAS un choix de capitaine - chaque coach dont le joueur
+        // participe le regle lui-meme depuis sa propre fiche (coupe.html), pas ici
+        // (demande explicite separee, meme jour : l'ancienne version affichait a
+        // tort un formulaire de style sur cette page). Recharge a chaque ouverture
+        // plutot que de mettre en cache (etat simple, cout negligeable a l'echelle
+        // de quelques rencontres par capitaine).
         async function basculerDetails(tieId) {
             const zone = document.getElementById('details-zone-' + tieId);
             const ouvert = zone.style.display !== 'none';
@@ -142,9 +172,12 @@
                 return;
             }
 
-            zone.innerHTML = data.rubbers.length > 0
-                ? data.rubbers.map(carteRubber).join('')
-                : '<p class="match-hint">Aucun résultat pour le moment.</p>';
+            // Les 5 rencontres (avec noms) ne peuvent s'afficher qu'une fois la
+            // composition des 2 nations connue (a partir de S-1) - avant, rien a
+            // montrer de plus utile que le statut deja visible sur la carte.
+            zone.innerHTML = data.composition.length > 0
+                ? tableauCinqRencontres(data)
+                : '<p class="match-hint">Composition pas encore connue.</p>';
         }
 
         function carteRencontre(t, playerId) {
