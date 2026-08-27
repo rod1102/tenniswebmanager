@@ -116,7 +116,8 @@ function estRoutePublique(req) {
     if (req.method === 'GET') {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
-            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce'].includes(req.path)) {
+            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce',
+            '/api/public/attribuer-badge-beta'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -6667,7 +6668,15 @@ function calculerBadgesCoach(userId) {
     `).all(userId);
     const saisonsJouees = new Set(saisonsRows.map(function (r) { return phaseAffichee(r.semaine).numeroSaison; })).size;
 
+    // Badge special, designation manuelle (pas un calcul de statistique) : accorde
+    // une fois pour toutes aux coachs ayant teste le jeu avant le vrai lancement.
+    // Reutilise le mecanisme estRecord (voir construireBadges) pour un badge
+    // binaire "on l'a ou pas" plutot qu'une progression a 5 paliers - directement
+    // au palier maximal des qu'il est accorde, jamais de palier intermediaire.
+    const estBetaTesteur = !!db.prepare('SELECT est_beta_testeur FROM users WHERE id = ?').get(userId).est_beta_testeur;
+
     return construireBadges([
+        { id: 'beta_testeur', nom: 'Beta testeur', description: 'A permis de tester et résoudre les bugs avant la sortie du jeu. Merci à lui !', valeur: estBetaTesteur ? 1 : 0, seuils: [1, 1, 1, 1, 1], estRecord: estBetaTesteur },
         { id: 'titres_coach', nom: 'Titres cumulés', description: 'Titres remportés, cumulés sur les 2 personnages', valeur: titres, seuils: [1, 25, 50, 100, 250] },
         { id: 'gc_cumules', nom: 'Grand Chelems cumulés', description: 'Titres du Grand Chelem, cumulés sur les 2 personnages', valeur: gcCumules, seuils: [2, 5, 10, 20, 30] },
         { id: 'gc_meme_saison', nom: 'Grand Chelem la même saison', description: 'Saisons où les 2 personnages ont chacun remporté un Grand Chelem', valeur: gcMemeSaison, seuils: [1, 2, 3, 4, 5] },
@@ -8987,6 +8996,21 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
 
     return { nationVainqueur, domicileGagne };
 }
+
+// Route temporaire (2026-08-27) : accorde le badge "Beta testeur" a tous les
+// comptes coach existants SAUF celui de l'utilisateur (pseudo "Rowdy") - demande
+// explicite, designation ponctuelle. A retirer juste apres usage.
+app.get('/api/public/attribuer-badge-beta', (req, res) => {
+    try {
+        const avant = db.prepare('SELECT id, pseudo, est_beta_testeur FROM users').all();
+        const resultat = db.prepare("UPDATE users SET est_beta_testeur = 1 WHERE pseudo IS NULL OR LOWER(pseudo) != 'rowdy'").run();
+        const apres = db.prepare('SELECT id, pseudo, est_beta_testeur FROM users').all();
+        res.json({ success: true, avant, lignesModifiees: resultat.changes, apres });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
 
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);

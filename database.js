@@ -735,7 +735,12 @@ const migrations = [
     // de production deja existante, cette migration met donc immediatement la
     // ligne jeu_etat existante a 0 des le prochain demarrage - effet recherche,
     // pas un hasard du DEFAULT SQLite habituel.
-    "ALTER TABLE jeu_etat ADD COLUMN inscriptions_ouvertes INTEGER DEFAULT 0"
+    "ALTER TABLE jeu_etat ADD COLUMN inscriptions_ouvertes INTEGER DEFAULT 0",
+    // Badge coach "Beta testeur" (2026-08-27) : designation manuelle, pas un calcul
+    // automatique - accorde une fois aux coachs ayant teste avant le vrai lancement
+    // (voir la route ponctuelle qui le pose sur les comptes concernes). DEFAULT 0
+    // pour que tout nouveau compte apres le lancement ne l'ait jamais par erreur.
+    "ALTER TABLE users ADD COLUMN est_beta_testeur INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {
