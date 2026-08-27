@@ -116,8 +116,7 @@ function estRoutePublique(req) {
     if (req.method === 'GET') {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
-            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce',
-            '/api/public/attribuer-badge-beta'].includes(req.path)) {
+            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -8996,21 +8995,6 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
 
     return { nationVainqueur, domicileGagne };
 }
-
-// Route temporaire (2026-08-27) : accorde le badge "Beta testeur" a tous les
-// comptes coach existants SAUF celui de l'utilisateur (pseudo "Rowdy") - demande
-// explicite, designation ponctuelle. A retirer juste apres usage.
-app.get('/api/public/attribuer-badge-beta', (req, res) => {
-    try {
-        const avant = db.prepare('SELECT id, pseudo, est_beta_testeur FROM users').all();
-        const resultat = db.prepare("UPDATE users SET est_beta_testeur = 1 WHERE pseudo IS NULL OR LOWER(pseudo) != 'rowdy'").run();
-        const apres = db.prepare('SELECT id, pseudo, est_beta_testeur FROM users').all();
-        res.json({ success: true, avant, lignesModifiees: resultat.changes, apres });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
 
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
