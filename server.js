@@ -116,7 +116,8 @@ function estRoutePublique(req) {
     if (req.method === 'GET') {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
-            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce'].includes(req.path)) {
+            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce',
+            '/api/public/inspecter-coach'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -8945,6 +8946,33 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
 
     return { nationVainqueur, domicileGagne };
 }
+
+// Route temporaire (2026-08-28) : inspection en lecture seule d'un coach par
+// pseudo, avant suppression demandee par l'utilisateur - juste pour verifier la
+// cible exacte et l'ampleur des donnees liees (matchs deja joues, tournois) avant
+// d'agir. A retirer juste apres usage.
+app.get('/api/public/inspecter-coach', (req, res) => {
+    try {
+        const pseudo = req.query.pseudo;
+        const user = db.prepare('SELECT id, email, pseudo, role FROM users WHERE LOWER(pseudo) = LOWER(?)').get(pseudo);
+        if (!user) return res.json({ success: true, trouve: false });
+
+        const joueurs = db.prepare('SELECT id, type, prenom, nom, statut FROM players WHERE user_id = ?').all(user.id);
+        const idsJoueurs = joueurs.map(function (j) { return j.id; });
+        let matchs = 0, tournoiJoueurs = 0, tournoiFavoris = 0, coupeCompo = 0;
+        if (idsJoueurs.length > 0) {
+            const placeholders = idsJoueurs.map(function () { return '?'; }).join(',');
+            matchs = db.prepare(`SELECT COUNT(*) n FROM matchs WHERE player_id IN (${placeholders})`).get(...idsJoueurs).n;
+            tournoiJoueurs = db.prepare(`SELECT COUNT(*) n FROM tournoi_joueurs WHERE est_reel = 1 AND player_id IN (${placeholders})`).get(...idsJoueurs).n;
+            tournoiFavoris = db.prepare(`SELECT COUNT(*) n FROM tournoi_favoris WHERE player_id IN (${placeholders})`).get(...idsJoueurs).n;
+        }
+
+        res.json({ success: true, trouve: true, user, joueurs, matchs, tournoiJoueurs, tournoiFavoris });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
 
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
