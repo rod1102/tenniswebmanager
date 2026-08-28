@@ -281,7 +281,7 @@ const CODES_PAYS = {
     'palestine': 'ps', 'panama': 'pa', 'papouasie-nouvelle-guinee': 'pg', 'paraguay': 'py',
     'pays-bas': 'nl', 'perou': 'pe', 'philippines': 'ph', 'pologne': 'pl', 'portugal': 'pt',
     'qatar': 'qa', 'republique dominicaine': 'do', 'republique tcheque': 'cz', 'roumanie': 'ro',
-    'royaume-uni': 'gb', 'russie': 'ru', 'rwanda': 'rw', 'salvador': 'sv', 'samoa': 'ws',
+    'royaume-uni': 'gb', 'russie': 'ru', 'rwanda': 'rw', 'saint-marin': 'sm', 'salvador': 'sv', 'samoa': 'ws',
     'senegal': 'sn', 'serbie': 'rs', 'seychelles': 'sc', 'sierra leone': 'sl', 'singapour': 'sg',
     'slovaquie': 'sk', 'slovenie': 'si', 'somalie': 'so', 'soudan': 'sd', 'soudan du sud': 'ss',
     'sri lanka': 'lk', 'suede': 'se', 'suisse': 'ch', 'suriname': 'sr', 'syrie': 'sy',
