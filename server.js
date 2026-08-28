@@ -117,7 +117,7 @@ function estRoutePublique(req) {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
             '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce',
-            '/api/public/rechercher-joueur'].includes(req.path)) {
+            '/api/public/rechercher-joueur', '/api/public/supprimer-joueurs'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -9017,6 +9017,31 @@ app.get('/api/public/rechercher-joueur', (req, res) => {
         });
 
         res.json({ success: true, joueurs, matchs, tournoiJoueurs });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Route temporaire (2026-08-28) : supprime des PERSONNAGES precis par id (les
+// comptes coach restent intacts) - demande explicite de l'utilisateur ("Supprime
+// les deux joueurs de Szynal"), verifiee au prealable via
+// /api/public/rechercher-joueur (0 match, 0 tournoi pour ces 2 joueurs).
+// A retirer juste apres usage.
+app.get('/api/public/supprimer-joueurs', (req, res) => {
+    try {
+        const ids = (req.query.ids || '').split(',').map(Number).filter(Boolean);
+        if (ids.length === 0) return res.json({ success: true, supprimes: 0 });
+
+        const placeholders = ids.map(function () { return '?'; }).join(',');
+        db.exec('PRAGMA foreign_keys = OFF');
+        ['matchs', 'plannings', 'planning_historique', 'journal_semaine_joueur', 'tournoi_favoris']
+            .forEach(function (table) { db.prepare(`DELETE FROM ${table} WHERE player_id IN (${placeholders})`).run(...ids); });
+        db.prepare(`DELETE FROM tournoi_joueurs WHERE est_reel = 1 AND player_id IN (${placeholders})`).run(...ids);
+        db.prepare(`DELETE FROM players WHERE id IN (${placeholders})`).run(...ids);
+        db.exec('PRAGMA foreign_keys = ON');
+
+        res.json({ success: true, supprimes: ids.length, idsSupprimes: ids });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
