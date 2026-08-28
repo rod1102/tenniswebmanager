@@ -54,7 +54,7 @@
         // Le logo (present sur toutes les pages internes) pointe vers index.html - deja
         // connecte, on ne veut pas atterrir sur la page publique (boutons Connexion/
         // Creer un compte, aucun menu) qui donne l'impression fausse d'etre deconnecte.
-        if (sessionStorage.getItem('currentUserId')) {
+        if (localStorage.getItem('currentUserId')) {
             window.location.href = 'accueil.html';
         }
 

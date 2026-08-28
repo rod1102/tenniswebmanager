@@ -608,7 +608,7 @@
 
     <script>
         (async function afficherRefusEventuel() {
-            const userId = sessionStorage.getItem('currentUserId');
+            const userId = localStorage.getItem('currentUserId');
             if (!userId) return;
             try {
                 const response = await fetch('/api/utilisateur/' + userId + '?userId=' + userId);
@@ -698,7 +698,7 @@
         document.getElementById('players-form').addEventListener('submit', async function (e) {
             e.preventDefault();
 
-            const userId = sessionStorage.getItem('currentUserId');
+            const userId = localStorage.getItem('currentUserId');
             if (!userId) {
                 alert('Session expirée, merci de te réinscrire.');
                 window.location.href = 'inscription.html';

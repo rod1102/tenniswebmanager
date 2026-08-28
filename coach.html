@@ -53,7 +53,7 @@
     </div>
 
     <script>
-        const userId = sessionStorage.getItem('currentUserId');
+        const userId = localStorage.getItem('currentUserId');
         if (!userId) {
             window.location.href = 'connexion.html';
         }
@@ -282,7 +282,7 @@
         document.getElementById('logout-btn').addEventListener('click', function (e) {
             e.preventDefault();
             fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
-            sessionStorage.removeItem('currentUserId');
+            localStorage.removeItem('currentUserId');
             window.location.href = 'index.html';
         });
 
