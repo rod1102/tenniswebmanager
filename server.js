@@ -1752,8 +1752,14 @@ function executerAvancementSemaine() {
             // 2026-08-28). Applique APRES la repartition manuelle en attente (l'un
             // n'exclut pas forcement l'autre en theorie, mais dans les faits un joueur
             // AFK n'a jamais eu l'occasion de soumettre xp_repartition_en_attente non
-            // plus).
-            if (!ordre && phaseNouvelleSemaine.type === 'tournoi' && !joueurEngageCetteSemaine) {
+            // plus). Meme regle qu'un entrainement generique planifie manuellement : un
+            // joueur blesse ne gagne aucune XP tant qu'il n'a pas fait un vrai repos
+            // (demande explicite de l'utilisateur, 2026-08-28 - "meme afk il ne gagne
+            // pas d'xp tant qu'il n'a pas fait un repos") - reste neanmoins marque "afk"
+            // dans le journal (juste sans XP), pour distinguer ce cas d'une semaine hors
+            // saison (action_prevue null).
+            const estAfk = !ordre && phaseNouvelleSemaine.type === 'tournoi' && !joueurEngageCetteSemaine;
+            if (estAfk && player.condition !== 'blesse') {
                 competencesErodees = repartirXPAuto(competencesErodees, XP_AFK);
                 xpAfkCreditee = XP_AFK;
             }
@@ -1794,7 +1800,7 @@ function executerAvancementSemaine() {
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 player.id, nouvelleSemaine,
-                joueurEngageCetteSemaine ? 'tournoi' : (ordre ? ordre.action : (xpAfkCreditee ? 'afk' : null)),
+                joueurEngageCetteSemaine ? 'tournoi' : (ordre ? ordre.action : (estAfk ? 'afk' : null)),
                 tournoiEngage ? tournoiEngage.nom : (coupeEngagee ? coupeEngagee.nom : null),
                 pointsExperience + xpAfkCreditee,
                 ordre && ordre.action === 'coaching_mental' ? 1 : 0,
