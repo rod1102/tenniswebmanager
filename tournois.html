@@ -498,8 +498,8 @@
 
             const tabsNav = document.getElementById('tabs-nav');
             tabsNav.innerHTML = `
-                <button class="tab-btn${typeCourant === 'joueur' ? ' active' : ''}" data-type="joueur">${joueurData ? formaterNom(joueurData.prenom, joueurData.nom) : 'Créer mon joueur'}</button>
-                <button class="tab-btn${typeCourant === 'joueuse' ? ' active' : ''}" data-type="joueuse">${joueuseData ? formaterNom(joueuseData.prenom, joueuseData.nom) : 'Créer ma joueuse'}</button>
+                <button class="tab-btn${typeCourant === 'joueur' ? ' active' : ''}" data-type="joueur">${joueurData ? formaterNom(joueurData.prenom, joueurData.nom) : 'ATP'}</button>
+                <button class="tab-btn${typeCourant === 'joueuse' ? ' active' : ''}" data-type="joueuse">${joueuseData ? formaterNom(joueuseData.prenom, joueuseData.nom) : 'WTA'}</button>
             `;
             tabsNav.querySelectorAll('.tab-btn').forEach(function (bouton) {
                 bouton.addEventListener('click', function () {
