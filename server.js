@@ -116,8 +116,7 @@ function estRoutePublique(req) {
     if (req.method === 'GET') {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
-            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce',
-            '/api/public/inspecter-compte', '/api/public/supprimer-compte'].includes(req.path)) {
+            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -8996,66 +8995,6 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
 
     return { nationVainqueur, domicileGagne };
 }
-
-// Route temporaire (2026-08-28) : inspection en lecture seule d'un compte par
-// email, avant suppression COMPLETE du compte (pas juste ses joueurs) demandee
-// par l'utilisateur. A retirer juste apres usage.
-app.get('/api/public/inspecter-compte', (req, res) => {
-    try {
-        const email = req.query.email;
-        const user = db.prepare('SELECT id, email, pseudo, role, est_redacteur FROM users WHERE LOWER(email) = LOWER(?)').get(email);
-        if (!user) return res.json({ success: true, trouve: false });
-
-        const joueurs = db.prepare('SELECT id, type, prenom, nom, statut FROM players WHERE user_id = ?').all(user.id);
-        const idsJoueurs = joueurs.map(function (j) { return j.id; });
-        let matchs = 0, tournoiJoueurs = 0;
-        if (idsJoueurs.length > 0) {
-            const placeholders = idsJoueurs.map(function () { return '?'; }).join(',');
-            matchs = db.prepare(`SELECT COUNT(*) n FROM matchs WHERE player_id IN (${placeholders})`).get(...idsJoueurs).n;
-            tournoiJoueurs = db.prepare(`SELECT COUNT(*) n FROM tournoi_joueurs WHERE est_reel = 1 AND player_id IN (${placeholders})`).get(...idsJoueurs).n;
-        }
-        const pronostics = db.prepare('SELECT COUNT(*) n FROM pronostics WHERE user_id = ?').get(user.id).n;
-        const articles = db.prepare('SELECT COUNT(*) n FROM articles_presse WHERE user_id = ?').get(user.id).n;
-
-        res.json({ success: true, trouve: true, user, joueurs, matchs, tournoiJoueurs, pronostics, articles });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
-// Route temporaire (2026-08-28) : suppression COMPLETE d'un compte (email, mot de
-// passe, pseudo, sessions) et de tout ce qui lui appartient - demande explicite
-// de l'utilisateur ("Supprime le compte esvelinr+1@gmail.com"). A retirer juste
-// apres usage.
-app.get('/api/public/supprimer-compte', (req, res) => {
-    try {
-        const email = req.query.email;
-        const user = db.prepare('SELECT id FROM users WHERE LOWER(email) = LOWER(?)').get(email);
-        if (!user) return res.json({ success: true, trouve: false });
-
-        const ids = db.prepare('SELECT id FROM players WHERE user_id = ?').all(user.id).map(function (r) { return r.id; });
-
-        db.exec('PRAGMA foreign_keys = OFF');
-        if (ids.length > 0) {
-            const placeholders = ids.map(function () { return '?'; }).join(',');
-            ['matchs', 'plannings', 'planning_historique', 'journal_semaine_joueur', 'tournoi_favoris']
-                .forEach(function (table) { db.prepare(`DELETE FROM ${table} WHERE player_id IN (${placeholders})`).run(...ids); });
-            db.prepare(`DELETE FROM tournoi_joueurs WHERE est_reel = 1 AND player_id IN (${placeholders})`).run(...ids);
-        }
-        db.prepare('DELETE FROM players WHERE user_id = ?').run(user.id);
-        db.prepare('DELETE FROM pronostics WHERE user_id = ?').run(user.id);
-        db.prepare('DELETE FROM articles_presse WHERE user_id = ?').run(user.id);
-        db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
-        db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
-        db.exec('PRAGMA foreign_keys = ON');
-
-        res.json({ success: true, trouve: true, userId: user.id, joueursSupprimes: ids.length });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
 
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
