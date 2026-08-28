@@ -117,7 +117,7 @@ function estRoutePublique(req) {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
             '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce',
-            '/api/public/inspecter-coach'].includes(req.path)) {
+            '/api/public/inspecter-coach', '/api/public/supprimer-joueurs-coach'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -8968,6 +8968,35 @@ app.get('/api/public/inspecter-coach', (req, res) => {
         }
 
         res.json({ success: true, trouve: true, user, joueurs, matchs, tournoiJoueurs, tournoiFavoris });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Route temporaire (2026-08-28) : supprime uniquement les PERSONNAGES d'un coach
+// (le compte lui-meme, email/mot de passe/pseudo, reste intact) - demande
+// explicite de l'utilisateur ("Supprime les joueurs de Rocky Corleone"), verifiee
+// au prealable via /api/public/inspecter-coach (0 match, 0 tournoi pour ce
+// compte). A retirer juste apres usage.
+app.get('/api/public/supprimer-joueurs-coach', (req, res) => {
+    try {
+        const pseudo = req.query.pseudo;
+        const user = db.prepare('SELECT id, pseudo FROM users WHERE LOWER(pseudo) = LOWER(?)').get(pseudo);
+        if (!user) return res.json({ success: true, trouve: false });
+
+        const ids = db.prepare('SELECT id FROM players WHERE user_id = ?').all(user.id).map(function (r) { return r.id; });
+        if (ids.length === 0) return res.json({ success: true, trouve: true, supprimes: 0 });
+
+        const placeholders = ids.map(function () { return '?'; }).join(',');
+        db.exec('PRAGMA foreign_keys = OFF');
+        ['matchs', 'plannings', 'planning_historique', 'journal_semaine_joueur', 'tournoi_favoris']
+            .forEach(function (table) { db.prepare(`DELETE FROM ${table} WHERE player_id IN (${placeholders})`).run(...ids); });
+        db.prepare(`DELETE FROM tournoi_joueurs WHERE est_reel = 1 AND player_id IN (${placeholders})`).run(...ids);
+        db.prepare(`DELETE FROM players WHERE id IN (${placeholders})`).run(...ids);
+        db.exec('PRAGMA foreign_keys = ON');
+
+        res.json({ success: true, trouve: true, supprimes: ids.length, idsSupprimes: ids });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
