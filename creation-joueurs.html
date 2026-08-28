@@ -247,7 +247,7 @@
                             </select>
                         </div>
 
-                        <div class="stats-header">Répartition des points techniques (120 au total)</div>
+                        <div class="stats-header" id="p1-budget-header">Répartition des points techniques (120 au total)</div>
                         <div class="stats-grid">
                             <div class="form-group">
                                 <label for="p1-service">Service <span class="info-icon" tabindex="0">?<span class="info-tooltip">Dur : 2 · Terre : 1 · Herbe : 2</span></span></label>
@@ -529,7 +529,7 @@
                             </select>
                         </div>
 
-                        <div class="stats-header">Répartition des points techniques (120 au total)</div>
+                        <div class="stats-header" id="p2-budget-header">Répartition des points techniques (120 au total)</div>
                         <div class="stats-grid">
                             <div class="form-group">
                                 <label for="p2-service">Service <span class="info-icon" tabindex="0">?<span class="info-tooltip">Dur : 2 · Terre : 1 · Herbe : 2</span></span></label>
@@ -621,7 +621,13 @@
             } catch (e) { /* pas bloquant si ca echoue */ }
         })();
 
-        const BUDGET = 120;
+        // Budget de base 120, corrige a la hausse par le serveur si la partie a deja
+        // avance (rattrapage pour un personnage cree en cours de saison, +4 points par
+        // semaine de tournoi ecoulee) - valeur d'affichage initiale, ecrasee des que
+        // /api/budget-creation repond (chargerBudget plus bas). La vraie validation
+        // reste cote serveur de toute facon (POST /api/joueurs recalcule son propre
+        // budget independamment).
+        let BUDGET = 120;
         const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
         const BUDGET_DISP = 12;
         const DISPOSITIONS = ['adversite', 'coupeur_de_tetes', 'dernier_carre', 'premiers_tours', 'sang_froid', 'indoor', 'rivalite'];
@@ -679,6 +685,25 @@
             });
             majBudgetDispositions(prefix);
         });
+
+        // Rattrapage pour un personnage cree en cours de saison (demande explicite de
+        // l'utilisateur, 2026-08-28) : recupere le vrai budget aupres du serveur (peut
+        // etre superieur a 120) et rafraichit l'affichage/la validation en consequence.
+        // Echec silencieux si la requete rate - le budget reste a 120 par defaut, la
+        // vraie validation cote serveur tranchera de toute facon a la soumission.
+        (async function chargerBudget() {
+            try {
+                const response = await fetch('/api/budget-creation');
+                const data = await response.json();
+                if (!response.ok || !data.budget) return;
+                BUDGET = data.budget;
+                const texteHeader = 'Répartition des points techniques (' + BUDGET + ' au total)';
+                document.getElementById('p1-budget-header').textContent = texteHeader;
+                document.getElementById('p2-budget-header').textContent = texteHeader;
+                majBudget('p1');
+                majBudget('p2');
+            } catch (e) { /* pas bloquant - budget reste a 120 */ }
+        })();
 
         // Info-bulles "?" : le survol suffit sur ordi (CSS :hover), mais sur mobile il
         // n'y a pas de survol - un tap bascule l'affichage, un tap ailleurs la referme.
