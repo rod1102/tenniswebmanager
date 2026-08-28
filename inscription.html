@@ -14,8 +14,6 @@
             <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
             <h1 class="auth-title">Créer un compte</h1>
 
-            <p id="inscriptions-fermees-message" class="match-hint" style="display:none;">Les inscriptions sont temporairement fermées. Reviens un peu plus tard.</p>
-
             <form id="signup-form">
                 <div class="form-group">
                     <label for="pseudo">Pseudo de coach</label>
@@ -41,20 +39,6 @@
     </div>
 
     <script>
-        // Verifie l'etat des inscriptions AVANT de laisser remplir le formulaire -
-        // /api/inscription refuse de toute facon la creation si c'est ferme, mais
-        // autant eviter a quelqu'un de remplir tout le formulaire pour rien.
-        (async function () {
-            try {
-                const response = await fetch('/api/semaine');
-                const data = await response.json();
-                if (response.ok && data.inscriptionsOuvertes === false) {
-                    document.getElementById('signup-form').style.display = 'none';
-                    document.getElementById('inscriptions-fermees-message').style.display = 'block';
-                }
-            } catch (err) { /* en cas d'erreur reseau, laisse le formulaire normal - /api/inscription tranchera */ }
-        })();
-
         document.getElementById('signup-form').addEventListener('submit', async function (e) {
             e.preventDefault();
 

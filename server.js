@@ -246,11 +246,6 @@ function ipReelle(req) {
 
 app.post('/api/inscription', (req, res) => {
     try {
-        const etatInscriptions = db.prepare('SELECT inscriptions_ouvertes FROM jeu_etat WHERE id = 1').get();
-        if (!etatInscriptions.inscriptions_ouvertes) {
-            return res.status(403).json({ error: 'Les inscriptions sont temporairement fermées. Réessaie un peu plus tard.' });
-        }
-
         const { email, password, pseudo } = req.body;
 
         if (!email || !password) {
@@ -958,12 +953,11 @@ function positionSemaineAffichee(semaine) {
 
 app.get('/api/semaine', (req, res) => {
     try {
-        const etat = db.prepare('SELECT semaine_actuelle, saison_lancee, inscriptions_ouvertes FROM jeu_etat WHERE id = 1').get();
+        const etat = db.prepare('SELECT semaine_actuelle, saison_lancee FROM jeu_etat WHERE id = 1').get();
         res.json({
             success: true, semaine_actuelle: etat.semaine_actuelle, phase: phaseAffichee(etat.semaine_actuelle),
             prochainAvancementAuto: prochaineEcheanceApres(new Date()).toISOString(),
-            saisonLancee: !!etat.saison_lancee,
-            inscriptionsOuvertes: !!etat.inscriptions_ouvertes
+            saisonLancee: !!etat.saison_lancee
         });
     } catch (err) {
         console.error(err);
@@ -2057,139 +2051,6 @@ app.post('/api/admin/pauser-saison', (req, res) => {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
     }
-});
-
-// Verrou manuel independant de saison_lancee : bloque uniquement la CREATION de
-// nouveaux comptes (POST /api/inscription), jamais la connexion ni le jeu des
-// comptes deja crees. Demande explicite de l'utilisateur, 2026-08-27, le temps de
-// brancher le nom de domaine tenniswebmanager.com.
-app.post('/api/admin/inscriptions/bloquer', (req, res) => {
-    try {
-        if (!estAdmin(req.userId)) {
-            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
-        }
-        db.prepare('UPDATE jeu_etat SET inscriptions_ouvertes = 0 WHERE id = 1').run();
-        res.json({ success: true });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
-app.post('/api/admin/inscriptions/autoriser', (req, res) => {
-    try {
-        if (!estAdmin(req.userId)) {
-            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
-        }
-        db.prepare('UPDATE jeu_etat SET inscriptions_ouvertes = 1 WHERE id = 1').run();
-        res.json({ success: true });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
-// Reset total avant le vrai lancement (cf. memoire project-test-beta-avant-lancement) :
-// supprime tous les personnages/tournois/classements/Coupe Davis/pronostics/presse
-// de la phase de test beta, mais PRESERVE les comptes coach (users : email, mot de
-// passe, pseudo, role, droit de redaction Presse) - decision explicite de
-// l'utilisateur, les testeurs n'auront pas besoin de se reinscrire. Rejoue ensuite
-// une saison complete (LONGUEUR_SAISON semaines) entierement par des bots, exactement
-// comme le tout premier peuplement du jeu (voir memoire project-saison-0-bots,
-// 2026-07-19) : sans aucun joueur reel, creerTournoi/tirerAuSort/simulerUnTour
-// composent chaque tableau a 100% de rivaux/lambdas, ce qui repeuple les classements
-// Live avant que les coachs ne recreent leurs vrais personnages. Meme decalage
-// d'affichage (saison_offset=1) pour que leur toute premiere vraie saison s'affiche
-// "Saison 1", pas "Saison 2".
-function executerResetTotal() {
-    const tablesAVider = [
-        'players', 'plannings', 'planning_historique', 'journal_semaine_joueur',
-        'matchs', 'tournois', 'tournoi_joueurs', 'tournoi_matchs', 'tournoi_favoris',
-        'tournoi_liste_attente', 'classement_joueurs', 'pronostics',
-        'classement_historique', 'classement_top30', 'coupe_equipes',
-        'coupe_composition', 'coupe_rubbers', 'coupe_capitaines',
-        'coupe_candidatures', 'coupe_votes', 'coupe_styles', 'coupe_groupe_mondial',
-        'semaines_reelles', 'articles_presse', 'evenements_globaux'
-    ];
-    // PRAGMA foreign_keys=ON par defaut sur ce projet (cf. commentaire plus haut
-    // dans database.js, piege RENAME+FK) : players est reference par plannings/
-    // planning_historique/journal_semaine_joueur/matchs/tournoi_favoris, donc un
-    // simple ordre de suppression ne suffit pas partout (ex. tournoi_favoris peut
-    // aussi referencer tournois). Desactive le temps du reset, comme les migrations
-    // de reparation existantes le font deja.
-    db.exec('PRAGMA foreign_keys = OFF');
-    tablesAVider.forEach(function (table) { db.prepare('DELETE FROM ' + table).run(); });
-    db.exec('PRAGMA foreign_keys = ON');
-    // users, sessions, annonce_admin : volontairement intouches.
-
-    db.prepare('UPDATE jeu_etat SET semaine_actuelle = 1, saison_offset = 0, saison_lancee = 0, derniere_avancee_auto = NULL WHERE id = 1').run();
-
-    // Rejoue semaine par semaine (jamais "hors du temps") : tirerAuSort seed les
-    // tetes de serie via le classement Live courant, qui depend de semaine_actuelle,
-    // et un tournoi sur 2 semaines a besoin que l'ancre reelle de sa 2e semaine
-    // existe deja avant de pouvoir jouer ses derniers tours (executerAvancementTour).
-    for (let semaine = 0; semaine < LONGUEUR_SAISON; semaine++) {
-        executerAvancementSemaine();
-        for (let garde = 0; garde < 50; garde++) {
-            const simuleTournoi = executerAvancementTour(true);
-            const simuleCoupe = executerAvancementTourCoupe(true);
-            if (!simuleTournoi && !simuleCoupe) break;
-        }
-    }
-
-    db.prepare('UPDATE jeu_etat SET saison_offset = 1 WHERE id = 1').run();
-
-    return db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
-}
-
-// Operation volontairement lourde (rejoue tout un cycle de calendrier complet,
-// ~5 minutes mesure en test) : bien trop long pour une requete HTTP synchrone
-// classique (risque de timeout du proxy Railway avant la fin, alors meme que le
-// traitement continuerait correctement cote serveur). La route repond donc
-// IMMEDIATEMENT et lance le travail apres coup (setImmediate) ; l'avancement se
-// suit via GET /api/admin/reset-total/statut (poll cote admin.html). Etat en
-// memoire seulement (pas en base) : un redemarrage du serveur pendant l'operation
-// perdrait juste le suivi de progression, jamais la coherence de la base
-// elle-meme (chaque etape de executerResetTotal est deja ecrite/commitee au fur
-// et a mesure par better-sqlite3, synchrone par nature).
-let resetTotalStatut = null;
-
-app.post('/api/admin/reset-total', (req, res) => {
-    try {
-        if (!estAdmin(req.userId)) {
-            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
-        }
-        if (req.body.confirmation !== 'RESET') {
-            return res.status(400).json({ error: 'Confirmation manquante ou incorrecte.' });
-        }
-        if (resetTotalStatut && resetTotalStatut.etat === 'en_cours') {
-            return res.status(409).json({ error: 'Une reinitialisation est deja en cours.' });
-        }
-
-        resetTotalStatut = { etat: 'en_cours', demarreA: new Date().toISOString() };
-        res.json({ success: true, demarre: true });
-
-        setImmediate(function () {
-            try {
-                const semaineFinale = executerResetTotal();
-                resetTotalStatut = { etat: 'termine', semaineFinale, termineA: new Date().toISOString() };
-                console.log('Reset total termine, semaineFinale=' + semaineFinale);
-            } catch (err) {
-                console.error('Erreur pendant le reset total (execution differee) :', err);
-                resetTotalStatut = { etat: 'erreur', erreur: err.message };
-            }
-        });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
-app.get('/api/admin/reset-total/statut', (req, res) => {
-    if (!estAdmin(req.userId)) {
-        return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
-    }
-    res.json({ success: true, statut: resetTotalStatut });
 });
 
 // Route temporaire (2026-08-20) : restaure manuellement le coaching mental perdu
