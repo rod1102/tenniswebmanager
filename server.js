@@ -116,8 +116,7 @@ function estRoutePublique(req) {
     if (req.method === 'GET') {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
-            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce',
-            '/api/public/inspecter-coach', '/api/public/supprimer-joueurs-coach'].includes(req.path)) {
+            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -8946,62 +8945,6 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
 
     return { nationVainqueur, domicileGagne };
 }
-
-// Route temporaire (2026-08-28) : inspection en lecture seule d'un coach par
-// pseudo, avant suppression demandee par l'utilisateur - juste pour verifier la
-// cible exacte et l'ampleur des donnees liees (matchs deja joues, tournois) avant
-// d'agir. A retirer juste apres usage.
-app.get('/api/public/inspecter-coach', (req, res) => {
-    try {
-        const pseudo = req.query.pseudo;
-        const user = db.prepare('SELECT id, email, pseudo, role FROM users WHERE LOWER(pseudo) = LOWER(?)').get(pseudo);
-        if (!user) return res.json({ success: true, trouve: false });
-
-        const joueurs = db.prepare('SELECT id, type, prenom, nom, statut FROM players WHERE user_id = ?').all(user.id);
-        const idsJoueurs = joueurs.map(function (j) { return j.id; });
-        let matchs = 0, tournoiJoueurs = 0, tournoiFavoris = 0, coupeCompo = 0;
-        if (idsJoueurs.length > 0) {
-            const placeholders = idsJoueurs.map(function () { return '?'; }).join(',');
-            matchs = db.prepare(`SELECT COUNT(*) n FROM matchs WHERE player_id IN (${placeholders})`).get(...idsJoueurs).n;
-            tournoiJoueurs = db.prepare(`SELECT COUNT(*) n FROM tournoi_joueurs WHERE est_reel = 1 AND player_id IN (${placeholders})`).get(...idsJoueurs).n;
-            tournoiFavoris = db.prepare(`SELECT COUNT(*) n FROM tournoi_favoris WHERE player_id IN (${placeholders})`).get(...idsJoueurs).n;
-        }
-
-        res.json({ success: true, trouve: true, user, joueurs, matchs, tournoiJoueurs, tournoiFavoris });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
-// Route temporaire (2026-08-28) : supprime uniquement les PERSONNAGES d'un coach
-// (le compte lui-meme, email/mot de passe/pseudo, reste intact) - demande
-// explicite de l'utilisateur ("Supprime les joueurs de Rocky Corleone"), verifiee
-// au prealable via /api/public/inspecter-coach (0 match, 0 tournoi pour ce
-// compte). A retirer juste apres usage.
-app.get('/api/public/supprimer-joueurs-coach', (req, res) => {
-    try {
-        const pseudo = req.query.pseudo;
-        const user = db.prepare('SELECT id, pseudo FROM users WHERE LOWER(pseudo) = LOWER(?)').get(pseudo);
-        if (!user) return res.json({ success: true, trouve: false });
-
-        const ids = db.prepare('SELECT id FROM players WHERE user_id = ?').all(user.id).map(function (r) { return r.id; });
-        if (ids.length === 0) return res.json({ success: true, trouve: true, supprimes: 0 });
-
-        const placeholders = ids.map(function () { return '?'; }).join(',');
-        db.exec('PRAGMA foreign_keys = OFF');
-        ['matchs', 'plannings', 'planning_historique', 'journal_semaine_joueur', 'tournoi_favoris']
-            .forEach(function (table) { db.prepare(`DELETE FROM ${table} WHERE player_id IN (${placeholders})`).run(...ids); });
-        db.prepare(`DELETE FROM tournoi_joueurs WHERE est_reel = 1 AND player_id IN (${placeholders})`).run(...ids);
-        db.prepare(`DELETE FROM players WHERE id IN (${placeholders})`).run(...ids);
-        db.exec('PRAGMA foreign_keys = ON');
-
-        res.json({ success: true, trouve: true, supprimes: ids.length, idsSupprimes: ids });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
 
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
