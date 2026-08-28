@@ -13,6 +13,17 @@
         <div class="auth-card creation-card">
             <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
 
+            <div class="nav-menu" style="width:fit-content; margin:0 auto 16px;">
+                <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                <div class="nav-menu-dropdown" id="nav-dropdown">
+                    <a href="tournois.html">Tournois</a>
+                    <a href="classements.html">Classements</a>
+                    <a href="annuaire.html">Annuaire</a>
+                    <a href="regles.html">Règles</a>
+                    <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                </div>
+            </div>
+
             <div style="text-align:center; margin-bottom:16px;">
                 <a href="admin.html" id="admin-link" class="cta cta-secondary" style="display:none; padding:8px 16px; font-size:0.75rem;">Administration (valider les autres joueurs d'abord)</a>
             </div>
@@ -612,11 +623,11 @@
 
     <script>
         // Lien Administration, visible uniquement pour un compte admin (demande
-        // explicite de l'utilisateur, 2026-08-28) : cette page n'a pas de menu de
-        // navigation comme le reste du site (inscription.html/connexion.html non
-        // plus), donc aucun autre moyen d'atteindre admin.html avant de creer ses
-        // propres personnages - utile pour valider d'autres joueurs en attente
-        // d'abord.
+        // explicite de l'utilisateur, 2026-08-28) : cette page n'a pas le menu de
+        // navigation complet du reste du site (inscription.html/connexion.html non
+        // plus, juste un mini-menu Tournois/Classements/Annuaire/Regles/Discord
+        // ajoute juste apres, cf. plus bas) - utile pour valider d'autres joueurs
+        // en attente avant de creer ses propres personnages.
         (async function verifierAdmin() {
             const userId = localStorage.getItem('currentUserId');
             if (!userId) return;
@@ -815,6 +826,16 @@
 
             alert('Bravo ! Tes deux personnages sont créés et en attente de validation par l\'administrateur.');
             window.location.href = 'accueil.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
         });
     </script>
 </body>
