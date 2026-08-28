@@ -116,7 +116,8 @@ function estRoutePublique(req) {
     if (req.method === 'GET') {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
-            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce'].includes(req.path)) {
+            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce',
+            '/api/public/rechercher-joueur'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -8995,6 +8996,32 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
 
     return { nationVainqueur, domicileGagne };
 }
+
+// Route temporaire (2026-08-28) : recherche en lecture seule d'un joueur par nom
+// de famille (ou d'un coach par pseudo), avant suppression demandee par
+// l'utilisateur ("Supprime les deux joueurs de Szynal"). A retirer juste apres usage.
+app.get('/api/public/rechercher-joueur', (req, res) => {
+    try {
+        const terme = req.query.q;
+        const joueurs = db.prepare(`
+            SELECT p.id, p.type, p.prenom, p.nom, p.statut, p.user_id, u.pseudo
+            FROM players p JOIN users u ON u.id = p.user_id
+            WHERE LOWER(p.nom) LIKE LOWER(?) OR LOWER(u.pseudo) LIKE LOWER(?)
+        `).all('%' + terme + '%', '%' + terme + '%');
+
+        const idsJoueurs = joueurs.map(function (j) { return j.id; });
+        let matchs = {}, tournoiJoueurs = {};
+        idsJoueurs.forEach(function (id) {
+            matchs[id] = db.prepare('SELECT COUNT(*) n FROM matchs WHERE player_id = ?').get(id).n;
+            tournoiJoueurs[id] = db.prepare('SELECT COUNT(*) n FROM tournoi_joueurs WHERE est_reel = 1 AND player_id = ?').get(id).n;
+        });
+
+        res.json({ success: true, joueurs, matchs, tournoiJoueurs });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
 
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
