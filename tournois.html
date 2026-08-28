@@ -271,6 +271,65 @@
             chargerJoueurCourant();
         }
 
+        // Variante en lecture seule de chargerCalendrierJoueur ci-dessous, utilisee
+        // quand aucun personnage n'existe encore sur ce circuit - meme presentation,
+        // mais aucun bouton d'action (inscription/desinscription/favori) puisque rien
+        // de tout ca n'a de sens sans joueur reel, et le nom du tournoi n'est pas
+        // cliquable (tournoi-detail.html a besoin d'un playerId valide).
+        async function chargerCalendrierPublic(circuit, container) {
+            const response = await fetch('/api/tournois/calendrier-circuit/' + circuit);
+            const data = await response.json();
+
+            if (!response.ok) {
+                container.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger le calendrier.') + '</div>';
+                return;
+            }
+            if (data.tournois.length === 0) {
+                container.innerHTML = '<div class="match-hint">Aucun tournoi éligible cette année.</div>';
+                return;
+            }
+
+            const parSemaine = {};
+            data.tournois.forEach(function (t) {
+                if (!parSemaine[t.semaine]) parSemaine[t.semaine] = [];
+                parSemaine[t.semaine].push(t);
+            });
+
+            Object.keys(parSemaine).sort(function (a, b) { return a - b; }).forEach(function (semaine) {
+                const enTete = document.createElement('div');
+                enTete.className = 'tournoi-semaine-header';
+                enTete.textContent = 'Semaine ' + parSemaine[semaine][0].positionSemaine;
+                container.appendChild(enTete);
+
+                const grille = document.createElement('div');
+                grille.className = 'tournoi-grid';
+
+                parSemaine[semaine].forEach(function (t) {
+                    const carte = document.createElement('div');
+
+                    if (t.estCoupe) {
+                        carte.className = 'tournoi-card';
+                        carte.innerHTML = `
+                            <a class="tournoi-card-name" href="coupe-tableau.html?circuit=${t.circuit}">${t.nom}</a>
+                            <div class="tournoi-card-meta">${t.manche}</div>
+                        `;
+                        grille.appendChild(carte);
+                        return;
+                    }
+
+                    carte.className = 'tournoi-card tournoi-card-' + classeSurface(t);
+                    const nomClasse = t.circuit === 'ATP' ? 'tournoi-name-atp' : 'tournoi-name-wta';
+                    carte.innerHTML = `
+                        <span class="tournoi-card-name ${nomClasse}">${t.nom}</span>
+                        <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Tableau de ${t.taille_tableau}</div>
+                    `;
+                    grille.appendChild(carte);
+                });
+
+                container.appendChild(grille);
+            });
+        }
+
         async function chargerCalendrierJoueur(player, container) {
             const response = await fetch('/api/tournois/calendrier/' + player.id + '?userId=' + userId);
             const data = await response.json();
@@ -397,9 +456,16 @@
             const container = document.getElementById('calendrier-container');
 
             if (!player) {
+                // Pas encore de personnage sur ce circuit : impossible de s'inscrire, mais
+                // le calendrier complet de l'annee reste consultable (demande explicite de
+                // l'utilisateur, 2026-08-28 - avant, la page entiere restait bloquee tant
+                // que le personnage n'existait pas).
                 semaineListe.innerHTML = '';
                 passesListe.innerHTML = '';
-                container.innerHTML = '<div class="match-hint">Pas encore de personnage sur ce circuit — <a href="creation-joueurs.html">créer mes personnages</a>.</div>';
+                container.innerHTML = '<div class="match-hint" style="margin-bottom:12px;">Pas encore de personnage sur ce circuit — <a href="creation-joueurs.html">créer mes personnages</a> pour t\'inscrire. En attendant, voici tout le calendrier de la saison :</div>';
+                const calendrierDiv = document.createElement('div');
+                container.appendChild(calendrierDiv);
+                await chargerCalendrierPublic(circuitAffiche, calendrierDiv);
                 return;
             }
             if (player.statut !== 'valide') {

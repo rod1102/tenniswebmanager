@@ -4408,6 +4408,56 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
     }
 });
 
+// Variante du calendrier ci-dessus, sans aucun joueur (avant meme la creation des
+// personnages) - demande explicite de l'utilisateur, 2026-08-28 : pouvoir
+// consulter tout le calendrier de l'annee, sans pouvoir s'inscrire (pas de champs
+// inscrit/favori/estObligatoire, qui n'ont pas de sens sans joueur reel). Circuit
+// passe en parametre plutot que deduit de player.type.
+app.get('/api/tournois/calendrier-circuit/:circuit', (req, res) => {
+    try {
+        const circuit = req.params.circuit === 'WTA' ? 'WTA' : 'ATP';
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const debut = etat.semaine_actuelle + 1;
+        const finOuvert = debut + 4;
+        const cycleLongueur = LONGUEUR_SAISON;
+        const positionDebut = ((debut - 1) % cycleLongueur) + 1;
+        const finAnnee = debut + (cycleLongueur - positionDebut);
+
+        const eligibles = [];
+        const nomCoupe = circuit === 'ATP' ? 'Coupe Davis' : 'Fed Cup';
+        for (let semaine = debut; semaine <= finAnnee; semaine++) {
+            const phase = phaseDeSemaine(semaine);
+            if (phase.type !== 'tournoi') continue;
+            CALENDRIER_TOURNOIS
+                .filter(function (t) { return t.circuit === circuit && t.semaine_debut === phase.positionSemaine && !tournoiDejaCreeCetteSaison(t.id, semaine); })
+                .forEach(function (t) { eligibles.push(Object.assign({}, t, { semaine, positionSemaine: t.semaine_debut, ouvert: semaine <= finOuvert })); });
+            SEMAINES_COUPES_EQUIPE
+                .filter(function (sc) { return sc.semaine === phase.positionSemaine; })
+                .forEach(function (sc) {
+                    eligibles.push({
+                        id: 'coupe-' + circuit + '-' + sc.manche, estCoupe: true, circuit: circuit,
+                        nom: nomCoupe, manche: sc.manche, semaine: semaine, positionSemaine: sc.semaine
+                    });
+                });
+        }
+
+        const tournoisExistants = db.prepare('SELECT id, calendrier_id, semaine, statut FROM tournois WHERE semaine BETWEEN ? AND ?').all(debut, finAnnee);
+        const tournoiMap = new Map(tournoisExistants.map(function (t) { return [t.calendrier_id + '-' + t.semaine, t]; }));
+
+        eligibles.forEach(function (t) {
+            const tournoi = tournoiMap.get(t.id + '-' + t.semaine);
+            t.tournoiId = tournoi ? tournoi.id : null;
+            t.inscriptionFermee = !!tournoi && tournoi.statut !== 'inscriptions';
+        });
+
+        res.json({ success: true, semaineActuelle: etat.semaine_actuelle, debut, finOuvert, tournois: eligibles });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/tournois/mes/:userId', (req, res) => {
     try {
         const userId = req.userId;

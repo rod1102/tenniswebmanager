@@ -38,7 +38,6 @@
             <div style="text-align:center;">
                 <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
             </div>
-            <div id="prochain-auto-badge" style="text-align:center; margin-bottom:16px; color:#8B98A5; font-size:0.75rem;"></div>
 
             <div id="annonce-container"></div>
 
@@ -178,9 +177,6 @@
             const data = await response.json();
             if (response.ok) {
                 document.getElementById('semaine-badge').textContent = 'Semaine actuelle : ' + libellePhase(data.phase);
-                const prochain = new Date(data.prochainAvancementAuto);
-                document.getElementById('prochain-auto-badge').textContent =
-                    'Prochain avancement automatique : ' + prochain.toLocaleString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' });
             }
         }
 
