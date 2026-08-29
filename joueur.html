@@ -290,10 +290,11 @@
             if (player.points_dispositions_a_gagner > 0) {
                 let inputsDispoHtml = '';
                 Object.keys(DISPOSITIONS_LABELS).forEach(function (cle) {
+                    const margeDispo = Math.max(0, 10 - player['disposition_' + cle]);
                     inputsDispoHtml += `
                         <div class="form-group">
-                            <label>${DISPOSITIONS_LABELS[cle]} ${iconeInfo(DISPOSITIONS_TOOLTIPS[cle])} (actuel : ${player['disposition_' + cle]})</label>
-                            <input type="number" min="0" value="0" class="dispo-gain-input" data-cle="${cle}">
+                            <label>${DISPOSITIONS_LABELS[cle]} ${iconeInfo(DISPOSITIONS_TOOLTIPS[cle])} (actuel : ${player['disposition_' + cle]} / 10)</label>
+                            <input type="number" min="0" max="${margeDispo}" value="0" class="dispo-gain-input" data-cle="${cle}">
                         </div>
                     `;
                 });
@@ -455,10 +456,16 @@
 
                     const repartition = {};
                     let total = 0;
+                    let sommeApres = 0;
+                    let depassementCategorie = false;
                     inputs.forEach(function (input) {
+                        const cle = input.getAttribute('data-cle');
                         const val = Number(input.value) || 0;
-                        repartition[input.getAttribute('data-cle')] = val;
+                        repartition[cle] = val;
                         total += val;
+                        const apres = (player['disposition_' + cle] || 0) + val;
+                        sommeApres += apres;
+                        if (apres > 10) depassementCategorie = true;
                     });
 
                     if (total > pool) {
@@ -467,6 +474,14 @@
                     }
                     if (total === 0) {
                         alert('Indique au moins un point à répartir.');
+                        return;
+                    }
+                    if (depassementCategorie) {
+                        alert('Chaque disposition est plafonnée à 10 points.');
+                        return;
+                    }
+                    if (sommeApres > 30) {
+                        alert('Le total des 7 dispositions est plafonné à 30 points (tu arriverais à ' + sommeApres + ').');
                         return;
                     }
 
@@ -493,6 +508,10 @@
 
                     if (depuis === vers) {
                         alert('Choisis deux catégories différentes.');
+                        return;
+                    }
+                    if ((player['disposition_' + vers] || 0) + 1 > 10) {
+                        alert('Chaque disposition est plafonnée à 10 points.');
                         return;
                     }
 

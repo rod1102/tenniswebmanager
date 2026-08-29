@@ -166,7 +166,9 @@ const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee',
 const DISPOSITIONS = ['adversite', 'coupeur_de_tetes', 'dernier_carre', 'premiers_tours', 'sang_froid', 'indoor', 'rivalite'];
 const STYLES_JEU = ['sprinter', 'prudence', 'en_avant', 'marathonien', 'mental_acier', 'reperage', 'aucun'];
 const BUDGET_DISPOSITIONS = 12;
-const MAX_PAR_DISPOSITION = 5;
+const MAX_PAR_DISPOSITION = 5;             // plafond a la CREATION uniquement
+const MAX_PAR_DISPOSITION_ABSOLU = 10;     // plafond dur, jamais depassable (gains d'intersaison / Coaching mental inclus)
+const MAX_TOTAL_DISPOSITIONS = 30;         // plafond dur sur la somme des 7 dispositions
 const SURFACES = ['dur', 'terre', 'herbe'];
 const ACTIONS_VALIDES = ['repos', 'generique', 'surface_dur', 'surface_terre', 'surface_herbe', 'coaching_mental'];
 
@@ -661,8 +663,11 @@ app.get('/api/admin/en-attente', (req, res) => {
 
 // Repartition des points de disposition gagnes (intersaison ou Coaching mental) :
 // meme principe que /api/repartir-xp (pool consommable partiellement, le reste
-// attend), mais SANS plafond de 5/categorie - celui-ci ne s'applique qu'a la
-// creation du personnage (dispositionsValides).
+// attend). Le plafond de 5/categorie ne s'applique qu'a la creation
+// (dispositionsValides), mais deux plafonds DURS s'appliquent ici : 10 points max
+// par disposition (MAX_PAR_DISPOSITION_ABSOLU) et 30 points max sur la somme des 7
+// (MAX_TOTAL_DISPOSITIONS). Des points de reserve non placables faute de marge
+// sont perdus a la prochaine avancee de semaine, comme les points d'XP non utilises.
 app.post('/api/repartir-dispositions-gain', (req, res) => {
     try {
         const { playerId, repartition } = req.body;
@@ -673,15 +678,24 @@ app.post('/api/repartir-dispositions-gain', (req, res) => {
         }
 
         let total = 0;
+        let sommeApres = 0;
         for (const cle of DISPOSITIONS) {
             const valeur = Number((repartition && repartition[cle]) || 0);
             if (!Number.isFinite(valeur) || valeur < 0) {
                 return res.status(400).json({ error: 'Valeurs invalides.' });
             }
+            const apres = player['disposition_' + cle] + valeur;
+            if (apres > MAX_PAR_DISPOSITION_ABSOLU) {
+                return res.status(400).json({ error: 'Chaque disposition est plafonnee a ' + MAX_PAR_DISPOSITION_ABSOLU + ' points (' + cle + ' arriverait a ' + apres + ').' });
+            }
+            sommeApres += apres;
             total += valeur;
         }
         if (total > player.points_dispositions_a_gagner) {
             return res.status(400).json({ error: 'Pas assez de points de disposition disponibles.' });
+        }
+        if (sommeApres > MAX_TOTAL_DISPOSITIONS) {
+            return res.status(400).json({ error: 'Le total des 7 dispositions est plafonne a ' + MAX_TOTAL_DISPOSITIONS + ' points (tu arriverais a ' + sommeApres + ').' });
         }
 
         const maj = db.prepare(`
@@ -839,6 +853,9 @@ app.post('/api/deplacer-disposition', (req, res) => {
         }
         if (player['disposition_' + depuis] <= 0) {
             return res.status(400).json({ error: 'Cette categorie est deja a 0.' });
+        }
+        if (player['disposition_' + vers] + 1 > MAX_PAR_DISPOSITION_ABSOLU) {
+            return res.status(400).json({ error: 'Chaque disposition est plafonnee a ' + MAX_PAR_DISPOSITION_ABSOLU + ' points, impossible d ajouter un point en ' + vers + '.' });
         }
 
         db.prepare(`
