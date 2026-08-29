@@ -279,14 +279,6 @@ app.post('/api/inscription', (req, res) => {
         }
 
         const ip = ipReelle(req);
-        // Diagnostic temporaire (bug "Limite IP atteinte" a tort, 2026-08-29) :
-        // a retirer une fois la cause confirmee cote logs Railway.
-        console.log('[inscription] ip retenue =', ip,
-            '| x-envoy-external-address =', req.headers['x-envoy-external-address'] || '-',
-            '| x-real-ip =', req.headers['x-real-ip'] || '-',
-            '| cf-connecting-ip =', req.headers['cf-connecting-ip'] || '-',
-            '| x-forwarded-for =', req.headers['x-forwarded-for'] || '-',
-            '| req.ip =', req.ip);
         const nbComptesIp = db.prepare('SELECT COUNT(*) AS n FROM users WHERE ip_inscription = ?').get(ip).n;
         if (nbComptesIp >= LIMITE_COMPTES_PAR_IP) {
             return res.status(409).json({ error: 'Limite IP atteinte : un compte a deja ete cree depuis cette connexion (un seul compte par personne).' });
