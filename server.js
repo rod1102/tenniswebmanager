@@ -234,16 +234,28 @@ function conditionSestDegradee(avant, apres) {
 // compte" habituel puisque ca s'applique aussi en dev/local).
 const LIMITE_COMPTES_PAR_IP = 1;
 
-// Railway ajoute son propre maillon devant l'appli (X-Forwarded-For contient au
-// moins 2 adresses : le vrai visiteur, puis un hop interne Railway) - avec "trust
-// proxy: 1", Express renvoyait ce hop interne (identique pour tout le monde) au
-// lieu du vrai visiteur, bloquant TOUTES les inscriptions des le 2e compte jamais
-// cree (bug trouve le 2026-08-17). On lit directement le premier maillon de
-// l'en-tete plutot que de compter les hops avec trust proxy - repli sur req.ip si
-// l'en-tete est absent (dev local, pas de proxy).
+// Determination de la vraie IP du visiteur derriere le proxy de Railway.
+//
+// Historique : "trust proxy: 1" + req.ip renvoyait un hop interne Railway,
+// identique pour tout le monde, bloquant toutes les inscriptions des le 2e compte
+// (bug 2026-08-17). Le repli "premier maillon de X-Forwarded-For" a corrige ce
+// cas-la mais reste fragile : l'ordre des maillons de X-Forwarded-For n'est pas
+// garanti cote Railway (parfois une IP d'infra se retrouve en tete), ce qui
+// provoquait des "Limite IP atteinte" a tort, une fois sur deux (bug 2026-08-29).
+//
+// On prefere donc l'en-tete a VALEUR UNIQUE que le proxy Envoy de Railway pose
+// lui-meme (x-envoy-external-address = adresse du client direct), puis
+// cf-connecting-ip si un jour le trafic repasse par Cloudflare, et enfin
+// seulement le 1er maillon de X-Forwarded-For, puis req.ip (dev local).
 function ipReelle(req) {
-    const xff = req.headers['x-forwarded-for'];
-    return xff ? xff.split(',')[0].trim() : req.ip;
+    const candidat = req.headers['x-envoy-external-address']
+        || req.headers['cf-connecting-ip']
+        || (req.headers['x-forwarded-for'] || '').split(',')[0]
+        || req.ip
+        || '';
+    // Normalise "::ffff:1.2.3.4" (IPv4 encapsule en IPv6) -> "1.2.3.4" pour que le
+    // meme visiteur ne compte pas comme 2 IP differentes selon la connexion.
+    return candidat.trim().replace(/^::ffff:/i, '');
 }
 
 app.post('/api/inscription', (req, res) => {
@@ -267,6 +279,14 @@ app.post('/api/inscription', (req, res) => {
         }
 
         const ip = ipReelle(req);
+        // Diagnostic temporaire (bug "Limite IP atteinte" a tort, 2026-08-29) :
+        // a retirer une fois la cause confirmee cote logs Railway.
+        console.log('[inscription] ip retenue =', ip,
+            '| x-envoy-external-address =', req.headers['x-envoy-external-address'] || '-',
+            '| x-real-ip =', req.headers['x-real-ip'] || '-',
+            '| cf-connecting-ip =', req.headers['cf-connecting-ip'] || '-',
+            '| x-forwarded-for =', req.headers['x-forwarded-for'] || '-',
+            '| req.ip =', req.ip);
         const nbComptesIp = db.prepare('SELECT COUNT(*) AS n FROM users WHERE ip_inscription = ?').get(ip).n;
         if (nbComptesIp >= LIMITE_COMPTES_PAR_IP) {
             return res.status(409).json({ error: 'Limite IP atteinte : un compte a deja ete cree depuis cette connexion (un seul compte par personne).' });
