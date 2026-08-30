@@ -191,7 +191,7 @@
             return `
                 <tr>
                     <td class="rang">${rang}</td>
-                    <td>${flagImg(n.drapeau)} ${n.nation}</td>
+                    <td>${flagImg(n.drapeau)} <a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(n.nation)}">${n.nation}</a></td>
                     <td class="pts">${n.points}</td>
                 </tr>
             `;

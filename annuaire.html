@@ -97,7 +97,7 @@
             liste.forEach(function (j) {
                 if (j.nationalite !== nationCourante) {
                     nationCourante = j.nationalite;
-                    html += `<tr class="classement-separateur"><td colspan="2">${flagImg(j.drapeau)} ${j.nationalite}</td></tr>`;
+                    html += `<tr class="classement-separateur"><td colspan="2">${flagImg(j.drapeau)} <a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(j.nationalite)}">${j.nationalite}</a></td></tr>`;
                 }
                 html += `
                     <tr>

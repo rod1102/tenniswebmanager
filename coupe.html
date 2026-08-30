@@ -279,7 +279,7 @@
 
             const divisionTxt = data.nbDivisions > 1 ? ` · Division ${tie.division}` : '';
             let html = `
-                <div class="stats-header">${tie.nation_domicile} vs ${tie.nation_exterieur}</div>
+                <div class="stats-header"><a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(tie.nation_domicile)}">${tie.nation_domicile}</a> vs <a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(tie.nation_exterieur)}">${tie.nation_exterieur}</a></div>
                 <p class="match-hint" style="text-align:left; padding:0;">${tie.manche || ''}${divisionTxt} · Semaine ${tie.positionSemaine} · Surface : ${tie.surface ? LABELS_SURFACE[tie.surface] : 'pas encore choisie'}</p>
             `;
 

@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fiche Pays — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20260829">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="capitanat.html">Capitanat</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title" id="page-titre">Fiche Pays</h1>
+
+            <div class="tabs-nav" id="tabs-nav">
+                <button class="tab-btn active" data-circuit="atp">ATP</button>
+                <button class="tab-btn" data-circuit="wta">WTA</button>
+            </div>
+
+            <div class="tab-panel" id="contenu"></div>
+        </div>
+    </div>
+
+    <script>
+        const userId = localStorage.getItem('currentUserId');
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        const nation = params.get('nation');
+        if (!nation) {
+            window.location.href = 'classements.html';
+        }
+
+        let paysData = null;
+        let circuitCourant = 'atp';
+
+        const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        function formaterNomComplet(nomComplet) {
+            if (!nomComplet) return nomComplet || '';
+            const i = nomComplet.lastIndexOf(' ');
+            if (i === -1) return nomComplet;
+            const prenom = nomComplet.slice(0, i).toLowerCase().replace(/(^|[\s'-])\p{L}/gu, function (c) { return c.toUpperCase(); });
+            return prenom + ' ' + nomComplet.slice(i + 1).toUpperCase();
+        }
+
+        function labelCategorie(circuit, categorie) {
+            if (categorie === 'slam') return 'Grand Chelem';
+            if (categorie === 'finals') return circuit === 'ATP' ? 'ATP Finals' : 'WTA Finals';
+            if (categorie === '1000') return 'Masters 1000';
+            return circuit + ' ' + categorie;
+        }
+
+        function lienJoueur(j) {
+            const nom = formaterNomComplet(j.nom);
+            if (j.estReel) return `<a class="lien-adversaire" href="adversaire.html?type=reel&id=${j.playerId}">${nom}</a>`;
+            return `<a class="lien-adversaire classement-bot" href="adversaire.html?type=rival&id=${j.rivalId}">${nom}</a>`;
+        }
+
+        function sectionClassementNation(bloc) {
+            const c = bloc.classementNation;
+            if (!c) return '<div class="match-hint">Nation non classée sur ce circuit.</div>';
+            return `<p class="regle-texte" style="margin:0;"><strong>${c.rang}<sup>e</sup></strong> nation — ${c.points} points (cumul des 4 meilleurs joueurs au classement Live).</p>`;
+        }
+
+        function sectionJoueurs(bloc) {
+            if (!bloc.joueurs.length) return '<div class="match-hint">Aucun joueur rattaché à cette nation sur ce circuit.</div>';
+            let rows = bloc.joueurs.map(function (j) {
+                const coach = j.coachNom
+                    ? `<a class="lien-adversaire" href="coach.html?id=${j.coachUserId}">${j.coachNom}</a>`
+                    : '<span class="match-hint">Bot</span>';
+                return `
+                    <tr>
+                        <td>${lienJoueur(j)}</td>
+                        <td class="rang">${j.rangLive || '—'}</td>
+                        <td class="rang">${j.rangRace || '—'}</td>
+                        <td>${coach}</td>
+                    </tr>
+                `;
+            }).join('');
+            return `
+                <table class="classement-table">
+                    <thead><tr><th>Joueur</th><th>Live</th><th>Race</th><th>Coach</th></tr></thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+        }
+
+        function sectionPalmaresCoupe(bloc) {
+            if (!bloc.palmaresCoupe.length) return '<div class="match-hint">Aucune finale de ' + bloc.nomCoupe + ' disputée.</div>';
+            return `
+                <table class="classement-table">
+                    <thead><tr><th>Saison</th><th>Résultat</th></tr></thead>
+                    <tbody>${bloc.palmaresCoupe.map(function (p) {
+                        return `<tr><td>Saison ${p.saison}</td><td>${p.resultat === 'Vainqueur' ? '🏆 Vainqueur' : 'Finaliste'}</td></tr>`;
+                    }).join('')}</tbody>
+                </table>
+            `;
+        }
+
+        function sectionHistoriqueCoupe(bloc) {
+            if (!bloc.historiqueCoupe.length) return '<div class="match-hint">Aucune rencontre de ' + bloc.nomCoupe + ' jouée.</div>';
+            const parSaison = {};
+            bloc.historiqueCoupe.forEach(function (h) {
+                (parSaison[h.saison] = parSaison[h.saison] || []).push(h);
+            });
+            return Object.keys(parSaison).sort(function (a, b) { return b - a; }).map(function (saison) {
+                const rencontres = parSaison[saison].map(function (h) {
+                    const issue = h.gagne
+                        ? '<span style="color:#4CAF50; font-weight:700;">V</span>'
+                        : '<span style="color:#E24B4A; font-weight:700;">D</span>';
+                    const lieu = h.domicile ? 'à domicile' : 'à l\'extérieur';
+                    return `
+                        <tr>
+                            <td>${h.mancheLabel}</td>
+                            <td>${issue}</td>
+                            <td><a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(h.adversaire)}">${flagImg(h.adversaireDrapeau)} ${h.adversaire}</a></td>
+                            <td class="rang">${h.scoreNation} – ${h.scoreAdversaire}</td>
+                            <td class="match-hint">${lieu}</td>
+                            <td><a class="lien-adversaire" href="coupe.html?tieId=${h.tieId}">détail</a></td>
+                        </tr>
+                    `;
+                }).join('');
+                return `
+                    <div class="stats-header" style="font-size:0.95rem; margin-top:18px;">${bloc.nomCoupe} — Saison ${saison}</div>
+                    <table class="classement-table"><tbody>${rencontres}</tbody></table>
+                `;
+            }).join('');
+        }
+
+        function sectionPalmaresTournois(bloc) {
+            if (!bloc.palmaresTournois.length) return '<div class="match-hint">Aucun titre en simple pour un joueur de cette nation.</div>';
+            const parSaison = {};
+            bloc.palmaresTournois.forEach(function (t) {
+                (parSaison[t.saison] = parSaison[t.saison] || []).push(t);
+            });
+            return Object.keys(parSaison).sort(function (a, b) { return b - a; }).map(function (saison) {
+                const lignes = parSaison[saison].map(function (t) {
+                    return `
+                        <tr>
+                            <td>${t.nomTournoi}</td>
+                            <td class="match-hint">${labelCategorie(bloc.circuitLabel, t.categorie)} · ${LABELS_SURFACE[t.surface] || t.surface}</td>
+                            <td>${formaterNomComplet(t.vainqueur)}</td>
+                            <td class="rang">S${t.positionSemaine || '?'}</td>
+                        </tr>
+                    `;
+                }).join('');
+                return `
+                    <div class="stats-header" style="font-size:0.95rem; margin-top:18px;">Saison ${saison}</div>
+                    <table class="classement-table"><tbody>${lignes}</tbody></table>
+                `;
+            }).join('');
+        }
+
+        function afficher() {
+            const bloc = Object.assign({}, paysData[circuitCourant], {
+                circuitLabel: circuitCourant.toUpperCase()
+            });
+            document.getElementById('contenu').innerHTML = `
+                <div class="stats-header">Classement de la nation</div>
+                ${sectionClassementNation(bloc)}
+
+                <div class="stats-header" style="margin-top:28px;">Joueurs de la nation</div>
+                ${sectionJoueurs(bloc)}
+
+                <div class="stats-header" style="margin-top:28px;">Palmarès ${bloc.nomCoupe}</div>
+                ${sectionPalmaresCoupe(bloc)}
+
+                <div class="stats-header" style="margin-top:28px;">Historique des rencontres ${bloc.nomCoupe}</div>
+                ${sectionHistoriqueCoupe(bloc)}
+
+                <div class="stats-header" style="margin-top:28px;">Palmarès en simple</div>
+                ${sectionPalmaresTournois(bloc)}
+            `;
+        }
+
+        async function charger() {
+            const response = await fetch('/api/pays/' + encodeURIComponent(nation));
+            const data = await response.json();
+            if (!response.ok) {
+                document.getElementById('contenu').innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger la fiche pays.') + '</div>';
+                return;
+            }
+            paysData = data;
+            document.getElementById('page-titre').innerHTML = flagImg(data.drapeau) + ' ' + data.nom;
+            document.title = data.nom + ' — Tennis Web Manager';
+            afficher();
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        document.querySelectorAll('.tab-btn').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                bouton.classList.add('active');
+                circuitCourant = bouton.dataset.circuit;
+                afficher();
+            });
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
+            localStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin();
+        charger();
+    </script>
+    <script src="retour.js?v=20260829"></script>
+</body>
+</html>

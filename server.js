@@ -5706,6 +5706,111 @@ app.get('/api/classement/nations/:circuit', (req, res) => {
     }
 });
 
+// Fiche Pays (pays.html) : pour UNE nation, agrege par circuit (ATP + WTA) son
+// classement nation, ses joueurs (rang Live + Race), le palmares et l'historique
+// complet des rencontres Coupe Davis / Fed Cup, et son palmares en simple (titres
+// remportes par des joueurs de la nation). Nation identifiee par son libelle
+// normalise (normaliserPays) pour fusionner les variantes d'accent entre circuits.
+app.get('/api/pays/:nation', (req, res) => {
+    try {
+        const cibleNorm = normaliserPays(req.params.nation || '');
+        if (!cibleNorm) return res.status(400).json({ error: 'Nation manquante.' });
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+
+        // Libelle "propre" : celui d'un vrai joueur ou d'un rival de la nation.
+        let libelle = req.params.nation;
+        const sources = db.prepare("SELECT DISTINCT nationalite AS n FROM players WHERE statut = 'valide' AND nationalite IS NOT NULL")
+            .all()
+            .concat(db.prepare('SELECT DISTINCT nationalite AS n FROM classement_joueurs WHERE nationalite IS NOT NULL').all());
+        const match = sources.find(function (r) { return normaliserPays(r.n) === cibleNorm; });
+        if (match) libelle = match.n;
+
+        function pourCircuit(circuit) {
+            const nomCoupe = circuit === 'ATP' ? 'Coupe Davis' : 'Fed Cup';
+
+            const ligneNation = classementNationsSomme([circuit])
+                .find(function (n) { return normaliserPays(n.nation) === cibleNorm; }) || null;
+
+            const rangsLive = calculerRangsLiveGlobal(circuit);
+            const rangsRace = calculerRangsRaceGlobal(circuit);
+            const joueurs = calculerClassementGlobal(circuit, semaineActuelle - FENETRE_LIVE, semaineActuelle)
+                .filter(function (c) { return normaliserPays(c.nationalite || '') === cibleNorm; })
+                .map(function (c) {
+                    return {
+                        nom: c.nom,
+                        estReel: c.playerId !== null,
+                        playerId: c.playerId,
+                        rivalId: c.rivalId,
+                        coachNom: c.userId ? nomCoach(c.userId) : null,
+                        coachUserId: c.userId || null,
+                        rangLive: rangsLive.get(c.cle) || null,
+                        rangRace: rangsRace.get(c.cle) || null,
+                        points: c.points
+                    };
+                })
+                .sort(function (a, b) { return (a.rangLive || 99999) - (b.rangLive || 99999); });
+
+            // Toutes les rencontres terminees du circuit qui impliquent la nation.
+            const ties = db.prepare("SELECT * FROM coupe_equipes WHERE circuit = ? AND statut = 'termine' ORDER BY saison DESC, semaine ASC")
+                .all(circuit)
+                .filter(function (t) {
+                    return normaliserPays(t.nation_domicile) === cibleNorm || normaliserPays(t.nation_exterieur) === cibleNorm;
+                });
+
+            const historique = ties.map(function (t) {
+                const domicile = normaliserPays(t.nation_domicile) === cibleNorm;
+                const adversaire = domicile ? t.nation_exterieur : t.nation_domicile;
+                const gagne = normaliserPays(t.nation_vainqueur || '') === cibleNorm;
+                return {
+                    tieId: t.id,
+                    saison: t.saison,
+                    manche: t.manche,
+                    mancheLabel: LABELS_MANCHE[t.manche] || t.manche,
+                    positionSemaine: positionSemaineAffichee(t.semaine),
+                    domicile: domicile,
+                    adversaire: adversaire,
+                    adversaireDrapeau: drapeau(adversaire),
+                    scoreNation: domicile ? t.victoires_domicile : t.victoires_exterieur,
+                    scoreAdversaire: domicile ? t.victoires_exterieur : t.victoires_domicile,
+                    gagne: gagne
+                };
+            });
+
+            const palmaresCoupe = historique
+                .filter(function (h) { return h.manche === 'finale'; })
+                .map(function (h) { return { saison: h.saison, resultat: h.gagne ? 'Vainqueur' : 'Finaliste' }; });
+
+            const titres = db.prepare(`
+                SELECT t.nom AS nom_tournoi, t.categorie, t.surface, t.semaine, tj.nom AS vainqueur, tj.nationalite
+                FROM tournoi_joueurs tj
+                JOIN tournois t ON t.id = tj.tournoi_id
+                WHERE tj.tour_elimine = 'Vainqueur' AND t.circuit = ? AND t.statut = 'termine'
+                ORDER BY t.semaine DESC
+            `).all(circuit)
+                .filter(function (r) { return normaliserPays(r.nationalite || '') === cibleNorm; })
+                .map(function (r) {
+                    return {
+                        saison: phaseAffichee(r.semaine).numeroSaison,
+                        positionSemaine: positionSemaineAffichee(r.semaine),
+                        nomTournoi: r.nom_tournoi,
+                        categorie: r.categorie,
+                        surface: r.surface,
+                        vainqueur: r.vainqueur
+                    };
+                });
+
+            return { nomCoupe, classementNation: ligneNation, joueurs, palmaresCoupe, historiqueCoupe: historique, palmaresTournois: titres };
+        }
+
+        res.json({ success: true, nom: libelle, drapeau: drapeau(libelle), atp: pourCircuit('ATP'), wta: pourCircuit('WTA') });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Annuaire : joueurs valides d'un circuit tries par nation puis par classement Live
 // decroissant a l'interieur de la nation (jamais Race, qui retombe a 0 pendant
 // chaque Pre-saison/Semaine 0 - peu adapte a un annuaire consultable en permanence).
