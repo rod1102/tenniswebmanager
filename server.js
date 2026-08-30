@@ -1752,13 +1752,13 @@ function executerAvancementSemaine() {
                 });
             }
 
-            // Regeneration d'energie : +5 (plafonne a 100) a l'entree d'une semaine de
-            // tournoi dont le numero est un multiple de 4 - soit S4, S8, ..., S48, tous
-            // les 4 tours a partir de la S4, RELANCE a chaque saison. Aucun gain a
-            // l'entree en Pre-saison / Semaine 0 (demande explicite de l'utilisateur,
-            // 2026-08-30 : base sur la position DANS la saison, plus sur la semaine
-            // absolue, qui donnait un gain decale et un 13e a la bascule Pre-saison).
-            if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine % 4 === 0) {
+            // Regeneration d'energie : +5 (plafonne a 100) a l'entree de la S5, puis
+            // tous les 4 tours - S5, S9, S13, ..., S49 (12 fois/saison). RELANCE a
+            // chaque saison, aucun gain en Pre-saison / Semaine 0 (demande explicite
+            // de l'utilisateur : 2026-08-30 passe de la semaine absolue a la position
+            // dans la saison ; 2026-08-31 point de depart cale sur la S5).
+            const posNouv = phaseNouvelleSemaine.type === 'tournoi' ? phaseNouvelleSemaine.positionSemaine : 0;
+            if (posNouv >= 5 && (posNouv - 5) % 4 === 0) {
                 pointsEnergie = Math.min(100, pointsEnergie + 5);
             }
 
