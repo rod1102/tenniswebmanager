@@ -398,39 +398,32 @@ h1 {
 }
 
 /* ---------- Themes Grand Chelem (theme-saison.js) ----------
-   Pendant les 2 semaines d'un Grand Chelem, <html data-slam="..."> declenche
-   un voile teinte + une photo de fond dediee SI le fichier existe (fond-ao.jpg,
-   fond-rg.jpg, fond-wimbledon.jpg, fond-us-open.jpg a la racine du projet).
-   Si l'image est absente (404), la couche reste vide et court.jpg reapparait
-   sous le voile teinte : on retombe proprement sur une simple teinte de couleur. */
+   Pendant les 2 semaines d'un Grand Chelem, <html data-slam="..."> change la
+   couleur du voile de fond par-dessus court.jpg (choix de l'utilisateur : teinte
+   seule, pas de photo dediee). */
 :root[data-slam] .court-background,
 :root[data-slam] .auth-page,
 :root[data-slam] .dashboard-page {
     background-image:
         linear-gradient(180deg, var(--slam-voile-haut) 0%, var(--slam-voile-bas) 100%),
-        var(--slam-image, none),
         url('court.jpg');
 }
 
 :root[data-slam="ao"] {
     --slam-voile-haut: rgba(10, 96, 170, 0.5);
     --slam-voile-bas: rgba(5, 44, 96, 0.9);
-    --slam-image: url('fond-ao.jpg');
 }
 :root[data-slam="rg"] {
     --slam-voile-haut: rgba(78, 36, 16, 0.68);
     --slam-voile-bas: rgba(46, 22, 12, 0.93);
-    --slam-image: url('fond-rg.jpg');
 }
 :root[data-slam="wimbledon"] {
     --slam-voile-haut: rgba(14, 46, 22, 0.66);
     --slam-voile-bas: rgba(9, 28, 15, 0.93);
-    --slam-image: url('fond-wimbledon.jpg');
 }
 :root[data-slam="us-open"] {
     --slam-voile-haut: rgba(104, 26, 128, 0.5);
     --slam-voile-bas: rgba(30, 14, 62, 0.92);
-    --slam-image: url('fond-us-open.jpg');
 }
 
 .dashboard-inner {

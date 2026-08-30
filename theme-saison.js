@@ -1,8 +1,8 @@
 /*
  * Theme visuel de fond selon la periode de jeu : pendant les 2 semaines de chaque
- * Grand Chelem, le voile de fond du site prend une couleur dediee (bleu dur, terre
- * orangee, vert gazon, bleu nuit) et, si le fichier image correspondant existe, une
- * photo de fond dediee. Inclure via <script src="theme-saison.js"></script>.
+ * Grand Chelem, le voile de fond du site prend une couleur dediee (bleu court vif,
+ * terre orangee, vert gazon, violet nocturne). Inclure via
+ * <script src="theme-saison.js"></script>.
  *
  * Pose un attribut data-slam sur <html> ; tout le rendu est ensuite gere en CSS
  * (voir "Themes Grand Chelem" dans style.css). /api/semaine est public : marche
