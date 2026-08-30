@@ -316,11 +316,11 @@
                 const lignesHtml = data.detail.map(function (d) {
                     const semaineTxt = d.positionSemaine !== null ? 'S' + d.positionSemaine : '—';
                     const nonCompte = d.compte === false;
-                    const style = nonCompte ? ' style="color:#E24B4A;"' : '';
+                    const rouge = nonCompte ? ' style="color:#E24B4A;"' : '';
                     return `
-                        <div class="stat-row"${style}>
-                            <span class="stat-label">${d.nom} (${semaineTxt} · ${d.tour_elimine || '-'})${nonCompte ? ' — non compté' : ''}</span>
-                            <span class="stat-value">${d.points_gagnes || 0}</span>
+                        <div class="stat-row">
+                            <span class="stat-label"${rouge}>${d.nom} (${semaineTxt} · ${d.tour_elimine || '-'})${nonCompte ? ' — non compté' : ''}</span>
+                            <span class="stat-value"${rouge}>${d.points_gagnes || 0}</span>
                         </div>
                     `;
                 }).join('');
