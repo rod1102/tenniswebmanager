@@ -312,11 +312,14 @@
                     return;
                 }
 
+                const auMoinsUnNonCompte = data.detail.some(function (d) { return d.compte === false; });
                 const lignesHtml = data.detail.map(function (d) {
                     const semaineTxt = d.positionSemaine !== null ? 'S' + d.positionSemaine : '—';
+                    const nonCompte = d.compte === false;
+                    const style = nonCompte ? ' style="color:#E24B4A;"' : '';
                     return `
-                        <div class="stat-row">
-                            <span class="stat-label">${d.nom} (${semaineTxt} · ${d.tour_elimine || '-'})</span>
+                        <div class="stat-row"${style}>
+                            <span class="stat-label">${d.nom} (${semaineTxt} · ${d.tour_elimine || '-'})${nonCompte ? ' — non compté' : ''}</span>
                             <span class="stat-value">${d.points_gagnes || 0}</span>
                         </div>
                     `;
@@ -326,7 +329,9 @@
                         <span class="stat-label" style="font-weight:700;">Total</span>
                         <span class="stat-value" style="font-weight:700;">${data.total}</span>
                     </div>
-                `;
+                ` + (auMoinsUnNonCompte
+                    ? '<p class="regle-table-note" style="margin-top:12px;"><span style="color:#E24B4A;">En rouge</span> : résultats hors des 18 (ATP) / 16 (WTA) meilleurs retenus au classement — leurs points ne sont pas comptés.</p>'
+                    : '');
             } catch (err) {
                 if (overlay.isConnected) {
                     document.getElementById('detail-points-corps').innerHTML = '<div class="match-hint">Impossible de charger le détail.</div>';

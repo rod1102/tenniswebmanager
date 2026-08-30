@@ -3240,6 +3240,61 @@ function pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle) {
     return points;
 }
 
+// Meme regle des N meilleurs resultats que pointsRetenusParEntiteCircuit, mais
+// pour UNE seule entite sur UN circuit, en renvoyant l'ensemble des tournoi_id
+// dont les points sont effectivement retenus (pour l'affichage "?" du detail :
+// les autres sont grises/rouges). n = 18 ATP / 16 WTA (+1 WTA si qualifiee aux
+// Finals dans la fenetre). Les tournois obligatoires du Top 30 occupent toujours
+// un slot (meme non joues -> ils reduisent juste le nombre de slots volontaires).
+function resultatsRetenusEntiteCircuit(circuit, cle, semaineMin, semaineActuelle) {
+    const estJoueur = cle.indexOf('joueur:') === 0;
+    const idEntite = cle.slice(estJoueur ? 7 : 6);
+
+    const resultats = db.prepare(
+        'SELECT tj.tournoi_id, tj.points_gagnes, t.categorie, t.calendrier_id, t.semaine ' +
+        'FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id ' +
+        'WHERE t.circuit = ? AND t.semaine > ? AND t.semaine <= ? AND t.statut = \'termine\' ' +
+        '  AND tj.points_gagnes IS NOT NULL AND ' +
+        (estJoueur ? '(tj.player_id = ? AND tj.est_reel = 1)' : 'tj.rival_id = ?')
+    ).all(circuit, semaineMin, semaineActuelle, idEntite);
+
+    let n = NB_RESULTATS_RETENUS[circuit] || 18;
+    if (circuit === 'WTA' && resultats.some(function (r) { return r.categorie === 'finals'; })) n += 1;
+
+    // Slots occupes par les obligatoires du Top 30 (GC + M1000 designes), joues ou non.
+    let nbSlotsObligatoires = 0;
+    const idsObligatoiresJoues = new Set();
+    if (estJoueur) {
+        const obligatoires = db.prepare(
+            'SELECT id, semaine, categorie, calendrier_id FROM tournois ' +
+            'WHERE circuit = ? AND semaine > ? AND semaine <= ? AND statut = \'termine\''
+        ).all(circuit, semaineMin, semaineActuelle)
+            .filter(function (t) { return estTournoiObligatoireTop30(circuit, t.calendrier_id, t.categorie); });
+        const top30ParSaison = new Map();
+        obligatoires.forEach(function (t) {
+            const saison = phaseAffichee(t.semaine).numeroSaison;
+            if (!top30ParSaison.has(saison)) {
+                const rows = db.prepare('SELECT cle FROM classement_top30 WHERE saison = ? AND circuit = ?').all(saison, circuit);
+                top30ParSaison.set(saison, new Set(rows.map(function (x) { return x.cle; })));
+            }
+            if (top30ParSaison.get(saison).has(cle)) {
+                nbSlotsObligatoires += 1;
+                idsObligatoiresJoues.add(t.id);
+            }
+        });
+    }
+
+    const retenus = new Set();
+    resultats.forEach(function (r) { if (idsObligatoiresJoues.has(r.tournoi_id)) retenus.add(r.tournoi_id); });
+
+    const volontaires = resultats
+        .filter(function (r) { return !idsObligatoiresJoues.has(r.tournoi_id); })
+        .sort(function (a, b) { return (b.points_gagnes || 0) - (a.points_gagnes || 0); });
+    volontaires.slice(0, Math.max(0, n - nbSlotsObligatoires)).forEach(function (r) { retenus.add(r.tournoi_id); });
+
+    return retenus;
+}
+
 // Classement PARTAGE (tous coachs confondus, pas un seul) pour un circuit et une
 // fenetre de semaines donnes : rivaux persistants + TOUS les joueurs reels valides
 // de ce circuit. Utilise pour la qualification aux Masters de fin de saison (Top 8
@@ -5632,34 +5687,53 @@ app.get('/api/classement/detail', (req, res) => {
         const semaineMin = type === 'race' ? debutSaison : semaineActuelle - FENETRE_LIVE;
 
         let condition, params;
+        // clesParCircuit : pour chaque circuit concerne, la cle d'entite a passer a
+        // resultatsRetenusEntiteCircuit (regle des N meilleurs resultats).
+        const clesParCircuit = {};
         if (cle && cle.indexOf('rival:') === 0) {
             condition = 'tj.rival_id = ?';
             params = [cle.slice(6)];
+            const rc = db.prepare('SELECT circuit FROM classement_joueurs WHERE id = ?').get(cle.slice(6));
+            if (rc) clesParCircuit[rc.circuit] = cle;
         } else if (cle && cle.indexOf('joueur:') === 0) {
             condition = '(tj.player_id = ? AND tj.est_reel = 1)';
             params = [cle.slice(7)];
+            const pc = db.prepare('SELECT type FROM players WHERE id = ?').get(cle.slice(7));
+            if (pc) clesParCircuit[pc.type === 'joueur' ? 'ATP' : 'WTA'] = cle;
         } else if (userIdParam) {
-            const joueurs = db.prepare("SELECT id FROM players WHERE user_id = ? AND statut = 'valide'").all(userIdParam);
+            const joueurs = db.prepare("SELECT id, type FROM players WHERE user_id = ? AND statut = 'valide'").all(userIdParam);
             if (joueurs.length === 0) {
                 return res.json({ success: true, detail: [], total: 0 });
             }
             const placeholders = joueurs.map(function () { return '?'; }).join(',');
             condition = '(tj.player_id IN (' + placeholders + ') AND tj.est_reel = 1)';
             params = joueurs.map(function (j) { return j.id; });
+            joueurs.forEach(function (j) { clesParCircuit[j.type === 'joueur' ? 'ATP' : 'WTA'] = 'joueur:' + j.id; });
         } else {
             return res.status(400).json({ error: 'Parametre cle ou userId requis.' });
         }
 
         const lignes = db.prepare(`
-            SELECT tournois.nom, tournois.circuit, tournois.semaine, tj.tour_elimine, tj.points_gagnes
+            SELECT tournois.nom, tournois.circuit, tournois.semaine, tj.tournoi_id, tj.tour_elimine, tj.points_gagnes
             FROM tournoi_joueurs tj
             JOIN tournois ON tournois.id = tj.tournoi_id
             WHERE ${condition} AND tournois.semaine > ? AND tournois.semaine <= ? AND tournois.statut = 'termine'
             ORDER BY tournois.semaine DESC
         `).all(...params, semaineMin, semaineActuelle);
 
-        lignes.forEach(function (l) { l.positionSemaine = positionSemaineAffichee(l.semaine); });
-        const total = lignes.reduce(function (s, l) { return s + (l.points_gagnes || 0); }, 0);
+        // Ensemble des tournoi_id dont les points comptent, par circuit (regle des
+        // 18 ATP / 16 WTA meilleurs resultats). Les autres seront affiches en rouge.
+        const retenusParCircuit = {};
+        Object.keys(clesParCircuit).forEach(function (circ) {
+            retenusParCircuit[circ] = resultatsRetenusEntiteCircuit(circ, clesParCircuit[circ], semaineMin, semaineActuelle);
+        });
+
+        lignes.forEach(function (l) {
+            l.positionSemaine = positionSemaineAffichee(l.semaine);
+            const set = retenusParCircuit[l.circuit];
+            l.compte = set ? set.has(l.tournoi_id) : true;
+        });
+        const total = lignes.reduce(function (s, l) { return s + (l.compte ? (l.points_gagnes || 0) : 0); }, 0);
 
         res.json({ success: true, detail: lignes, total });
     } catch (err) {
