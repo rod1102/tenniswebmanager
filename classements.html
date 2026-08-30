@@ -188,11 +188,12 @@
         }
 
         function ligneNationHtml(n, rang) {
+            const boutonDetail = `<button class="pts-detail-btn" data-nation="${encodeURIComponent(n.nation)}" data-circuit="${PARAM_NATIONS[circuitCourant]}" title="Détail des points">?</button>`;
             return `
                 <tr>
                     <td class="rang">${rang}</td>
                     <td>${flagImg(n.drapeau)} <a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(n.nation)}">${n.nation}</a></td>
-                    <td class="pts">${n.points}</td>
+                    <td class="pts">${n.points} ${boutonDetail}</td>
                 </tr>
             `;
         }
@@ -333,10 +334,71 @@
             }
         }
 
+        async function ouvrirDetailNation(nation, circuit) {
+            const overlay = document.createElement('div');
+            overlay.className = 'dispo-blocage-overlay';
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box" style="max-width:480px;">
+                    <div class="stats-header" style="margin-top:0;">Points de la nation — ${decodeURIComponent(nation)}</div>
+                    <div id="detail-points-corps"><div class="match-hint">Chargement...</div></div>
+                    <button class="cta cta-secondary" id="detail-points-fermer" style="margin-top:16px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+            document.getElementById('detail-points-fermer').addEventListener('click', function () { overlay.remove(); });
+
+            try {
+                const response = await fetch('/api/classement/nations/detail/' + nation + '?circuit=' + circuit);
+                const data = await response.json();
+                if (!overlay.isConnected) return;
+                const corps = document.getElementById('detail-points-corps');
+                if (!response.ok) {
+                    corps.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger le détail.') + '</div>';
+                    return;
+                }
+
+                let html = '';
+                data.groupes.forEach(function (g) {
+                    if (data.plusieurs) html += `<div class="stats-header" style="font-size:0.9rem; margin-top:12px;">${g.circuit}</div>`;
+                    if (!g.joueurs.length) {
+                        html += '<div class="match-hint">Aucun joueur classé.</div>';
+                        return;
+                    }
+                    g.joueurs.forEach(function (j) {
+                        const lien = j.estReel
+                            ? `adversaire.html?type=reel&id=${j.playerId}`
+                            : `adversaire.html?type=rival&id=${j.rivalId}`;
+                        html += `
+                            <div class="stat-row">
+                                <span class="stat-label"><a class="lien-adversaire${j.estReel ? '' : ' classement-bot'}" href="${lien}">${formaterNomComplet(j.nom)}</a> <span class="match-hint">(${j.rangLive ? '#' + j.rangLive : '—'})</span></span>
+                                <span class="stat-value">${j.points}</span>
+                            </div>
+                        `;
+                    });
+                });
+                html += `
+                    <div class="stat-row" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.15); padding-top:8px;">
+                        <span class="stat-label" style="font-weight:700;">Total</span>
+                        <span class="stat-value" style="font-weight:700;">${data.total}</span>
+                    </div>
+                `;
+                corps.innerHTML = html;
+            } catch (err) {
+                if (overlay.isConnected) {
+                    document.getElementById('detail-points-corps').innerHTML = '<div class="match-hint">Impossible de charger le détail.</div>';
+                }
+            }
+        }
+
         document.addEventListener('click', function (e) {
             const bouton = e.target.closest('.pts-detail-btn');
             if (!bouton) return;
-            ouvrirDetailPoints(bouton.dataset.cle || null, bouton.dataset.userId || null, bouton.dataset.type);
+            if (bouton.dataset.nation) {
+                ouvrirDetailNation(bouton.dataset.nation, bouton.dataset.circuit);
+            } else {
+                ouvrirDetailPoints(bouton.dataset.cle || null, bouton.dataset.userId || null, bouton.dataset.type);
+            }
         });
 
         document.querySelectorAll('#tabs-nav-circuit .tab-btn').forEach(function (bouton) {

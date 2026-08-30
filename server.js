@@ -5706,6 +5706,43 @@ app.get('/api/classement/nations/:circuit', (req, res) => {
     }
 });
 
+// Detail du classement d'une nation ("?" sur l'onglet Nation) : les (jusqu'a) 4
+// meilleurs joueurs par circuit dont les points Live sont retenus dans le total de
+// la nation (meme selection que classementNationsTop4). Pour COMBINE (onglet
+// Coach), renvoie les 4 ATP + les 4 WTA, comme classementNationsSomme les additionne.
+app.get('/api/classement/nations/detail/:nation', (req, res) => {
+    try {
+        const cibleNorm = normaliserPays(req.params.nation || '');
+        if (!cibleNorm) return res.status(400).json({ error: 'Nation manquante.' });
+        const param = req.query.circuit;
+        const circuits = param === 'WTA' ? ['WTA'] : (param === 'COMBINE' ? ['ATP', 'WTA'] : ['ATP']);
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+
+        const groupes = circuits.map(function (circuit) {
+            const rangsLive = calculerRangsLiveGlobal(circuit);
+            const quatre = calculerClassementGlobal(circuit, etat.semaine_actuelle - FENETRE_LIVE, etat.semaine_actuelle)
+                .filter(function (c) { return normaliserPays(c.nationalite || '') === cibleNorm; })
+                .slice(0, 4)
+                .map(function (c) {
+                    return {
+                        nom: c.nom,
+                        estReel: c.playerId !== null,
+                        playerId: c.playerId,
+                        rivalId: c.rivalId,
+                        rangLive: rangsLive.get(c.cle) || null,
+                        points: c.points
+                    };
+                });
+            return { circuit, joueurs: quatre, sousTotal: quatre.reduce(function (s, j) { return s + j.points; }, 0) };
+        });
+
+        res.json({ success: true, plusieurs: circuits.length > 1, groupes, total: groupes.reduce(function (s, g) { return s + g.sousTotal; }, 0) });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Fiche Pays (pays.html) : pour UNE nation, agrege par circuit (ATP + WTA) son
 // classement nation, ses joueurs (rang Live + Race), le palmares et l'historique
 // complet des rencontres Coupe Davis / Fed Cup, et son palmares en simple (titres
