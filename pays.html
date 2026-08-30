@@ -100,9 +100,10 @@
                 const coach = j.coachNom
                     ? `<a class="lien-adversaire" href="coach.html?id=${j.coachUserId}">${j.coachNom}</a>`
                     : '<span class="match-hint">Bot</span>';
+                const marque = j.compteClassement ? '<span title="Compte dans le classement de la nation (4 meilleurs)" style="color:#D4F000;">●</span> ' : '';
                 return `
                     <tr>
-                        <td>${lienJoueur(j)}</td>
+                        <td>${marque}${lienJoueur(j)}</td>
                         <td class="rang">${j.rangLive || '—'}</td>
                         <td class="rang">${j.rangRace || '—'}</td>
                         <td>${coach}</td>
@@ -114,6 +115,7 @@
                     <thead><tr><th>Joueur</th><th>Live</th><th>Race</th><th>Coach</th></tr></thead>
                     <tbody>${rows}</tbody>
                 </table>
+                <p class="regle-table-note"><span style="color:#D4F000;">●</span> Compte dans le classement de la nation (4 meilleurs au Live). Les bots hors de ce top 4 ne sont pas listés.</p>
             `;
         }
 

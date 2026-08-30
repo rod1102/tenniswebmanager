@@ -5735,9 +5735,14 @@ app.get('/api/pays/:nation', (req, res) => {
 
             const rangsLive = calculerRangsLiveGlobal(circuit);
             const rangsRace = calculerRangsRaceGlobal(circuit);
+            // Liste triee par points decroissants (= ordre Live) : les 4 premieres
+            // occurrences de la nation sont celles dont les points comptent dans le
+            // classement de la nation (cf. classementNationsTop4). On garde tous les
+            // joueurs reels + uniquement les rivaux qui font partie de ce top 4
+            // (demande explicite de l'utilisateur, 2026-08-30).
             const joueurs = calculerClassementGlobal(circuit, semaineActuelle - FENETRE_LIVE, semaineActuelle)
                 .filter(function (c) { return normaliserPays(c.nationalite || '') === cibleNorm; })
-                .map(function (c) {
+                .map(function (c, i) {
                     return {
                         nom: c.nom,
                         estReel: c.playerId !== null,
@@ -5747,10 +5752,11 @@ app.get('/api/pays/:nation', (req, res) => {
                         coachUserId: c.userId || null,
                         rangLive: rangsLive.get(c.cle) || null,
                         rangRace: rangsRace.get(c.cle) || null,
-                        points: c.points
+                        points: c.points,
+                        compteClassement: i < 4
                     };
                 })
-                .sort(function (a, b) { return (a.rangLive || 99999) - (b.rangLive || 99999); });
+                .filter(function (j) { return j.estReel || j.compteClassement; });
 
             // Toutes les rencontres terminees du circuit qui impliquent la nation.
             const ties = db.prepare("SELECT * FROM coupe_equipes WHERE circuit = ? AND statut = 'termine' ORDER BY saison DESC, semaine ASC")
