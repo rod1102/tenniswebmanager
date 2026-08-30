@@ -1658,8 +1658,11 @@ h1 {
 }
 
 .inscrit-corps .lien-adversaire { font-weight: 700; }
-.inscrit-moi { color: #D4F000; }
 .inscrit-meta { color: #8B98A5; font-weight: 400; font-size: 0.85rem; }
+
+/* Le joueur du coach en jaune, comme dans le tableau (.bracket-moi). */
+.inscrit-card-moi .inscrit-corps,
+.inscrit-card-moi .inscrit-corps .lien-adversaire { color: #D4F000; }
 
 .tournoi-name-atp { color: #5FA8E8; }
 .tournoi-name-wta { color: #E87CC2; }

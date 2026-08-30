@@ -295,9 +295,9 @@
                 if (j.tour_elimine) suffixes.push(j.tour_elimine);
                 if (enAttente) suffixes.push('en liste d\'attente');
                 const classeFond = enAttente ? 'tournoi-card-attente' : 'tournoi-card-highlight';
-                return `<div class="tournoi-card ${classeFond} inscrit-card">
+                return `<div class="tournoi-card ${classeFond} inscrit-card${estMoi ? ' inscrit-card-moi' : ''}">
                     <span class="inscrit-rang">${rangTxt}</span>
-                    <span class="inscrit-corps">${seed}${nomLien}${estMoi ? ' <span class="inscrit-moi">(Toi)</span>' : ''}${suffixes.length ? ' <span class="inscrit-meta">· ' + suffixes.join(' · ') + '</span>' : ''}</span>
+                    <span class="inscrit-corps">${seed}${nomLien}${suffixes.length ? ' <span class="inscrit-meta">· ' + suffixes.join(' · ') + '</span>' : ''}</span>
                 </div>`;
             }
 
