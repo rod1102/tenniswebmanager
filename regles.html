@@ -223,7 +223,8 @@
                     <div class="stats-header">Diminution des automatismes</div>
                     <p class="regle-texte">
                         Chaque semaine, les automatismes de surface diminuent de 5 points (minimum 0), à l'exclusion
-                        de ceux correspondant à une surface où le joueur a joué durant la semaine en simple.
+                        de celui de la surface sur laquelle le joueur a été actif cette semaine-là : soit parce
+                        qu'il y a joué un match en simple, soit parce qu'il y a mené un entraînement de surface.
                     </p>
 
                     <div class="stats-header">Les compétences</div>
@@ -609,9 +610,10 @@
                     </div>
                     <p class="regle-table-note">
                         Les points d'énergie sont plafonnés à 100 et se régénèrent de 5 points toutes les quatre
-                        semaines de jeu : à l'entrée de la Semaine 5, puis de la 9, de la 13… jusqu'à la Semaine 49
-                        (12 fois par saison). Le compteur repart de zéro à chaque nouvelle saison ; la Pré-saison et
-                        la Semaine 0 n'accordent aucun gain.
+                        semaines de jeu, à l'entrée des semaines suivantes (12 fois par saison) :
+                        <strong>S5, S9, S13, S17, S21, S25, S29, S33, S37, S41, S45, S49</strong>. Le compteur
+                        repart de zéro à chaque nouvelle saison ; la Pré-saison et la Semaine 0 n'accordent aucun
+                        gain.
                     </p>
                     <p class="regle-texte">
                         Les classements ATP et WTA se déclinent en deux versions : le classement Live, qui reflète les
@@ -926,8 +928,13 @@
                     </p>
                     <p class="regle-texte">
                         <strong>Cookies</strong><br>
-                        Le site n'utilise aucun cookie. La connexion repose sur le stockage de session de ton
-                        navigateur (localStorage), automatiquement effacé à la fermeture de l'onglet.
+                        Le site dépose un seul cookie, strictement nécessaire à son fonctionnement : un cookie de
+                        session (<code>session_token</code>) qui contient un identifiant de session aléatoire,
+                        inaccessible au JavaScript (httpOnly), et qui te garde connecté d'une page à l'autre. Il
+                        expire au bout de 30 jours ou à la déconnexion. Aucun cookie de mesure d'audience ni de
+                        publicité n'est utilisé. Ton navigateur conserve par ailleurs ton identifiant de coach en
+                        stockage local (localStorage) pour t'éviter de te reconnecter à chaque visite ; il est
+                        supprimé dès que tu te déconnectes.
                     </p>
                 </div>
             </div>
