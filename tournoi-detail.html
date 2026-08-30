@@ -294,8 +294,8 @@
                 if (j.coachNom) suffixes.push('Coach : ' + j.coachNom);
                 if (j.tour_elimine) suffixes.push(j.tour_elimine);
                 if (enAttente) suffixes.push('en liste d\'attente');
-                const classeFond = enAttente ? 'tournoi-card-attente' : 'tournoi-card-highlight';
-                return `<div class="tournoi-card ${classeFond} inscrit-card${estMoi ? ' inscrit-card-moi' : ''}">
+                const classeFond = enAttente ? ' tournoi-card-attente' : '';
+                return `<div class="tournoi-card inscrit-card${classeFond}${estMoi ? ' inscrit-card-moi' : ''}">
                     <span class="inscrit-rang">${rangTxt}</span>
                     <span class="inscrit-corps">${seed}${nomLien}${suffixes.length ? ' <span class="inscrit-meta">· ' + suffixes.join(' · ') + '</span>' : ''}</span>
                 </div>`;
