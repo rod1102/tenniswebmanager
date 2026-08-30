@@ -2151,27 +2151,6 @@ app.get('/api/admin/diagnostiquer-doublons-joueurs', (req, res) => {
     }
 });
 
-// DIAGNOSTIC TEMPORAIRE (2026-08-30, bug "S1-S4 + Masters WTA disparus de Tournois")
-// - a retirer une fois la cause confirmee.
-app.get('/api/admin/diag-tournois', (req, res) => {
-    try {
-        if (!estAdmin(req.userId)) return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
-        const etat = db.prepare('SELECT * FROM jeu_etat WHERE id = 1').get();
-        const tournois = db.prepare('SELECT id, calendrier_id, circuit, categorie, semaine, statut FROM tournois ORDER BY semaine, circuit').all();
-        const parSemaine = {};
-        tournois.forEach(function (t) {
-            const p = phaseDeSemaine(t.semaine);
-            const pa = phaseAffichee(t.semaine);
-            const cle = t.semaine + ' (' + p.type + (p.positionSemaine ? ' S' + p.positionSemaine : '') + ', saisonAff ' + pa.numeroSaison + ')';
-            (parSemaine[cle] = parSemaine[cle] || []).push(t.calendrier_id + ' [' + t.circuit + '/' + t.statut + ']');
-        });
-        res.json({ success: true, jeu_etat: etat, LONGUEUR_SAISON, total: tournois.length, parSemaine });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'ERREUR : ' + err.message });
-    }
-});
-
 // Avancement automatique : fidele au PDF ("chaque semaine reelle equivaut a deux
 // semaines ingame"), rythme fixe a lundi et jeudi 8h00 heure FRANCAISE (Europe/Paris).
 const JOURS_ECHEANCE_AUTO = [1, 4]; // lundi, jeudi

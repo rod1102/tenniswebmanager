@@ -792,4 +792,39 @@ db.prepare(`
 `).run();
 db.prepare("UPDATE jeu_etat SET patch_longueur_52 = 1 WHERE patch_longueur_52 = 0").run();
 
+// Complement du recalage L=51->52 : les tournois FUTURS deja pre-crees sous
+// l'ancien calendrier (statut 'inscriptions'/'a_venir') ne bougeaient pas avec le
+// recalage de semaine_actuelle - ils se retrouvent 1 semaine trop tot par rapport
+// a phaseDeSemaine (leur S1 tombe sur la S0, etc.), donc filtres a tort comme
+// "doublons" par tournoiDejaCreeCetteSaison et absents du calendrier "Tournois de
+// l'annee" (bug signale par l'utilisateur le 2026-08-30). On recale chaque ligne
+// mal alignee sur la vraie semaine absolue de sa position calendaire, dans la
+// meme saison, + les lignes liste d'attente / favoris qui la referencent.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_tournois_52 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_tournois_52 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const { CALENDRIER_TOURNOIS, phaseDeSemaine, LONGUEUR_SAISON } = require('./calendrier-tournois');
+    const futurs = db.prepare("SELECT id, calendrier_id, semaine FROM tournois WHERE statut IN ('inscriptions', 'a_venir')").all();
+    const majT = db.prepare('UPDATE tournois SET semaine = ? WHERE id = ?');
+    const majLA = db.prepare('UPDATE tournoi_liste_attente SET semaine = ? WHERE calendrier_id = ? AND semaine = ?');
+    const majFav = db.prepare('UPDATE tournoi_favoris SET semaine = ? WHERE calendrier_id = ? AND semaine = ?');
+    const recale = db.transaction(function () {
+        futurs.forEach(function (t) {
+            const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === t.calendrier_id; });
+            if (!entree) return;
+            const phase = phaseDeSemaine(t.semaine);
+            if (phase.type === 'tournoi' && phase.positionSemaine === entree.semaine_debut) return; // deja bien aligne
+            // Bonne semaine absolue : meme saison (cycle) que la ligne actuelle,
+            // position calendaire = entree.semaine_debut (positionSaison = +2).
+            const cycle = Math.floor((t.semaine - 1) / LONGUEUR_SAISON);
+            const cible = cycle * LONGUEUR_SAISON + entree.semaine_debut + 2;
+            if (cible === t.semaine) return;
+            majT.run(cible, t.id);
+            majLA.run(cible, t.calendrier_id, t.semaine);
+            majFav.run(cible, t.calendrier_id, t.semaine);
+        });
+    });
+    recale();
+    db.prepare("UPDATE jeu_etat SET patch_tournois_52 = 1 WHERE id = 1").run();
+}
+
 module.exports = db;
