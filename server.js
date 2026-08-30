@@ -1366,9 +1366,10 @@ function variationDispositionsIntersaison(indexIntersaison) {
 // fois a l'ENTREE en semaine 49 (derniere semaine de tournoi du cycle), PAS a la
 // bascule vers la Pre-saison suivante comme avant (demande explicite de
 // l'utilisateur, 2026-08-24). Ouvre une repartition manuelle des competences pour
-// les joueurs les plus developpes (cible = ((XP totale - 200) / 2.5) + 100, jamais
+// les joueurs les plus developpes (cible = ((XP totale - 200) / 2.5) + 120, jamais
 // si cible >= total) au lieu d'une reduction automatique (regle PDF, revient sur un
-// choix precedent).
+// choix precedent). Constante +120 depuis le 2026-08-30 (etait +100 avant, demande
+// explicite de l'utilisateur).
 //
 // SEULEMENT le rabotage des competences est deplace ici - la variation de
 // dispositions, le Top 30 fige et le tableau Coupe Davis restent a la bascule
@@ -1405,7 +1406,7 @@ function appliquerMoulinettePourJoueur(player) {
     const valeurs = {};
     COMPETENCES.forEach(function (c) { valeurs[c] = player[c]; });
     const xpTotale = COMPETENCES.reduce(function (s, c) { return s + valeurs[c]; }, 0);
-    const cible = ((xpTotale - 200) / 2.5) + 100;
+    const cible = ((xpTotale - 200) / 2.5) + 120;
 
     // Moulinette : les competences ne bougent PAS ici - le coach les repartit
     // lui-meme (route /api/joueurs/repartir-competences-moulinette), plafonne par
