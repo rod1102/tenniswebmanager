@@ -1,7 +1,8 @@
-node_modules/
+.claude/
 .env
+McGraw.png
+node_modules/
+server-*.log
 tennis-manager.db
 tennis-manager.db.backup-*
-server-*.log
 uploads/
-.claude/
