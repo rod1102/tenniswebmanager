@@ -4601,6 +4601,10 @@ app.get('/api/tournois/passes/:playerId', (req, res) => {
         // simplement de "Tournois passes" (bug signale par l'utilisateur, meme jour).
         const passes = db.prepare("SELECT id, calendrier_id, semaine FROM tournois WHERE circuit = ? AND statut = 'termine' AND semaine BETWEEN ? AND ?")
             .all(circuit, etat.semaine_actuelle - cycleLongueur, etat.semaine_actuelle)
+            // Exclut la "Saison 0" : les tournois joues par les bots pour pre-remplir
+            // les classements avant le vrai depart de la partie (cf. saison_offset).
+            // "Tournois passes" ne montre que l'historique des vraies saisons (>= 1).
+            .filter(function (row) { return phaseAffichee(row.semaine).numeroSaison >= 1; })
             .map(function (row) {
                 const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === row.calendrier_id; });
                 if (!entree) return null; // entree calendaire disparue (ne devrait jamais arriver)
