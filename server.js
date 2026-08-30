@@ -3584,16 +3584,22 @@ function perteMentalCourant(categorie, label) {
 // condition) selon SON PROPRE style. Taux de perte de forme (Prudence 0.08 / En
 // Avant 0.12 / defaut 0.10), de gain de mental max (Mental d'acier 0.15 / defaut
 // 0.1) et de gain d'automatisme (Reperage 6 / defaut 3) cf. tournoi_joueurs.style_choisi.
+// styleAdversaire (optionnel) : le style joue par l'adversaire ce match-la - s'il
+// vaut "marathonien", la perte de forme de CE joueur est majoree de 50 % (le
+// marathonien fait courir son adversaire pour le fatiguer, regle PDF).
 // moitie (optionnel, utilise par simulerRubberDouble en Coupe Davis/Fed Cup,
 // demande explicite de l'utilisateur, 2026-08-26) : divise par 2 la perte de
 // forme, la perte de mental courant et le gain de mental max - PAS l'usure, qui
 // reste +1 dans tous les cas. Arrondi a 2 decimales au lieu d'1 dans ce cas (une
 // valeur normalement a 1 decimale, une fois divisee par 2, peut tomber sur 2 -
 // ex. 12,094 -> 12,10 plutot que 12,1 ou 12,0).
-function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants, categorie, label, conditionFinale, moitie) {
+function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants, categorie, label, conditionFinale, moitie, styleAdversaire) {
     const facteur = moitie ? 0.5 : 1;
     const decimales = moitie ? 100 : 10;
-    const tauxPerteForme = (style === 'prudence' ? 0.08 : (style === 'en_avant' ? 0.12 : 0.10)) * facteur;
+    // Style adverse "Marathonien" : l'adversaire fait courir ce joueur pour le
+    // fatiguer -> sa perte de forme par jeu est accrue de 50 % (regle PDF).
+    const facteurMarathonienAdverse = styleAdversaire === 'marathonien' ? 1.5 : 1;
+    const tauxPerteForme = (style === 'prudence' ? 0.08 : (style === 'en_avant' ? 0.12 : 0.10)) * facteur * facteurMarathonienAdverse;
     const tauxGainMentalMax = (style === 'mental_acier' ? 0.15 : 0.1) * facteur;
     const gainAutomatisme = style === 'reperage' ? 6 : 3;
     const nouvelleForme = Math.max(0, player.forme - totalJeux * tauxPerteForme);
@@ -3828,8 +3834,8 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
         { forme: player2.forme, pointsEnergie: player2.points_energie, condition: player2.condition, type: player2.type }
     );
 
-    const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA);
-    const etat2 = appliquerEtatPostMatch(player2, tournoi.surface, style2, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleB);
+    const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA, false, style2);
+    const etat2 = appliquerEtatPostMatch(player2, tournoi.surface, style2, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleB, false, style1);
 
     const j1Gagne = resultat.vainqueur === 'A';
 
@@ -8695,10 +8701,10 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
 
     const labelPourEtatPostMatch = LABEL_MANCHE_COUPE[tie.manche] || 'premier tour';
     const kineDomicile = vDomicile.joueur
-        ? appliquerEtatPostMatch(vDomicile.joueur, surface, styleDomicile, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleA).kineIntervenu
+        ? appliquerEtatPostMatch(vDomicile.joueur, surface, styleDomicile, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleA, false, styleExterieur).kineIntervenu
         : false;
     const kineExterieur = vExterieur.joueur
-        ? appliquerEtatPostMatch(vExterieur.joueur, surface, styleExterieur, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleB).kineIntervenu
+        ? appliquerEtatPostMatch(vExterieur.joueur, surface, styleExterieur, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleB, false, styleDomicile).kineIntervenu
         : false;
 
     const nationVainqueur = resultat.vainqueur === 'A' ? tie.nation_domicile : tie.nation_exterieur;
