@@ -284,20 +284,20 @@
 
             function carteInscrit(j, enAttente) {
                 const estMoi = j.est_reel && j.player_id === Number(playerId);
-                const nomTxt = flagImg(j.drapeau) + ' ' + formaterNomComplet(j.nom) + (estMoi ? ' (Toi)' : '');
-                const nomAffiche = lienAdversaire(nomTxt, j.est_reel, j.player_id, j.rival_id);
+                // Une seule ligne, ordre : classement · drapeau · nom · coach.
+                const rangTxt = j.rangRace ? '#' + j.rangRace : 'NC';
+                const seed = j.tete_de_serie ? '[' + j.tete_de_serie + '] ' : '';
+                const nomLien = lienAdversaire(flagImg(j.drapeau) + ' ' + formaterNomComplet(j.nom), j.est_reel, j.player_id, j.rival_id);
                 // Niveau totalement confidentiel ici, y compris le tien - le nom du coach,
                 // lui, n'apparait que pour un vrai joueur (les rivaux n'ont pas de coach).
-                const meta = [];
-                if (j.coachNom) meta.push('Coach : ' + j.coachNom);
-                if (j.nationalite) meta.push(j.nationalite);
-                if (j.rangRace) meta.push('Race #' + j.rangRace);
-                if (j.tour_elimine) meta.push(j.tour_elimine);
-                if (enAttente) meta.push('En liste d\'attente — des joueurs mieux classés sont déjà retenus');
+                const suffixes = [];
+                if (j.coachNom) suffixes.push('Coach : ' + j.coachNom);
+                if (j.tour_elimine) suffixes.push(j.tour_elimine);
+                if (enAttente) suffixes.push('en liste d\'attente');
                 const classeFond = enAttente ? 'tournoi-card-attente' : 'tournoi-card-highlight';
-                return `<div class="tournoi-card ${classeFond}">
-                    <div class="tournoi-card-name">${j.tete_de_serie ? '[' + j.tete_de_serie + '] ' : ''}${nomAffiche}</div>
-                    <div class="tournoi-card-meta">${meta.join(' · ')}</div>
+                return `<div class="tournoi-card ${classeFond} inscrit-card">
+                    <span class="inscrit-rang">${rangTxt}</span>
+                    <span class="inscrit-corps">${seed}${nomLien}${estMoi ? ' <span class="inscrit-moi">(Toi)</span>' : ''}${suffixes.length ? ' <span class="inscrit-meta">· ' + suffixes.join(' · ') + '</span>' : ''}</span>
                 </div>`;
             }
 

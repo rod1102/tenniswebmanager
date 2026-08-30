@@ -1631,6 +1631,36 @@ h1 {
     background: rgba(226, 75, 74, 0.08);
 }
 
+/* Liste des inscrits (tournoi-detail.html) : une seule ligne par joueur,
+   ordre classement -> drapeau -> nom -> coach. */
+.inscrit-card {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    padding: 11px 16px;
+}
+
+.inscrit-rang {
+    flex-shrink: 0;
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: #C4CDD6;
+    font-variant-numeric: tabular-nums;
+    min-width: 3.2em;
+}
+
+.inscrit-corps {
+    min-width: 0;
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: #F5F7FA;
+}
+
+.inscrit-corps .lien-adversaire { font-weight: 700; }
+.inscrit-moi { color: #D4F000; }
+.inscrit-meta { color: #8B98A5; font-weight: 400; font-size: 0.85rem; }
+
 .tournoi-name-atp { color: #5FA8E8; }
 .tournoi-name-wta { color: #E87CC2; }
 
