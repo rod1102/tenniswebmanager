@@ -5345,16 +5345,18 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
                 j.rangRace = rangDe(rangsRace, j.rival_id, j.est_reel, j.player_id);
                 j.coachNom = j.est_reel ? nomCoach(j.coach_user_id) : null;
             });
-            // Niveau confidentiel : reste utilise pour le tri (tete de serie puis niveau,
-            // comme avant) mais efface du JSON envoye au client pour tout le monde sauf
-            // le joueur qui consulte - sinon la valeur resterait visible brute dans
-            // l'onglet reseau du navigateur meme si l'affichage la masque.
+            // Tri : tetes de serie d'abord (dans l'ordre), puis par classement Live
+            // (le rang affiche cote client) - jamais par niveau, qui est confidentiel
+            // et donnerait un ordre incoherent avec le numero montre a l'ecran.
             joueurs.sort(function (a, b) {
                 if (a.tete_de_serie && b.tete_de_serie) return a.tete_de_serie - b.tete_de_serie;
                 if (a.tete_de_serie) return -1;
                 if (b.tete_de_serie) return 1;
-                return b.niveau - a.niveau;
+                return (a.rang || 99999) - (b.rang || 99999);
             });
+            // Niveau efface du JSON envoye au client pour tout le monde sauf le joueur
+            // qui consulte - sinon la valeur resterait visible brute dans l'onglet
+            // reseau du navigateur meme si l'affichage la masque.
             joueurs.forEach(function (j) {
                 const estMoi = j.est_reel && j.player_id === Number(playerId);
                 if (!estMoi) j.niveau = null;

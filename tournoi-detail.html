@@ -279,13 +279,13 @@
                     if (a.tete_de_serie && b.tete_de_serie) return a.tete_de_serie - b.tete_de_serie;
                     if (a.tete_de_serie) return -1;
                     if (b.tete_de_serie) return 1;
-                    return b.niveau - a.niveau;
+                    return (a.rang || 99999) - (b.rang || 99999);
                 });
 
             function carteInscrit(j, enAttente) {
                 const estMoi = j.est_reel && j.player_id === Number(playerId);
-                // Une seule ligne, ordre : classement · drapeau · nom · coach.
-                const rangTxt = j.rangRace ? '#' + j.rangRace : 'NC';
+                // Une seule ligne, ordre : classement (Live) · drapeau · nom · coach.
+                const rangTxt = j.rang ? '#' + j.rang : 'NC';
                 const seed = j.tete_de_serie ? '[' + j.tete_de_serie + '] ' : '';
                 const nomLien = lienAdversaire(flagImg(j.drapeau) + ' ' + formaterNomComplet(j.nom), j.est_reel, j.player_id, j.rival_id);
                 // Niveau totalement confidentiel ici, y compris le tien - le nom du coach,
