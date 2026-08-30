@@ -1750,9 +1750,16 @@ function executerAvancementSemaine() {
                     const perte = Math.floor(valeur * 0.04);
                     competencesErodees[cle] = Math.max(0, valeur - perte);
                 });
-                if (semaine % 4 === 0) {
-                    pointsEnergie = Math.min(100, pointsEnergie + 5);
-                }
+            }
+
+            // Regeneration d'energie : +5 (plafonne a 100) a l'entree d'une semaine de
+            // tournoi dont le numero est un multiple de 4 - soit S4, S8, ..., S48, tous
+            // les 4 tours a partir de la S4, RELANCE a chaque saison. Aucun gain a
+            // l'entree en Pre-saison / Semaine 0 (demande explicite de l'utilisateur,
+            // 2026-08-30 : base sur la position DANS la saison, plus sur la semaine
+            // absolue, qui donnait un gain decale et un 13e a la bascule Pre-saison).
+            if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine % 4 === 0) {
+                pointsEnergie = Math.min(100, pointsEnergie + 5);
             }
 
             // Repartition d'XP programmee par le coach (via /api/repartir-xp) : appliquee
