@@ -311,11 +311,12 @@ function genererJoueurLambda(categorie, estFeminin) {
     };
 }
 
-const LONGUEUR_SAISON = 51; // 1 Pre-saison + 1 Semaine 0 + 49 semaines de tournois
+const LONGUEUR_SAISON = 52; // 1 Pre-saison + 1 Semaine 0 + S1-S49 (tournois) + S50 (semaine de la moulinette, sans tournoi individuel) - passe de 51 a 52 le 2026-08-30 pour que la moulinette (entree en S-2 = S50) ne tombe plus sur la finale de Coupe Davis (S49)
 
 // Interprete un semaine_actuelle absolu (sans borne, incremente indefiniment) en
-// phase de saison : presaison/s0 (aucun tournoi, aucune XP) ou tournoi (avec la
-// position 1-49 a chercher dans CALENDRIER_TOURNOIS).
+// phase de saison : presaison/s0 (aucun tournoi, aucune XP) ou tournoi (position
+// 1-50 ; S1-S49 portent les tournois de CALENDRIER_TOURNOIS, S50 n'en a aucun -
+// c'est la semaine de la moulinette).
 function phaseDeSemaine(semaine) {
     const positionSaison = ((semaine - 1) % LONGUEUR_SAISON) + 1;
     const numeroSaison = Math.floor((semaine - 1) / LONGUEUR_SAISON) + 1;

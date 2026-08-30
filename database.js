@@ -740,7 +740,10 @@ const migrations = [
     // automatique - accorde une fois aux coachs ayant teste avant le vrai lancement
     // (voir la route ponctuelle qui le pose sur les comptes concernes). DEFAULT 0
     // pour que tout nouveau compte apres le lancement ne l'ait jamais par erreur.
-    "ALTER TABLE users ADD COLUMN est_beta_testeur INTEGER DEFAULT 0"
+    "ALTER TABLE users ADD COLUMN est_beta_testeur INTEGER DEFAULT 0",
+    // Marqueur du recalage de semaine_actuelle lie au passage LONGUEUR_SAISON 51->52
+    // (ajout d'une S50, semaine de la moulinette). Voir le bloc guarde plus bas.
+    "ALTER TABLE jeu_etat ADD COLUMN patch_longueur_52 INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {
@@ -769,5 +772,24 @@ db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_coupe_styles_unique_v2 ON coupe_s
 // jamais reprendre ce statut - cette purge ne rattrape que les refus deja
 // enregistres avant ce correctif. Sans effet (0 ligne) une fois la base a jour.
 db.prepare("DELETE FROM players WHERE statut = 'refuse'").run();
+
+// Recalage unique lie au passage LONGUEUR_SAISON 51 -> 52 (ajout d'une S50, la
+// semaine de la moulinette, pour ne plus tomber sur la finale de Coupe Davis en
+// S49 - demande explicite de l'utilisateur, 2026-08-30). phaseDeSemaine recalcule
+// tout a la volee par modulo LONGUEUR_SAISON : une base pile a la frontiere d'un
+// cycle de l'ANCIEN modele (Pre-saison <=> (semaine_actuelle - 1) % 51 === 0,
+// cas de la prod : semaine 52) serait sinon reinterpretee comme "S50" de la
+// saison precedente. On avance alors semaine_actuelle d'autant de cycles de 51
+// deja ecoules (1 pour la prod : 52 -> 53), pour rester exactement sur la meme
+// phase affichee. Les bases en cours de saison (non-frontiere, ex. dev) ne
+// bougent pas. Le marqueur patch_longueur_52 garantit un passage unique.
+db.prepare(`
+    UPDATE jeu_etat
+    SET semaine_actuelle = semaine_actuelle + ((semaine_actuelle - 1) / 51)
+    WHERE patch_longueur_52 = 0
+      AND semaine_actuelle > 1
+      AND ((semaine_actuelle - 1) % 51) = 0
+`).run();
+db.prepare("UPDATE jeu_etat SET patch_longueur_52 = 1 WHERE patch_longueur_52 = 0").run();
 
 module.exports = db;

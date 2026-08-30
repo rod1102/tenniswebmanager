@@ -1050,12 +1050,14 @@ app.get('/api/planification/:playerId', (req, res) => {
         // Demande explicite de l'utilisateur, 2026-08-26.
         const coupes = joueursEngagesCoupeDavis(player, debut, fin);
 
-        // finDeSaison : derniere semaine de type "tournoi" du cycle, juste avant que la
-        // moulinette s'applique a la bascule vers la Pre-saison suivante - rien a y
-        // planifier (aucun tournoi n'y tombe jamais), donc le select repos/entrainement
-        // n'a pas de sens la, contrairement aux autres semaines "tournoi" classiques
-        // (bug signale par l'utilisateur, 2026-08-24 : affichait un select vide avec
-        // l'alerte "bientot trop tard" au lieu d'expliquer qu'il n'y a rien a faire).
+        // finDeSaison : derniere semaine de type "tournoi" du cycle = S50
+        // (`LONGUEUR_SAISON - 2`), la semaine de la moulinette - aucun tournoi n'y
+        // tombe jamais et il n'y a rien a y planifier, donc le select
+        // repos/entrainement n'a pas de sens la, contrairement aux autres semaines
+        // "tournoi" classiques (bug signale par l'utilisateur, 2026-08-24 : affichait
+        // un select vide avec l'alerte "bientot trop tard" au lieu d'expliquer qu'il
+        // n'y a rien a faire). Depuis le 2026-08-30 c'est S50 et non plus S49 (finale
+        // de Coupe Davis).
         const phases = {};
         for (let s = debut; s <= fin; s++) {
             const p = phaseAffichee(s);
@@ -1363,9 +1365,11 @@ function variationDispositionsIntersaison(indexIntersaison) {
 }
 
 // "La moulinette" au sens strict (rabotage des competences) : declenchee une seule
-// fois a l'ENTREE en semaine 49 (derniere semaine de tournoi du cycle), PAS a la
-// bascule vers la Pre-saison suivante comme avant (demande explicite de
-// l'utilisateur, 2026-08-24). Ouvre une repartition manuelle des competences pour
+// fois a l'ENTREE en S50 (`LONGUEUR_SAISON - 2`, derniere semaine du cycle, sans
+// aucun tournoi individuel), PAS a la bascule vers la Pre-saison suivante comme
+// avant (demande explicite de l'utilisateur, 2026-08-24 ; deplacee de S49 a S50 le
+// 2026-08-30 pour ne plus coincider avec la finale de Coupe Davis, en S49).
+// Ouvre une repartition manuelle des competences pour
 // les joueurs les plus developpes (cible = ((XP totale - 200) / 2.5) + 120, jamais
 // si cible >= total) au lieu d'une reduction automatique (regle PDF, revient sur un
 // choix precedent). Constante +120 depuis le 2026-08-30 (etait +100 avant, demande
@@ -1863,10 +1867,11 @@ function executerAvancementSemaine() {
         db.prepare('UPDATE jeu_etat SET semaine_actuelle = semaine_actuelle + 1 WHERE id = 1').run();
 
         // Moulinette : marquee "en attente" une seule fois, exactement a l'entree en
-        // semaine 49 (derniere semaine de tournoi du cycle), pas a la bascule
-        // Pre-saison (demande explicite de l'utilisateur, 2026-08-24). Le vrai calcul
-        // est differe jusqu'a la prochaine connexion du coach (2026-08-25), voir
-        // marquerMoulinetteEnAttente plus haut.
+        // S50 (LONGUEUR_SAISON - 2, derniere semaine du cycle, sans tournoi), pas a la
+        // bascule Pre-saison (demande explicite de l'utilisateur, 2026-08-24 ;
+        // deplacee de S49 a S50 le 2026-08-30, la finale de Coupe Davis occupant S49).
+        // Le vrai calcul est differe jusqu'a la prochaine connexion du coach
+        // (2026-08-25), voir marquerMoulinetteEnAttente plus haut.
         if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine === LONGUEUR_SAISON - 2) {
             marquerMoulinetteEnAttente();
         }
