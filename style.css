@@ -907,6 +907,27 @@ h1 {
     margin: 4px auto 14px;
 }
 
+/* ---------- Bandeau "joueurs a valider" (accueil.html, admin uniquement) ---------- */
+
+.admin-validations-alerte {
+    display: block;
+    margin: 0 0 20px;
+    padding: 12px 18px;
+    border-radius: 10px;
+    background: rgba(212, 240, 0, 0.12);
+    border: 1px solid rgba(212, 240, 0, 0.4);
+    color: #D4F000;
+    font-weight: 600;
+    font-size: 0.9rem;
+    text-align: center;
+    text-decoration: none;
+    transition: background 0.15s ease;
+}
+
+.admin-validations-alerte:hover {
+    background: rgba(212, 240, 0, 0.2);
+}
+
 /* ---------- Menu deroulant ---------- */
 
 .nav-menu {

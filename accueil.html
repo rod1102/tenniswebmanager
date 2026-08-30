@@ -39,6 +39,8 @@
                 <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
             </div>
 
+            <div id="validations-admin-container"></div>
+
             <div id="annonce-container"></div>
 
             <div id="alerte-capitaine-container"></div>
@@ -117,6 +119,22 @@
             if (response.ok && data.user.role === 'admin') {
                 document.getElementById('admin-link').style.display = 'inline-block';
                 estAdminCourant = true;
+            }
+        }
+
+        // Bandeau admin : "X joueurs sont a valider", uniquement pour l'admin et
+        // uniquement s'il y a au moins une inscription en attente.
+        async function afficherValidationsAdmin() {
+            const container = document.getElementById('validations-admin-container');
+            if (!estAdminCourant) { container.innerHTML = ''; return; }
+            try {
+                const response = await fetch('/api/admin/en-attente');
+                const data = await response.json();
+                const n = (response.ok && data.players) ? data.players.length : 0;
+                if (n === 0) { container.innerHTML = ''; return; }
+                container.innerHTML = `<a href="admin.html" class="admin-validations-alerte">${n} joueur${n > 1 ? 's sont' : ' est'} à valider — aller à l'administration</a>`;
+            } catch (e) {
+                container.innerHTML = '';
             }
         }
 
@@ -435,6 +453,7 @@
         (async function () {
             await verifierAdmin();
             chargerAnnonce();
+            afficherValidationsAdmin();
         })();
         chargerSemaine();
         chargerAccueil();
