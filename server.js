@@ -3090,10 +3090,68 @@ function melanger(liste) {
     return copie;
 }
 
+// --- Niveau des bots cale sur celui des joueurs reels (demande explicite de
+// l'utilisateur, 2026-08-31) ---
+// Le niveau de jeu d'un bot (rival persistant OU lambda jetable) n'est plus une
+// valeur fixe : a chaque tirage de tournoi (et a chaque rencontre de Coupe Davis/
+// BJK Cup), il est tire dans une bande de 70 a 100 % de la MOYENNE du niveau de
+// jeu des joueurs reels valides du circuit - avec un plancher a 330 (niveau d'un
+// perso frais) tant qu'il y a moins de 4 reels ou que leur moyenne est basse.
+// Reference "niveau de jeu" = moyenne de niveauNormal() sur les 3 surfaces (forme/
+// energie/automatismes du moment inclus). Les niveaux d'un meme tournoi sont
+// rendus distincts tant que la largeur de bande le permet.
+const NIVEAU_BOT_PLANCHER = 330;
+const NIVEAU_BOT_MIN_REELS = 4;
+
+function niveauJeuReferenceReel(player) {
+    return SURFACES.reduce(function (s, surf) { return s + niveauNormal(player, surf); }, 0) / SURFACES.length;
+}
+
+function moyenneNiveauJeuReels(circuit) {
+    const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
+    const reels = db.prepare("SELECT * FROM players WHERE type = ? AND statut = 'valide'").all(type);
+    if (reels.length < NIVEAU_BOT_MIN_REELS) return NIVEAU_BOT_PLANCHER;
+    const moy = reels.reduce(function (s, p) { return s + niveauJeuReferenceReel(p); }, 0) / reels.length;
+    return Math.max(NIVEAU_BOT_PLANCHER, moy);
+}
+
+// Un seul niveau de bot dans la bande (Coupe Davis : 1-2 rivaux par cote).
+function niveauBotUnique(circuit) {
+    return Math.round(moyenneNiveauJeuReels(circuit) * (0.70 + Math.random() * 0.30));
+}
+
+// Redistribue le niveau de TOUS les bots d'un tournoi dans la bande, en les
+// rendant distincts autant que possible. Appelee a la fin de tirerAuSort.
+function recalerNiveauxBotsTournoi(tournoiId, circuit) {
+    const bots = db.prepare("SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 0 AND nom != 'BYE'").all(tournoiId);
+    if (bots.length === 0) return;
+    const M = moyenneNiveauJeuReels(circuit);
+    const bas = Math.round(M * 0.70);
+    const haut = Math.round(M);
+    const largeur = Math.max(1, haut - bas);
+    const utilises = new Set();
+    const maj = db.prepare('UPDATE tournoi_joueurs SET niveau = ? WHERE id = ?');
+    melanger(bots).forEach(function (b, i) {
+        let v = bots.length > 1
+            ? bas + Math.round((i / (bots.length - 1)) * largeur) + Math.round((Math.random() - 0.5) * Math.min(6, largeur / bots.length))
+            : bas + Math.floor(Math.random() * (largeur + 1));
+        v = Math.max(bas, Math.min(haut, v));
+        if (utilises.has(v)) {
+            for (let d = 1; d <= largeur; d++) {
+                if (v - d >= bas && !utilises.has(v - d)) { v -= d; break; }
+                if (v + d <= haut && !utilises.has(v + d)) { v += d; break; }
+            }
+        }
+        utilises.add(v);
+        maj.run(v, b.id);
+    });
+}
+
 // Roster persistant de rivaux fictifs par coach et par circuit, utilise pour que
 // les Classements (ATP/WTA Live/Race) aient de vrais rivaux qui cumulent des
 // points d'un tournoi a l'autre, plutot que des lambdas jetables. Genere une
-// seule fois (lazy-init) avec une repartition de niveaux en pyramide.
+// seule fois (lazy-init) ; le niveau stocke ici ne sert plus qu'a la Coupe Davis
+// avant recalage - voir recalerNiveauxBotsTournoi / niveauBotUnique.
 const ROSTER_SIZE = 200;
 const CATEGORIES_ROSTER = [250, 250, 250, 500, 500, 500, 1000, 1000, 1000, 'slam', 'slam'];
 
@@ -3609,6 +3667,10 @@ function tirerAuSort(tournoiId, entreeCalendrier) {
             majPosition.run(index, e.id);
         }
     });
+
+    // Niveau des bots (rivaux + lambdas) recale sur la moyenne des joueurs reels
+    // du circuit, une fois le tableau fige - cf. recalerNiveauxBotsTournoi.
+    recalerNiveauxBotsTournoi(tournoiId, entreeCalendrier.circuit);
 
     db.prepare("UPDATE tournois SET statut = 'a_venir' WHERE id = ?").run(tournoiId);
 
@@ -8894,8 +8956,10 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
             const mental = normal + player.mental_courant;
             return { normal, mental, mentalCourant: player.mental_courant, joueur: player };
         }
-        const rival = db.prepare('SELECT * FROM classement_joueurs WHERE id = ?').get(entree.id);
-        return { normal: rival.niveau, mental: rival.niveau + 100, mentalCourant: 100, joueur: null };
+        // Niveau du rival recale sur la moyenne des joueurs reels du circuit (bande
+        // 70-100 %), comme pour un tournoi - cf. niveauBotUnique.
+        const niv = niveauBotUnique(tie.circuit);
+        return { normal: niv, mental: niv + 100, mentalCourant: 100, joueur: null };
     }
 
     const vDomicile = valeurs(domicileEntree);
@@ -9190,8 +9254,8 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
             const mental = normal + player.mental_courant;
             return Object.assign({ joueur: player, style: null }, ajusterNiveauxStyle(normal, mental, null, player.mental_courant, 1));
         }
-        const rival = db.prepare('SELECT * FROM classement_joueurs WHERE id = ?').get(id);
-        return { normal: rival.niveau, mental: rival.niveau + 100 };
+        const niv = niveauBotUnique(tie.circuit);
+        return { normal: niv, mental: niv + 100 };
     }
 
     const d1 = valeurJoueur(!!compoDomicile.double_j1_est_reel, compoDomicile.double_j1_id);
