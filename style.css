@@ -1652,55 +1652,12 @@ h1 {
     background: rgba(226, 75, 74, 0.08);
 }
 
-/* Liste des inscrits (tournoi-detail.html) : une seule ligne par joueur,
-   ordre classement -> drapeau -> nom -> coach. Volontairement discret : pas de
-   liseré bleu vif ni de nom en gras blanc, juste une carte grise sobre. */
-.inscrit-card {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 3px 11px;
-    padding: 9px 14px;
-    background: rgba(255, 255, 255, 0.035);
-    border: 1px solid rgba(255, 255, 255, 0.09);
-    border-left: 1px solid rgba(255, 255, 255, 0.09);
-}
-
-.inscrit-rang {
-    flex-shrink: 0;
-    font-weight: 600;
-    font-size: 0.8rem;
-    color: #8B98A5;
-    font-variant-numeric: tabular-nums;
-    min-width: 3em;
-}
-
-.inscrit-corps {
-    min-width: 0;
-    font-size: 0.84rem;
-    font-weight: 500;
-    color: #D6DCE2;
-}
-
-.inscrit-corps .lien-adversaire { font-weight: 600; color: #D6DCE2; }
-.inscrit-corps .lien-adversaire:hover { color: #D4F000; }
-.inscrit-meta { color: #7C8794; font-weight: 400; font-size: 0.8rem; }
-
-.inscrit-card.tournoi-card-attente {
-    border-color: rgba(226, 75, 74, 0.32);
-    background: rgba(226, 75, 74, 0.045);
-}
-
-/* Le joueur du coach : nom en jaune (comme .bracket-moi dans le tableau),
-   plus un liseré jaune très discret sur la carte. */
-.inscrit-card-moi {
-    border-color: rgba(212, 240, 0, 0.28);
-    border-left-color: rgba(212, 240, 0, 0.28);
-    background: rgba(212, 240, 0, 0.05);
-}
-.inscrit-card-moi .inscrit-corps,
-.inscrit-card-moi .inscrit-corps .lien-adversaire { color: #D4F000; }
-.inscrit-card-moi .inscrit-rang { color: #9AA84A; }
+/* Liste des inscrits (tournoi-detail.html) : tableau compact .classement-table
+   (rang / joueur / coach), pense pour tenir jusqu'a 128 lignes lisiblement. */
+.classement-table td.rang { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.inscrit-seed { color: #8B98A5; font-size: 0.78em; }
+.inscrit-coach-cell { color: #8B98A5; }
+.inscrit-attente td { color: #7C8794; font-style: italic; }
 
 .tournoi-name-atp { color: #5FA8E8; }
 .tournoi-name-wta { color: #E87CC2; }

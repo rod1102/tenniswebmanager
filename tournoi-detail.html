@@ -282,36 +282,39 @@
                     return (a.rang || 99999) - (b.rang || 99999);
                 });
 
-            function carteInscrit(j, enAttente) {
+            // Tableau compact (jusqu'a 128 lignes pour un GC) : rang, joueur, coach.
+            // Le joueur du coach en jaune (.classement-moi). Niveau confidentiel.
+            function ligneInscrit(j, enAttente) {
                 const estMoi = j.est_reel && j.player_id === Number(playerId);
-                // Une seule ligne, ordre : classement (Live) · drapeau · nom · coach.
-                const rangTxt = j.rang ? '#' + j.rang : 'NC';
-                const seed = j.tete_de_serie ? '[' + j.tete_de_serie + '] ' : '';
+                const cls = estMoi ? 'classement-moi' : (enAttente ? 'inscrit-attente' : '');
+                const seed = j.tete_de_serie ? '<span class="inscrit-seed">[' + j.tete_de_serie + ']</span> ' : '';
                 const nomLien = lienAdversaire(flagImg(j.drapeau) + ' ' + formaterNomComplet(j.nom), j.est_reel, j.player_id, j.rival_id);
-                // Niveau totalement confidentiel ici, y compris le tien - le nom du coach,
-                // lui, n'apparait que pour un vrai joueur (les rivaux n'ont pas de coach).
-                const suffixes = [];
-                if (j.coachNom) suffixes.push('Coach : ' + j.coachNom);
-                if (j.tour_elimine) suffixes.push(j.tour_elimine);
-                if (enAttente) suffixes.push('en liste d\'attente');
-                const classeFond = enAttente ? ' tournoi-card-attente' : '';
-                return `<div class="tournoi-card inscrit-card${classeFond}${estMoi ? ' inscrit-card-moi' : ''}">
-                    <span class="inscrit-rang">${rangTxt}</span>
-                    <span class="inscrit-corps">${seed}${nomLien}${suffixes.length ? ' <span class="inscrit-meta">· ' + suffixes.join(' · ') + '</span>' : ''}</span>
-                </div>`;
+                return `<tr${cls ? ' class="' + cls + '"' : ''}>
+                    <td class="rang">${j.rang ? '#' + j.rang : 'NC'}</td>
+                    <td>${seed}${nomLien}</td>
+                    <td class="inscrit-coach-cell">${j.coachNom || '—'}</td>
+                </tr>`;
             }
 
-            const nbConfirmes = tries.length;
-            const placesRestantes = instance.taille_tableau - nbConfirmes;
+            const enAttente = instance.enAttente || [];
+            const corpsAttente = enAttente.length
+                ? '<tr class="classement-separateur"><td colspan="3">Liste d\'attente</td></tr>'
+                    + enAttente.map(function (j) { return ligneInscrit(j, true); }).join('')
+                : '';
+
+            const placesRestantes = instance.taille_tableau - tries.length;
             const noteCompletude = placesRestantes > 0
-                ? `<p class="match-hint" style="text-align:left; padding:8px 0;">${placesRestantes} place${placesRestantes > 1 ? 's' : ''} restante${placesRestantes > 1 ? 's' : ''} — complétée${placesRestantes > 1 ? 's' : ''} automatiquement faute d'assez de joueurs humains inscrits.</p>`
+                ? `<p class="match-hint" style="text-align:left; padding:10px 0 0;">${placesRestantes} place${placesRestantes > 1 ? 's' : ''} restante${placesRestantes > 1 ? 's' : ''} — complétée${placesRestantes > 1 ? 's' : ''} automatiquement faute d'assez de joueurs humains inscrits.</p>`
                 : '';
 
             panneau.innerHTML = `
-                <div class="tournoi-list">
-                    ${tries.map(function (j) { return carteInscrit(j, false); }).join('')}
-                    ${(instance.enAttente || []).map(function (j) { return carteInscrit(j, true); }).join('')}
-                </div>
+                <table class="classement-table">
+                    <thead><tr><th>Rang</th><th>Joueur</th><th>Coach</th></tr></thead>
+                    <tbody>
+                        ${tries.map(function (j) { return ligneInscrit(j, false); }).join('')}
+                        ${corpsAttente}
+                    </tbody>
+                </table>
                 ${noteCompletude}
             `;
         }
