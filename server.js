@@ -2640,8 +2640,8 @@ function nbConfrontations(confrontations, adversaireEstReel, adversaireId, limit
 // Bonus de niveau de jeu apporte par les dispositions d'un vrai joueur pour UN
 // match precis (tournoi individuel ET rencontres de Coupe Davis/Fed Cup en simple -
 // jamais le double, qui n'a pas d'adversaire individuel unique). "fixe" s'applique pendant tout le
-// match, "sangFroid" seulement dans le set decisif (le jeu se joue toujours en 2
-// sets gagnants, donc systematiquement le 3e). Plusieurs dispositions peuvent se
+// match, "sangFroid" seulement dans le set decisif (3e set en best of 3, 5e set en
+// best of 5 pour les Grands Chelems hommes). Plusieurs dispositions peuvent se
 // cumuler (demande explicite de l'utilisateur) : chaque condition remplie ajoute
 // son propre bonus indépendamment des autres.
 function calculerBonusDispositions(player, adversaireEntree, contexte) {
@@ -2697,8 +2697,8 @@ function ajusterNiveauxStyle(niveauA_normal, niveauA_mental, styleA, mentalCoura
 }
 
 // bonusSangFroidA/B (disposition "Sang froid", optionnels) : n'ajoutent au niveau
-// de jeu que dans le set decisif - le jeu se joue toujours en 2 sets gagnants, donc
-// c'est systematiquement le 3e set (numeroSet === 3), jamais un 5e.
+// de jeu que dans le SET DECISIF - le 3e set en best of 3, le 5e set en best of 5
+// (Grand Chelem hommes) : cf. numeroSetDecisif ci-dessous.
 // etatPhysiqueA/B (optionnels) : { forme, pointsEnergie, condition } d'un vrai
 // joueur AVANT le match, pour tirer une eventuelle alerte kine jeu par jeu et
 // degrader dynamiquement son niveau de jeu pour le reste du match (regle du PDF,
