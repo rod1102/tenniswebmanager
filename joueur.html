@@ -817,21 +817,22 @@
                 <div class="bar-row"><span class="bar-label">Herbe</span><div class="bar-track"><div class="bar-fill automatisme-herbe" style="width:${Math.min(100, player.surface_herbe_automatismes / 30 * 100)}%;"></div></div><span class="bar-value">${player.surface_herbe_automatismes}</span></div>
 
                 <div class="stats-header">Spécialisation par surface</div>
+                <p class="match-hint" style="text-align:left; padding:0 0 8px;">« Niveau » = points ordinaires. « Points importants » (balle de break/set/match, tie-break) : la forme ne compte pas, le mental prend sa place.</p>
                 <div class="surface-grid">
                     <div class="surface-card dur">
                         <div class="surface-name">Dur</div>
                         <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_dur_niveau}</span></div>
-                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_dur_niveau_mental}</span></div>
+                        <div class="stat-row-mini"><span>Points importants</span><span>${player.surface_dur_niveau_mental}</span></div>
                     </div>
                     <div class="surface-card terre">
                         <div class="surface-name">Terre battue</div>
                         <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_terre_niveau}</span></div>
-                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_terre_niveau_mental}</span></div>
+                        <div class="stat-row-mini"><span>Points importants</span><span>${player.surface_terre_niveau_mental}</span></div>
                     </div>
                     <div class="surface-card herbe">
                         <div class="surface-name">Herbe</div>
                         <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_herbe_niveau}</span></div>
-                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_herbe_niveau_mental}</span></div>
+                        <div class="stat-row-mini"><span>Points importants</span><span>${player.surface_herbe_niveau_mental}</span></div>
                     </div>
                 </div>
 
@@ -841,17 +842,17 @@
                     <div class="surface-card dur">
                         <div class="surface-name">Dur</div>
                         <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_dur_niveau_double}</span></div>
-                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_dur_niveau_mental_double}</span></div>
+                        <div class="stat-row-mini"><span>Points importants</span><span>${player.surface_dur_niveau_mental_double}</span></div>
                     </div>
                     <div class="surface-card terre">
                         <div class="surface-name">Terre battue</div>
                         <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_terre_niveau_double}</span></div>
-                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_terre_niveau_mental_double}</span></div>
+                        <div class="stat-row-mini"><span>Points importants</span><span>${player.surface_terre_niveau_mental_double}</span></div>
                     </div>
                     <div class="surface-card herbe">
                         <div class="surface-name">Herbe</div>
                         <div class="stat-row-mini"><span>Niveau</span><span>${player.surface_herbe_niveau_double}</span></div>
-                        <div class="stat-row-mini"><span>Niveau + Mental</span><span>${player.surface_herbe_niveau_mental_double}</span></div>
+                        <div class="stat-row-mini"><span>Points importants</span><span>${player.surface_herbe_niveau_mental_double}</span></div>
                     </div>
                 </div>
             `;

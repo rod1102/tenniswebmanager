@@ -563,13 +563,16 @@ app.get('/api/joueurs/:userId', (req, res) => {
 
         players.forEach(function (player) {
             SURFACES.forEach(function (surface) {
+                // "niveau" = points ordinaires (forme comptee). "niveau_mental" = points
+                // importants : la forme est retiree et le mental prend sa place (regle PDF),
+                // il ne s'y ajoute pas.
                 const niveauBase = niveauNormal(player, surface);
                 player['surface_' + surface + '_niveau'] = Math.round(niveauBase * 100) / 100;
-                player['surface_' + surface + '_niveau_mental'] = Math.round((niveauBase + player.mental_courant) * 100) / 100;
+                player['surface_' + surface + '_niveau_mental'] = Math.round((niveauBase - player.forme + player.mental_courant) * 100) / 100;
 
                 const niveauDoubleBase = niveauDouble(player, surface);
                 player['surface_' + surface + '_niveau_double'] = Math.round(niveauDoubleBase * 100) / 100;
-                player['surface_' + surface + '_niveau_mental_double'] = Math.round((niveauDoubleBase + player.mental_courant) * 100) / 100;
+                player['surface_' + surface + '_niveau_mental_double'] = Math.round((niveauDoubleBase - player.forme + player.mental_courant) * 100) / 100;
             });
             player.drapeau = drapeau(player.nationalite);
         });
@@ -2455,9 +2458,10 @@ function nomJoueur(cle) {
 }
 
 // Resout UN point : tirage technique simple si ce point n'a rien de decisif
-// (menacant = null), sinon un unique tirage avec le mental deja integre au niveau
-// (niveau_mental = niveau_normal + mental_courant) - meme mecanique que
-// resoudrePointTB pour le tie-break. Plus de 1er tirage technique "a l'aveugle"
+// (menacant = null), sinon un unique tirage sur niveau_mental - meme mecanique que
+// resoudrePointTB pour le tie-break. niveau_mental est prepare par l'appelant :
+// niveau SANS la forme, PLUS le mental courant (regle PDF - sur les points
+// importants la forme ne compte pas, le mental la remplace). Plus de 1er tirage technique "a l'aveugle"
 // suivi de relances silencieuses tant que technique et mental ne s'accordent pas :
 // chaque relance invisible gonflait quand meme pointsImportants (donc le gain de
 // mental max) sans jamais apparaitre dans le teletexte (demande explicite de
@@ -3847,7 +3851,9 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
     // reste donc "brut" ici (sans malus, juste les dispositions).
     const niveauReel_normal_avecDispositions = niveauReel_normal + bonus.fixe;
 
-    const niveauReel_mental = niveauReel_normal_avecDispositions + player.mental_courant;
+    // Points importants : le mental REMPLACE la forme (regle PDF - la forme n'est
+    // pas comptee sur ces points), il ne s'y ajoute pas.
+    const niveauReel_mental = niveauReel_normal_avecDispositions - player.forme + player.mental_courant;
     const niveauLambda_normal = lambda.niveau;
     const niveauLambda_mental = niveauLambda_normal + 100;
 
@@ -3954,10 +3960,11 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
     // Malus de condition physique (PDF) : -50 fatigue, -100 diminue, 0 en pleine
     // forme - applique desormais DYNAMIQUEMENT jeu par jeu a l'interieur de
     // simulerMatch (via etatPhysiqueA/B), pas fige avant le match.
+    // Points importants : le mental remplace la forme, ne s'y ajoute pas (regle PDF).
     const niveau1_normal = niveauNormal(player1, tournoi.surface, (j1.energie_misee || 0) * 5) + bonus1.fixe;
-    const niveau1_mental = niveau1_normal + player1.mental_courant;
+    const niveau1_mental = niveau1_normal - player1.forme + player1.mental_courant;
     const niveau2_normal = niveauNormal(player2, tournoi.surface, (j2.energie_misee || 0) * 5) + bonus2.fixe;
-    const niveau2_mental = niveau2_normal + player2.mental_courant;
+    const niveau2_mental = niveau2_normal - player2.forme + player2.mental_courant;
 
     const style1 = styleDuTourCourant(tournoi.id, player1, j1);
     const style2 = styleDuTourCourant(tournoi.id, player2, j2);
@@ -8966,7 +8973,8 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
         if (entree.estReel) {
             const player = db.prepare('SELECT * FROM players WHERE id = ?').get(entree.id);
             const normal = niveauNormal(player, surface);
-            const mental = normal + player.mental_courant;
+            // Points importants : le mental remplace la forme (regle PDF).
+            const mental = normal - player.forme + player.mental_courant;
             return { normal, mental, mentalCourant: player.mental_courant, joueur: player };
         }
         // Niveau du rival recale sur la moyenne des joueurs reels du circuit (bande
@@ -9264,7 +9272,8 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
         if (estReel) {
             const player = db.prepare('SELECT * FROM players WHERE id = ?').get(id);
             const normal = niveauDouble(player, surface);
-            const mental = normal + player.mental_courant;
+            // Points importants : le mental remplace la forme (regle PDF).
+            const mental = normal - player.forme + player.mental_courant;
             return Object.assign({ joueur: player, style: null }, ajusterNiveauxStyle(normal, mental, null, player.mental_courant, 1));
         }
         const niv = niveauBotUnique(tie.circuit);
