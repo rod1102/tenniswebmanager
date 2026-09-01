@@ -5798,6 +5798,10 @@ app.get('/api/classement/detail', (req, res) => {
             l.positionSemaine = positionSemaineAffichee(l.semaine);
             const set = retenusParCircuit[l.circuit];
             l.compte = set ? set.has(l.tournoi_id) : true;
+            // Live : dans combien de semaines ce resultat sort de la fenetre glissante
+            // de 52 semaines (0 = il sort au prochain changement de semaine). Non
+            // pertinent pour la Race (remise a zero en fin de saison).
+            l.expireDansSemaines = type === 'race' ? null : (l.semaine + FENETRE_LIVE - semaineActuelle);
         });
         const total = lignes.reduce(function (s, l) { return s + (l.compte ? (l.points_gagnes || 0) : 0); }, 0);
 

@@ -313,25 +313,46 @@
                 }
 
                 const auMoinsUnNonCompte = data.detail.some(function (d) { return d.compte === false; });
+                // Tri par points : comptés (du plus gros au plus faible) puis non comptés
+                // (idem). À points égaux, celui qui sort le plus tôt de la fenêtre d'abord.
+                data.detail.sort(function (a, b) {
+                    const na = a.compte === false, nb = b.compte === false;
+                    if (na !== nb) return na ? 1 : -1;
+                    const pb = (b.points_gagnes || 0) - (a.points_gagnes || 0);
+                    if (pb !== 0) return pb;
+                    return (a.semaine || 0) - (b.semaine || 0);
+                });
                 const lignesHtml = data.detail.map(function (d) {
                     const semaineTxt = d.positionSemaine !== null ? 'S' + d.positionSemaine : '—';
                     const nonCompte = d.compte === false;
                     const rouge = nonCompte ? ' style="color:#E24B4A;"' : '';
+                    let expire = '';
+                    if (d.expireDansSemaines != null) {
+                        const n = d.expireDansSemaines;
+                        const txt = n <= 0 ? 'sort au prochain changement de semaine' : 'sort dans ' + n + ' sem.';
+                        const couleur = (!nonCompte && n <= 4) ? ' style="color:#E8A13C;"' : '';
+                        expire = ` · <span class="detail-expire"${couleur}>${txt}</span>`;
+                    }
                     return `
                         <div class="stat-row">
-                            <span class="stat-label"${rouge}>${d.nom} (${semaineTxt} · ${d.tour_elimine || '-'})${nonCompte ? ' — non compté' : ''}</span>
+                            <span class="stat-label"${rouge}>${d.nom} — ${d.tour_elimine || '-'} (${semaineTxt})${expire}${nonCompte ? ' — non compté' : ''}</span>
                             <span class="stat-value"${rouge}>${d.points_gagnes || 0}</span>
                         </div>
                     `;
                 }).join('');
+                let notes = '';
+                if (auMoinsUnNonCompte) {
+                    notes += '<p class="regle-table-note" style="margin-top:12px;"><span style="color:#E24B4A;">En rouge</span> : résultats hors des 18 (ATP) / 16 (WTA) meilleurs retenus au classement — leurs points ne sont pas comptés.</p>';
+                }
+                if (type !== 'race') {
+                    notes += '<p class="regle-table-note" style="margin-top:8px;">Trié du plus gros gain au plus faible. « sort dans N sem. » = quand le résultat quittera la fenêtre glissante de 52 semaines (<span style="color:#E8A13C;">en orange</span> s\'il compte et part dans 4 semaines ou moins).</p>';
+                }
                 corps.innerHTML = lignesHtml + `
                     <div class="stat-row" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.15); padding-top:8px;">
                         <span class="stat-label" style="font-weight:700;">Total</span>
                         <span class="stat-value" style="font-weight:700;">${data.total}</span>
                     </div>
-                ` + (auMoinsUnNonCompte
-                    ? '<p class="regle-table-note" style="margin-top:12px;"><span style="color:#E24B4A;">En rouge</span> : résultats hors des 18 (ATP) / 16 (WTA) meilleurs retenus au classement — leurs points ne sont pas comptés.</p>'
-                    : '');
+                ` + notes;
             } catch (err) {
                 if (overlay.isConnected) {
                     document.getElementById('detail-points-corps').innerHTML = '<div class="match-hint">Impossible de charger le détail.</div>';
