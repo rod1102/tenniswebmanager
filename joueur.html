@@ -777,7 +777,7 @@
 
                 <div class="stat-row"><span class="stat-label">Âge</span><span class="stat-value">${player.age} ans</span></div>
                 <div class="stat-row"><span class="stat-label">Taille</span><span class="stat-value">${player.taille} cm</span></div>
-                <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value">${flagImg(player.drapeau)} ${player.nationalite}</span></div>
+                <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value"><a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(player.nationalite)}">${flagImg(player.drapeau)} ${player.nationalite}</a></span></div>
                 <div class="stat-row"><span class="stat-label">Main forte</span><span class="stat-value">${traduireMain(player.main_forte)}</span></div>
                 <div id="capitaine-zone"></div>
                 <div class="stat-row"><span class="stat-label">Classement Live</span><span class="stat-value">${rangLive}</span></div>

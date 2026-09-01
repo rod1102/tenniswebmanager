@@ -182,7 +182,7 @@
                     <div class="stat-row"><span class="stat-label">Nom</span><span class="stat-value">${(info.nom || '').toUpperCase()}</span></div>
                     <div class="stat-row"><span class="stat-label">Âge</span><span class="stat-value">${info.age} ans</span></div>
                     <div class="stat-row"><span class="stat-label">Taille</span><span class="stat-value">${info.taille} cm</span></div>
-                    <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value">${flagImg(info.drapeau)} ${info.nationalite}</span></div>
+                    <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value"><a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(info.nationalite)}">${flagImg(info.drapeau)} ${info.nationalite}</a></span></div>
                     <div class="stat-row"><span class="stat-label">Main forte</span><span class="stat-value">${traduireMain(info.main_forte)}</span></div>
                     <div class="stat-row"><span class="stat-label">Circuit</span><span class="stat-value">${info.circuit}</span></div>
                     <div class="stat-row"><span class="stat-label">Coach</span><span class="stat-value"><a class="lien-adversaire" href="coach.html?id=${info.coachUserId}">${info.coachNom}</a></span></div>
@@ -191,7 +191,7 @@
             } else {
                 panneau.innerHTML = `
                     <div class="stat-row"><span class="stat-label">Nom</span><span class="stat-value">${formaterNomComplet(info.nom)}</span></div>
-                    <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value">${flagImg(info.drapeau)} ${info.nationalite}</span></div>
+                    <div class="stat-row"><span class="stat-label">Nationalité</span><span class="stat-value"><a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(info.nationalite)}">${flagImg(info.drapeau)} ${info.nationalite}</a></span></div>
                     <div class="stat-row"><span class="stat-label">Circuit</span><span class="stat-value">${info.circuit}</span></div>
                     ${ligneClassement(info)}
                     <div class="match-hint">Rival persistant du circuit — infos personnelles (taille, main) non disponibles.</div>
