@@ -57,11 +57,11 @@
 
                         <div class="form-group">
                             <label for="p1-prenom">Prénom</label>
-                            <input type="text" id="p1-prenom" name="p1-prenom" required>
+                            <input type="text" id="p1-prenom" name="p1-prenom" maxlength="20" required>
                         </div>
                         <div class="form-group">
                             <label for="p1-nom">Nom</label>
-                            <input type="text" id="p1-nom" name="p1-nom" required>
+                            <input type="text" id="p1-nom" name="p1-nom" maxlength="20" required>
                         </div>
                         <div class="form-group">
                             <label for="p1-age">Âge</label>
@@ -340,11 +340,11 @@
 
                         <div class="form-group">
                             <label for="p2-prenom">Prénom</label>
-                            <input type="text" id="p2-prenom" name="p2-prenom" required>
+                            <input type="text" id="p2-prenom" name="p2-prenom" maxlength="20" required>
                         </div>
                         <div class="form-group">
                             <label for="p2-nom">Nom</label>
-                            <input type="text" id="p2-nom" name="p2-nom" required>
+                            <input type="text" id="p2-nom" name="p2-nom" maxlength="20" required>
                         </div>
                         <div class="form-group">
                             <label for="p2-age">Âge</label>
@@ -776,6 +776,13 @@
             }
             if (!nomValide(document.getElementById('p2-prenom').value) || !nomValide(document.getElementById('p2-nom').value)) {
                 alert('Le prénom et le nom de la joueuse ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.');
+                return;
+            }
+            const tropLong = ['p1-prenom', 'p1-nom', 'p2-prenom', 'p2-nom'].some(function (id) {
+                return document.getElementById(id).value.trim().length > 20;
+            });
+            if (tropLong) {
+                alert('Le prénom et le nom sont limités à 20 caractères chacun.');
                 return;
             }
 

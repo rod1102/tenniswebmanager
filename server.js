@@ -322,8 +322,12 @@ function dispositionsValides(joueur) {
 // Lettres (accents compris), espaces, apostrophes et tirets uniquement - meme jeu
 // de caracteres que celui deja suppose par capitaliserPrenom/formaterNom partout
 // ailleurs dans le jeu. Rejette chiffres, caracteres speciaux, chaine vide/blanche.
+const MAX_LONGUEUR_NOM = 20;
 function nomValide(texte) {
     return /^\p{L}+([\s'-]\p{L}+)*$/u.test((texte || '').trim());
+}
+function nomTropLong(texte) {
+    return (texte || '').trim().length > MAX_LONGUEUR_NOM;
 }
 
 function calculerNiveau(joueur) {
@@ -359,6 +363,9 @@ app.post('/api/joueurs', (req, res) => {
         }
         if (!nomValide(joueuse.prenom) || !nomValide(joueuse.nom)) {
             return res.status(400).json({ error: 'Le prenom et le nom de la joueuse ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.' });
+        }
+        if ([joueur.prenom, joueur.nom, joueuse.prenom, joueuse.nom].some(nomTropLong)) {
+            return res.status(400).json({ error: 'Le prenom et le nom sont limites a ' + MAX_LONGUEUR_NOM + ' caracteres chacun.' });
         }
         const budgetCourant = budgetActuelCompetences();
         if (!competencesValides(joueur, budgetCourant)) {
