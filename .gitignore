@@ -1,6 +1,7 @@
 .claude/
 .env
 McGraw.png
+planification-joueurs.xlsx
 node_modules/
 server-*.log
 tennis-manager.db
