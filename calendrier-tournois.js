@@ -90,9 +90,9 @@ const CALENDRIER_TOURNOIS = [
     { id: 'atp-miami', circuit: 'ATP', nom: 'Miami Open', pays: 'Etats-Unis', categorie: 1000, surface: 'dur', taille_tableau: 96, semaine_debut: 12, duree: 2, bareme: 'ATP_1000_96' },
 
     // --- ATP : swing terre battue ---
-    { id: 'atp-houston', circuit: 'ATP', nom: 'US Men\'s Clay Court Championships (Houston)', pays: 'Etats-Unis', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 15, duree: 1, bareme: 'ATP_250' },
+    // Houston (US Men's Clay Court Championships) et Bucarest (Romanian Open) retires
+    // du calendrier le 2026-09-02 (demande de l'utilisateur) - S15 garde Marrakech + Monte-Carlo.
     { id: 'atp-marrakech', circuit: 'ATP', nom: 'Grand Prix Hassan II (Marrakech)', pays: 'Maroc', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 15, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-bucarest', circuit: 'ATP', nom: 'Romanian Open (Bucarest)', pays: 'Roumanie', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 15, duree: 1, bareme: 'ATP_250' },
     { id: 'atp-monte-carlo', circuit: 'ATP', nom: 'Monte-Carlo Masters', pays: 'Monaco', categorie: 1000, surface: 'terre', taille_tableau: 56, semaine_debut: 15, duree: 1, bareme: 'ATP_1000_56' },
     { id: 'atp-barcelone', circuit: 'ATP', nom: 'Barcelona Open', pays: 'Espagne', categorie: 500, surface: 'terre', taille_tableau: 32, semaine_debut: 16, duree: 1, bareme: 'ATP_500' },
     { id: 'atp-munich', circuit: 'ATP', nom: 'Bavarian International (Munich)', pays: 'Allemagne', categorie: 500, surface: 'terre', taille_tableau: 32, semaine_debut: 16, duree: 1, bareme: 'ATP_500' },

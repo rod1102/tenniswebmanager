@@ -834,4 +834,28 @@ if (db.prepare('SELECT patch_tournois_52 AS p FROM jeu_etat WHERE id = 1').get()
     db.prepare("UPDATE jeu_etat SET patch_tournois_52 = 1 WHERE id = 1").run();
 }
 
+// Retrait de 2 tournois ATP 250 du calendrier (Houston, Bucarest) le 2026-09-02
+// (demande de l'utilisateur) : nettoyage unique des lignes qui les referencaient
+// (coeurs/favoris, liste d'attente, et le cas tres improbable d'un tournoi deja
+// cree pour une future edition).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_retrait_houston_bucarest INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_retrait_houston_bucarest AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const RETIRES = ['atp-houston', 'atp-bucarest'];
+    const ph = RETIRES.map(function () { return '?'; }).join(',');
+    const purge = db.transaction(function () {
+        const tIds = db.prepare(`SELECT id FROM tournois WHERE calendrier_id IN (${ph})`).all(...RETIRES).map(function (r) { return r.id; });
+        if (tIds.length) {
+            const tph = tIds.map(function () { return '?'; }).join(',');
+            db.prepare(`DELETE FROM tournoi_matchs WHERE tournoi_id IN (${tph})`).run(...tIds);
+            db.prepare(`DELETE FROM tournoi_joueurs WHERE tournoi_id IN (${tph})`).run(...tIds);
+            db.prepare(`DELETE FROM pronostics WHERE tournoi_id IN (${tph})`).run(...tIds);
+            db.prepare(`DELETE FROM tournois WHERE id IN (${tph})`).run(...tIds);
+        }
+        db.prepare(`DELETE FROM tournoi_liste_attente WHERE calendrier_id IN (${ph})`).run(...RETIRES);
+        db.prepare(`DELETE FROM tournoi_favoris WHERE calendrier_id IN (${ph})`).run(...RETIRES);
+        db.prepare("UPDATE jeu_etat SET patch_retrait_houston_bucarest = 1 WHERE id = 1").run();
+    });
+    purge();
+}
+
 module.exports = db;
