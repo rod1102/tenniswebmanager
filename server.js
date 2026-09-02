@@ -161,11 +161,22 @@ const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee',
 // ACTIFS - la mecanique d'accumulation vit dans executerAvancementSemaine. Un
 // joueur reel dont les SEMAINES_INACTIVITE_EXCLUSION dernieres semaines creditees
 // sont TOUTES "afk" (coach qui ne planifie plus rien) est exclu de la moyenne.
-// L'accumulateur repart de 0 a chaque entree en Pre-saison (le budget repart donc
-// de 120 tout net a chaque nouvelle saison). En Pre-saison / Semaine 0, on renvoie
-// directement 120.
+// A chaque entree en Pre-saison, l'accumulateur ne repart PAS de zero : il passe a
+// la moulinette (meme formule que celle des joueurs, `moulinetteDeLaValeur`) pour
+// donner la valeur de depart de la saison suivante - progression conservee d'une
+// saison a l'autre, mais rabotee si elle a trop gonfle (demande explicite de
+// l'utilisateur, 2026-09-02). En Pre-saison / Semaine 0, on renvoie directement 120.
 const RATIO_BUDGET_RATTRAPAGE = 0.70;
 const SEMAINES_INACTIVITE_EXCLUSION = 3;
+
+// Meme rabotage que la moulinette d'intersaison des joueurs (cf.
+// appliquerMoulinettePourJoueur) : cible = ((V - 200) / 2.5) + 120, appliquee
+// seulement si elle abaisse V (jamais d'augmentation), plancher a 0.
+function moulinetteDeLaValeur(v) {
+    if (!(v > 0)) return 0;
+    const cible = ((v - 200) / 2.5) + 120;
+    return cible < v ? Math.max(0, Math.floor(cible)) : v;
+}
 
 // Un joueur reel est "actif" tant que ses SEMAINES_INACTIVITE_EXCLUSION dernieres
 // semaines creditees ne sont pas toutes "afk". Trop peu de recul (personnage tout
@@ -1853,15 +1864,18 @@ function executerAvancementSemaine() {
         });
 
         // Accumulateur du budget de creation "en cours de saison" (voir
-        // budgetActuelCompetences). A chaque entree en Pre-saison / Semaine 0 il
-        // repart de 0 ; sur une vraie semaine de tournoi qu'on vient de terminer, il
-        // grandit de 70 % de la moyenne des XP reellement distribues cette
-        // semaine-la (journal_semaine_joueur.xp_credite = entrainement + tournoi)
-        // aux joueurs reels encore actifs. Demande explicite de l'utilisateur,
-        // 2026-09-02.
-        if (phaseNouvelleSemaine.type !== 'tournoi') {
-            db.prepare('UPDATE jeu_etat SET budget_creation_accumule = 0 WHERE id = 1').run();
-        } else if (phaseActuelle.type === 'tournoi') {
+        // budgetActuelCompetences). A l'entree en Pre-saison, il passe a la
+        // moulinette (moulinetteDeLaValeur) : la valeur rabotee sert de point de
+        // depart a la saison suivante (une seule fois, a l'entree en Pre-saison -
+        // pas a la bascule Pre-saison -> S0, sinon double rabotage). Sur une vraie
+        // semaine de tournoi qu'on vient de terminer, il grandit de 70 % de la
+        // moyenne des XP reellement distribues cette semaine-la
+        // (journal_semaine_joueur.xp_credite = entrainement + tournoi) aux joueurs
+        // reels encore actifs. Demande explicite de l'utilisateur, 2026-09-02.
+        if (phaseNouvelleSemaine.type === 'presaison') {
+            const actuel = db.prepare('SELECT budget_creation_accumule FROM jeu_etat WHERE id = 1').get().budget_creation_accumule || 0;
+            db.prepare('UPDATE jeu_etat SET budget_creation_accumule = ? WHERE id = 1').run(moulinetteDeLaValeur(actuel));
+        } else if (phaseActuelle.type === 'tournoi' && phaseNouvelleSemaine.type === 'tournoi') {
             const xpSemaine = db.prepare("SELECT id FROM players WHERE statut = 'valide'").all()
                 .filter(function (p) { return joueurReelActif(p.id); })
                 .map(function (p) {
