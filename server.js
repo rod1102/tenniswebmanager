@@ -155,11 +155,12 @@ const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee',
 // Un personnage cree en cours de saison (phase "tournoi") ne part plus avec un
 // budget forfaitaire (+4 pts/semaine ecoulee, ancien modele du 2026-08-28) mais
 // avec un budget cale sur le niveau des joueurs deja en jeu : 70 % de la moyenne
-// de la somme des 8 competences des joueurs reels ENCORE ACTIFS. Un joueur reel
-// dont les 3 dernieres semaines creditees sont TOUTES "afk" (coach qui ne planifie
-// plus rien) est exclu de cette moyenne. Jamais moins que le budget de base 120 ;
-// en Pre-saison / Semaine 0, ou s'il n'y a aucun joueur actif, on reste a 120.
-// Demande explicite de l'utilisateur, 2026-09-02.
+// de la somme des 8 competences (= points d'XP repartis a la semaine in-game en
+// cours) des joueurs reels ENCORE ACTIFS. Un joueur reel dont les 3 dernieres
+// semaines creditees sont TOUTES "afk" (coach qui ne planifie plus rien) est exclu
+// de cette moyenne. Pas de plancher a 120 : le budget vaut exactement ce 70 %. En
+// Pre-saison / Semaine 0, ou s'il n'y a aucun joueur actif (rien a moyenner), on
+// retombe sur le budget de base 120. Demande explicite de l'utilisateur, 2026-09-02.
 const RATIO_BUDGET_RATTRAPAGE = 0.70;
 const SEMAINES_INACTIVITE_EXCLUSION = 3;
 
@@ -191,7 +192,7 @@ function budgetActuelCompetences() {
     if (actifs.length === 0) return BUDGET_POINTS;
 
     const moyenne = actifs.reduce(function (s, p) { return s + sommeCompetences(p); }, 0) / actifs.length;
-    return Math.max(BUDGET_POINTS, Math.round(moyenne * RATIO_BUDGET_RATTRAPAGE));
+    return Math.round(moyenne * RATIO_BUDGET_RATTRAPAGE);
 }
 const DISPOSITIONS = ['adversite', 'coupeur_de_tetes', 'dernier_carre', 'premiers_tours', 'sang_froid', 'indoor', 'rivalite'];
 const STYLES_JEU = ['sprinter', 'prudence', 'en_avant', 'marathonien', 'mental_acier', 'reperage', 'aucun'];
