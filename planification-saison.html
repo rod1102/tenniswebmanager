@@ -163,7 +163,9 @@
                 const labelSemaine = libellePhase(phaseInfo) || ('Semaine ' + s);
 
                 let lockLabel = null;
+                let lockFavori = false;
                 if (dataPlan.tournoisVerrous[s]) lockLabel = 'Tournoi : ' + dataPlan.tournoisVerrous[s];
+                else if (dataPlan.favoris && dataPlan.favoris[s]) { lockLabel = '♥ Tournoi visé : ' + dataPlan.favoris[s]; lockFavori = true; }
                 else if (dataPlan.coupes[s]) lockLabel = dataPlan.coupes[s];
                 else if (phaseInfo && phaseInfo.type !== 'tournoi') lockLabel = phaseInfo.type === 'presaison' ? 'Pré-saison — rien à planifier' : 'Semaine 0 — préparatifs';
                 else if (phaseInfo && phaseInfo.finDeSaison) lockLabel = 'Fin de saison : Moulinette';
@@ -180,6 +182,7 @@
                         <div class="planning-week-card planning-week-tournoi">
                             <label>${labelSemaine}</label>
                             <div class="planning-tournoi-lock">${lockLabel}</div>
+                            ${lockFavori ? '<div class="planning-week-hint">Inscription automatique à l\'ouverture des inscriptions. Retire le cœur depuis Tournois pour rendre la semaine planifiable.</div>' : ''}
                             ${hint}
                         </div>`;
                     continue;

@@ -1148,16 +1148,26 @@ app.get('/api/planification-saison/:playerId', (req, res) => {
         // sur 2 semaines. On part de `debut - 1` pour attraper un tournoi 2 semaines
         // commence juste avant la fenetre.
         const tournoisVerrous = {};
+        // Tournois "visés" via le coeur (tournoi_favoris) : pas encore une vraie
+        // inscription (l'auto-inscription se fait a l'ouverture des inscriptions,
+        // S-5), mais le coach a deja decide d'y jouer - la semaine ne doit donc pas
+        // proposer un entrainement sur la planification de saison. Demande explicite
+        // de l'utilisateur, 2026-09-02.
+        const favoris = {};
         if (fin >= debut) {
-            db.prepare('SELECT calendrier_id, semaine FROM tournoi_liste_attente WHERE player_id = ? AND semaine BETWEEN ? AND ?')
-                .all(playerId, Math.max(1, debut - 1), fin)
-                .forEach(function (i) {
+            const etendre = function (dest, rows) {
+                rows.forEach(function (i) {
                     const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === i.calendrier_id; });
                     const duree = entree ? entree.duree : 1;
                     const nom = entree ? entree.nom : i.calendrier_id;
-                    for (let d = 0; d < duree; d++) tournoisVerrous[i.semaine + d] = nom;
+                    for (let d = 0; d < duree; d++) dest[i.semaine + d] = nom;
                 });
+            };
+            etendre(tournoisVerrous, db.prepare('SELECT calendrier_id, semaine FROM tournoi_liste_attente WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, Math.max(1, debut - 1), fin));
+            etendre(favoris, db.prepare('SELECT calendrier_id, semaine FROM tournoi_favoris WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, Math.max(1, debut - 1), fin));
         }
+        // Une vraie inscription a la priorite sur un simple coeur pour la meme semaine.
+        Object.keys(tournoisVerrous).forEach(function (s) { delete favoris[s]; });
 
         const coupes = {};
         (fin >= debut ? joueursEngagesCoupeDavis(player, debut, fin) : []).forEach(function (c) { coupes[c.semaine] = c.nom; });
@@ -1168,7 +1178,7 @@ app.get('/api/planification-saison/:playerId', (req, res) => {
             phases[s] = Object.assign({}, p, { finDeSaison: p.type === 'tournoi' && p.positionSemaine === LONGUEUR_SAISON - 2 });
         }
 
-        res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournoisVerrous, coupes, phases });
+        res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournoisVerrous, favoris, coupes, phases });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
