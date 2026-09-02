@@ -743,7 +743,14 @@ const migrations = [
     "ALTER TABLE users ADD COLUMN est_beta_testeur INTEGER DEFAULT 0",
     // Marqueur du recalage de semaine_actuelle lie au passage LONGUEUR_SAISON 51->52
     // (ajout d'une S50, semaine de la moulinette). Voir le bloc guarde plus bas.
-    "ALTER TABLE jeu_etat ADD COLUMN patch_longueur_52 INTEGER DEFAULT 0"
+    "ALTER TABLE jeu_etat ADD COLUMN patch_longueur_52 INTEGER DEFAULT 0",
+    // Accumulateur du budget de competences des inscrits en cours de saison
+    // (2026-09-02) : grandit chaque semaine de 70 % de la moyenne des XP distribues
+    // aux joueurs reels actifs, remis a 0 a chaque entree en Pre-saison. Le budget
+    // affiche vaut 120 + round(cet accumulateur). DEFAULT 0 = "repart de 0 au
+    // deploiement" (choix explicite de l'utilisateur, pas de reconstitution
+    // retroactive depuis l'historique du journal).
+    "ALTER TABLE jeu_etat ADD COLUMN budget_creation_accumule REAL DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {

@@ -152,21 +152,20 @@ app.use(authentifier);
 const BUDGET_POINTS = 120;
 const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
 
-// Un personnage cree en cours de saison (phase "tournoi") ne part plus avec un
-// budget forfaitaire (+4 pts/semaine ecoulee, ancien modele du 2026-08-28) mais
-// avec un budget cale sur le niveau des joueurs deja en jeu : 70 % de la moyenne
-// de la somme des 8 competences (= points d'XP repartis a la semaine in-game en
-// cours) des joueurs reels ENCORE ACTIFS. Un joueur reel dont les 3 dernieres
-// semaines creditees sont TOUTES "afk" (coach qui ne planifie plus rien) est exclu
-// de cette moyenne. Pas de plancher a 120 : le budget vaut exactement ce 70 %. En
-// Pre-saison / Semaine 0, ou s'il n'y a aucun joueur actif (rien a moyenner), on
-// retombe sur le budget de base 120. Demande explicite de l'utilisateur, 2026-09-02.
+// Budget de competences d'un personnage cree en cours de saison (ancien modele du
+// 2026-08-28 : +4 pts par semaine ecoulee ; nouveau modele 2026-09-02, demande
+// explicite de l'utilisateur). Le budget vaut 120 + un ACCUMULATEUR
+// (jeu_etat.budget_creation_accumule) qui grandit chaque semaine de tournoi de 70 %
+// de la moyenne des XP reellement distribues cette semaine-la (entrainement +
+// tournoi + tout, via journal_semaine_joueur.xp_credite) aux joueurs reels ENCORE
+// ACTIFS - la mecanique d'accumulation vit dans executerAvancementSemaine. Un
+// joueur reel dont les SEMAINES_INACTIVITE_EXCLUSION dernieres semaines creditees
+// sont TOUTES "afk" (coach qui ne planifie plus rien) est exclu de la moyenne.
+// L'accumulateur repart de 0 a chaque entree en Pre-saison (le budget repart donc
+// de 120 tout net a chaque nouvelle saison). En Pre-saison / Semaine 0, on renvoie
+// directement 120.
 const RATIO_BUDGET_RATTRAPAGE = 0.70;
 const SEMAINES_INACTIVITE_EXCLUSION = 3;
-
-function sommeCompetences(p) {
-    return COMPETENCES.reduce(function (s, c) { return s + (p[c] || 0); }, 0);
-}
 
 // Un joueur reel est "actif" tant que ses SEMAINES_INACTIVITE_EXCLUSION dernieres
 // semaines creditees ne sont pas toutes "afk". Trop peu de recul (personnage tout
@@ -183,16 +182,10 @@ function joueurReelActif(playerId) {
 }
 
 function budgetActuelCompetences() {
-    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const etat = db.prepare('SELECT semaine_actuelle, budget_creation_accumule FROM jeu_etat WHERE id = 1').get();
     const phase = phaseDeSemaine(etat.semaine_actuelle);
     if (phase.type !== 'tournoi') return BUDGET_POINTS;
-
-    const reels = db.prepare("SELECT * FROM players WHERE statut = 'valide'").all();
-    const actifs = reels.filter(function (p) { return joueurReelActif(p.id); });
-    if (actifs.length === 0) return BUDGET_POINTS;
-
-    const moyenne = actifs.reduce(function (s, p) { return s + sommeCompetences(p); }, 0) / actifs.length;
-    return Math.round(moyenne * RATIO_BUDGET_RATTRAPAGE);
+    return BUDGET_POINTS + Math.round(etat.budget_creation_accumule || 0);
 }
 const DISPOSITIONS = ['adversite', 'coupeur_de_tetes', 'dernier_carre', 'premiers_tours', 'sang_froid', 'indoor', 'rivalite'];
 const STYLES_JEU = ['sprinter', 'prudence', 'en_avant', 'marathonien', 'mental_acier', 'reperage', 'aucun'];
@@ -1858,6 +1851,29 @@ function executerAvancementSemaine() {
             const liste = calculerClassementGlobal(circuit, semaine - FENETRE_LIVE, semaine);
             liste.forEach(function (j, i) { insertHistorique.run(circuit, j.cle, semaine, i + 1); });
         });
+
+        // Accumulateur du budget de creation "en cours de saison" (voir
+        // budgetActuelCompetences). A chaque entree en Pre-saison / Semaine 0 il
+        // repart de 0 ; sur une vraie semaine de tournoi qu'on vient de terminer, il
+        // grandit de 70 % de la moyenne des XP reellement distribues cette
+        // semaine-la (journal_semaine_joueur.xp_credite = entrainement + tournoi)
+        // aux joueurs reels encore actifs. Demande explicite de l'utilisateur,
+        // 2026-09-02.
+        if (phaseNouvelleSemaine.type !== 'tournoi') {
+            db.prepare('UPDATE jeu_etat SET budget_creation_accumule = 0 WHERE id = 1').run();
+        } else if (phaseActuelle.type === 'tournoi') {
+            const xpSemaine = db.prepare("SELECT id FROM players WHERE statut = 'valide'").all()
+                .filter(function (p) { return joueurReelActif(p.id); })
+                .map(function (p) {
+                    return db.prepare('SELECT xp_credite FROM journal_semaine_joueur WHERE player_id = ? AND semaine = ?').get(p.id, semaine);
+                })
+                .filter(Boolean);
+            if (xpSemaine.length > 0) {
+                const moyenne = xpSemaine.reduce(function (s, r) { return s + (r.xp_credite || 0); }, 0) / xpSemaine.length;
+                db.prepare('UPDATE jeu_etat SET budget_creation_accumule = budget_creation_accumule + ? WHERE id = 1')
+                    .run(RATIO_BUDGET_RATTRAPAGE * moyenne);
+            }
+        }
 
         db.prepare('UPDATE jeu_etat SET semaine_actuelle = semaine_actuelle + 1 WHERE id = 1').run();
 

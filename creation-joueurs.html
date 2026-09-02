@@ -658,11 +658,12 @@
         })();
 
         // Budget de base 120, corrige a la hausse par le serveur si la partie a deja
-        // avance (rattrapage pour un personnage cree en cours de saison : 70 % de la
-        // moyenne des competences des joueurs reels actifs) - valeur d'affichage
-        // initiale, ecrasee des que /api/budget-creation repond (chargerBudget plus
-        // bas). La vraie validation reste cote serveur de toute facon (POST
-        // /api/joueurs recalcule son propre budget independamment).
+        // avance (rattrapage pour un personnage cree en cours de saison : 120 + un
+        // accumulateur qui grandit chaque semaine de 70 % de la moyenne des XP
+        // gagnes par les joueurs reels actifs) - valeur d'affichage initiale,
+        // ecrasee des que /api/budget-creation repond (chargerBudget plus bas). La
+        // vraie validation reste cote serveur de toute facon (POST /api/joueurs
+        // recalcule son propre budget independamment).
         let BUDGET = 120;
         const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
         const BUDGET_DISP = 12;
