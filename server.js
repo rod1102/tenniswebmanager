@@ -1111,43 +1111,6 @@ const LABELS_ACTION_COURTS = {
     afk: 'AFK'
 };
 
-// XP credite automatiquement a un joueur "AFK" (aucune planification soumise
-// cette semaine, pas engage en tournoi ni Coupe Davis/Fed Cup) - demande explicite
-// de l'utilisateur, 2026-08-28 : plutot que de perdre silencieusement la semaine,
-// 4 XP sont repartis tout seuls, TOUJOURS dans le meme ordre : d'abord chaque
-// competence UNE PAR UNE (dans l'ordre de COMPETENCES) jusqu'a 24 avant de passer
-// a la suivante ; une fois les 8 a 24, une competence tiree au hasard est remplie
-// jusqu'a 99 avant d'en tirer une autre au hasard (jamais jusqu'a 100 - plafond
-// volontairement legerement en dessous du maximum). Le montant peut deborder sur
-// plusieurs competences la meme semaine si le seuil courant est atteint en cours
-// de route (rare avec seulement 4 points, mais gere proprement).
-const XP_AFK = 4;
-function repartirXPAuto(competencesActuelles, montant) {
-    const resultat = Object.assign({}, competencesActuelles);
-    let reste = montant;
-    while (reste > 0) {
-        let cible = COMPETENCES.find(function (c) { return resultat[c] < 24; });
-        let plafond = 24;
-        if (!cible) {
-            // Phase 2 : toutes deja a 24+ - on continue la competence "en cours"
-            // (strictement entre 24 et 99) s'il y en a une, sinon on en tire une
-            // nouvelle au hasard parmi celles encore sous 99.
-            cible = COMPETENCES.find(function (c) { return resultat[c] > 24 && resultat[c] < 99; });
-            if (!cible) {
-                const eligibles = COMPETENCES.filter(function (c) { return resultat[c] < 99; });
-                if (eligibles.length === 0) break; // tout est deja a 99, rien de plus a faire
-                cible = eligibles[Math.floor(Math.random() * eligibles.length)];
-            }
-            plafond = 99;
-        }
-        const espace = plafond - resultat[cible];
-        const applique = Math.min(espace, reste);
-        resultat[cible] += applique;
-        reste -= applique;
-    }
-    return resultat;
-}
-
 app.get('/api/joueur/semaine-info/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
@@ -1665,11 +1628,6 @@ function executerAvancementSemaine() {
             // deja en base (regle explicite de l'utilisateur : ne peuvent pas rester
             // en reserve indefiniment, perdus s'ils ne sont pas utilises a temps).
             let pointsExperience = 0;
-            // XP creditee automatiquement a un joueur "AFK" cette semaine (voir plus bas,
-            // repartirXPAuto) - distincte de pointsExperience : contrairement a l'XP
-            // d'entrainement generique, elle est repartie tout de suite dans les
-            // competences, jamais laissee en attente pour une repartition manuelle.
-            let xpAfkCreditee = 0;
             let pointsEnergie = player.points_energie;
             // EXCEPTION a la regle ci-dessus, uniquement pour les dispositions gagnees :
             // en quittant une semaine de Pre-saison/Semaine 0 (phaseActuelle.type !==
@@ -1792,22 +1750,11 @@ function executerAvancementSemaine() {
             // Joueur "AFK" cette semaine : aucune planification soumise (ordre est deja
             // null pour un joueur engage en tournoi/Coupe Davis OU hors semaine de
             // tournoi, cf. calcul de `ordre` plus haut - il ne reste donc que le vrai cas
-            // "rien de fait") - credite et repartit 4 XP automatiquement plutot que de
-            // perdre la semaine en silence (demande explicite de l'utilisateur,
-            // 2026-08-28). Applique APRES la repartition manuelle en attente (l'un
-            // n'exclut pas forcement l'autre en theorie, mais dans les faits un joueur
-            // AFK n'a jamais eu l'occasion de soumettre xp_repartition_en_attente non
-            // plus). Meme regle qu'un entrainement generique planifie manuellement : un
-            // joueur blesse ne gagne aucune XP tant qu'il n'a pas fait un vrai repos
-            // (demande explicite de l'utilisateur, 2026-08-28 - "meme afk il ne gagne
-            // pas d'xp tant qu'il n'a pas fait un repos") - reste neanmoins marque "afk"
-            // dans le journal (juste sans XP), pour distinguer ce cas d'une semaine hors
-            // saison (action_prevue null).
+            // "rien de fait"). Ne rien planifier = perdre la semaine, aucune XP
+            // automatique (demande explicite de l'utilisateur, 2026-09-02 ; revient sur
+            // les 4 XP auto du 2026-08-28). Le marqueur "afk" reste ecrit dans le journal
+            // pour distinguer ce cas d'une semaine hors saison (action_prevue null).
             const estAfk = !ordre && phaseNouvelleSemaine.type === 'tournoi' && !joueurEngageCetteSemaine;
-            if (estAfk && player.condition !== 'blesse') {
-                competencesErodees = repartirXPAuto(competencesErodees, XP_AFK);
-                xpAfkCreditee = XP_AFK;
-            }
 
             const nouveauNiveau = COMPETENCES.reduce(function (s, c) { return s + competencesErodees[c]; }, 0) / COMPETENCES.length;
 
@@ -1847,7 +1794,7 @@ function executerAvancementSemaine() {
                 player.id, nouvelleSemaine,
                 joueurEngageCetteSemaine ? 'tournoi' : (ordre ? ordre.action : (estAfk ? 'afk' : null)),
                 tournoiEngage ? tournoiEngage.nom : (coupeEngagee ? coupeEngagee.nom : null),
-                pointsExperience + xpAfkCreditee,
+                pointsExperience,
                 ordre && ordre.action === 'coaching_mental' ? 1 : 0,
                 ordre && ordre.action === 'coaching_mental' ? 1 : 0,
                 formeAvant, forme, energieAvant, pointsEnergie, usureAvant, usureAvant,
