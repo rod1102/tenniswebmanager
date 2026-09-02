@@ -383,6 +383,16 @@
                 `;
             }
 
+            // Acces a la planification longue portee (toute la saison en cours) - meme
+            // table `plannings`, meme declenchement automatique, juste une fenetre de
+            // saisie non bornee aux 5 prochaines semaines.
+            weeksHtml += `
+                <a class="planning-week-card" href="planification-saison.html?type=${typeCourant}" style="display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; gap:4px; text-decoration:none; border-style:dashed; color:#D4F000; font-weight:700; font-size:0.78rem;">
+                    <span style="font-size:1.3rem; line-height:1;">→</span>
+                    Voir plus — planifier toute la saison
+                </a>
+            `;
+
             container.innerHTML = `
                 ${xpHtml}
                 ${dispositionsGainHtml}

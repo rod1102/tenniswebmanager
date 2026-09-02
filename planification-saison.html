@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planifier la saison — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20260829">
+    <style>
+        .planning-week-hint { font-size: 0.64rem; color: #8B98A5; margin-top: 6px; line-height: 1.35; }
+        .planning-bulk {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+            background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px; padding: 10px 12px; margin-bottom: 14px; font-size: 0.78rem; color: #8B98A5;
+        }
+        .planning-bulk select {
+            padding: 7px 8px; background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.2); border-radius: 6px; color: #F5F7FA; font-size: 0.75rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Tournois</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="capitanat.html">Capitanat</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/9RwtWEyjF" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <div style="text-align:center;">
+                <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
+            </div>
+
+            <h1 class="dashboard-title" style="text-align:center;">Planifier toute la saison</h1>
+            <p class="match-hint" style="text-align:center; max-width:640px; margin:0 auto 16px;">
+                Pose tes ordres pour toutes les semaines restantes de la saison en cours. Ils se déclenchent
+                automatiquement à chaque avancée de semaine, comme la fenêtre des 5 prochaines semaines sur la
+                fiche joueur. Modifiable tant que la semaine n'est pas jouée. Les semaines de tournoi ou de
+                Coupe Davis / Fed Cup où tu es engagé sont verrouillées.
+            </p>
+
+            <div class="tabs-nav" id="tabs-nav"></div>
+            <div id="saison-container"></div>
+
+            <div style="text-align:center; margin-top:20px;">
+                <a href="joueur.html" class="cta cta-secondary" style="padding:10px 20px; font-size:0.8rem;">← Retour à la fiche joueur</a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userId = localStorage.getItem('currentUserId');
+        if (!userId) {
+            window.location.href = 'connexion.html';
+        }
+
+        const paramsUrl = new URLSearchParams(window.location.search);
+        const typeDemande = paramsUrl.get('type');
+        let typeCourant = (typeDemande === 'joueur' || typeDemande === 'joueuse') ? typeDemande : null;
+        let joueurData = null;
+        let joueuseData = null;
+
+        const ACTIONS_LABELS = {
+            '': '— Non défini —',
+            repos: 'Repos',
+            generique: 'Entraînement générique (+8 XP)',
+            surface_dur: 'Entraînement surface Dur',
+            surface_terre: 'Entraînement surface Terre battue',
+            surface_herbe: 'Entraînement surface Herbe',
+            coaching_mental: 'Coaching mental (0 XP, +1 disposition)'
+        };
+
+        const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+
+        function formaterNom(prenom, nom) {
+            const p = (prenom || '').toLowerCase().replace(/(^|[\s'-])\p{L}/gu, function (c) { return c.toUpperCase(); });
+            return p + ' ' + (nom || '').toUpperCase();
+        }
+
+        function libellePhase(phase) {
+            if (!phase) return '';
+            if (phase.type === 'presaison') return 'Pré-saison (Saison ' + phase.numeroSaison + ')';
+            if (phase.type === 's0') return 'Semaine 0 (Saison ' + phase.numeroSaison + ')';
+            return 'Semaine ' + phase.positionSemaine + ' (Saison ' + phase.numeroSaison + ')';
+        }
+
+        function labelCategorie(t) {
+            if (t.categorie === 'slam') return 'Grand Chelem';
+            if (t.categorie === 'finals') return 'Masters';
+            return t.circuit + ' ' + t.categorie;
+        }
+
+        async function chargerSemaine() {
+            const response = await fetch('/api/semaine');
+            const data = await response.json();
+            if (response.ok) {
+                document.getElementById('semaine-badge').textContent = 'Semaine actuelle : ' + libellePhase(data.phase);
+            }
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (response.ok && data.user.role === 'admin') {
+                document.getElementById('admin-link').style.display = 'inline-block';
+            }
+        }
+
+        async function chargerSaison(player) {
+            const container = document.getElementById('saison-container');
+
+            if (player.statut !== 'valide') {
+                container.innerHTML = '<p style="text-align:center; color:#8B98A5;">La planification sera disponible une fois ce personnage validé par l\'administrateur.</p>';
+                return;
+            }
+
+            const [rPlan, rCal] = await Promise.all([
+                fetch('/api/planification-saison/' + player.id),
+                fetch('/api/tournois/calendrier/' + player.id + '?userId=' + userId)
+            ]);
+            const dataPlan = await rPlan.json();
+            if (!rPlan.ok) { container.innerHTML = '<div class="match-hint">' + (dataPlan.error || 'Impossible de charger la planification.') + '</div>'; return; }
+
+            let calParSemaine = {};
+            if (rCal.ok) {
+                const dataCal = await rCal.json();
+                (dataCal.tournois || []).forEach(function (t) {
+                    if (!calParSemaine[t.semaine]) calParSemaine[t.semaine] = [];
+                    calParSemaine[t.semaine].push(t);
+                });
+            }
+
+            if (dataPlan.fin < dataPlan.debut) {
+                container.innerHTML = '<p style="text-align:center; color:#8B98A5;">Plus rien à planifier pour cette saison. Reviens à la prochaine Pré-saison.</p>';
+                return;
+            }
+
+            const ordresInitiaux = {};
+            dataPlan.ordres.forEach(function (o) { ordresInitiaux[o.semaine] = o.action; });
+
+            let weeksHtml = '';
+            for (let s = dataPlan.debut; s <= dataPlan.fin; s++) {
+                const phaseInfo = dataPlan.phases && dataPlan.phases[s];
+                const labelSemaine = libellePhase(phaseInfo) || ('Semaine ' + s);
+
+                let lockLabel = null;
+                if (dataPlan.tournoisVerrous[s]) lockLabel = 'Tournoi : ' + dataPlan.tournoisVerrous[s];
+                else if (dataPlan.coupes[s]) lockLabel = dataPlan.coupes[s];
+                else if (phaseInfo && phaseInfo.type !== 'tournoi') lockLabel = phaseInfo.type === 'presaison' ? 'Pré-saison — rien à planifier' : 'Semaine 0 — préparatifs';
+                else if (phaseInfo && phaseInfo.finDeSaison) lockLabel = 'Fin de saison : Moulinette';
+
+                let hint = '';
+                (calParSemaine[s] || []).forEach(function (t) {
+                    if (t.estCoupe) { hint += '<div class="planning-week-hint">' + t.nom + ' — ' + t.manche + '</div>'; return; }
+                    const dbut = t.semaine === s ? '' : ' (2ᵉ sem.)';
+                    hint += '<div class="planning-week-hint">' + t.nom + ' · ' + labelCategorie(t) + ' · ' + (LABELS_SURFACE[t.surface] || t.surface) + dbut + '</div>';
+                });
+
+                if (lockLabel) {
+                    weeksHtml += `
+                        <div class="planning-week-card planning-week-tournoi">
+                            <label>${labelSemaine}</label>
+                            <div class="planning-tournoi-lock">${lockLabel}</div>
+                            ${hint}
+                        </div>`;
+                    continue;
+                }
+
+                const valeurActuelle = ordresInitiaux[s] || '';
+                let optionsHtml = '';
+                Object.keys(ACTIONS_LABELS).forEach(function (val) {
+                    optionsHtml += `<option value="${val}" ${val === valeurActuelle ? 'selected' : ''}>${ACTIONS_LABELS[val]}</option>`;
+                });
+                weeksHtml += `
+                    <div class="planning-week-card">
+                        <label>${labelSemaine}</label>
+                        <select class="planning-select" data-semaine="${s}" data-initial="${valeurActuelle}">${optionsHtml}</select>
+                        ${hint}
+                    </div>`;
+            }
+
+            container.innerHTML = `
+                <div class="planning-bulk">
+                    <span>Remplir d'un coup :</span>
+                    <select id="bulk-action">${Object.keys(ACTIONS_LABELS).filter(function (v) { return v !== ''; }).map(function (v) { return '<option value="' + v + '">' + ACTIONS_LABELS[v] + '</option>'; }).join('')}</select>
+                    <button class="cta cta-secondary" id="bulk-vides" style="padding:8px 14px; font-size:0.75rem;">Semaines non définies</button>
+                    <button class="cta cta-secondary" id="bulk-toutes" style="padding:8px 14px; font-size:0.75rem;">Toutes les semaines libres</button>
+                </div>
+                <div class="planning-grid">${weeksHtml}</div>
+                <div style="text-align:center;">
+                    <button class="cta cta-primary" id="enregistrer-saison" style="padding:12px 24px; font-size:0.85rem;">Enregistrer la planification</button>
+                </div>
+                <div id="saison-feedback" class="match-hint" style="text-align:center; margin-top:10px;"></div>
+            `;
+
+            document.getElementById('bulk-vides').addEventListener('click', function () {
+                const v = document.getElementById('bulk-action').value;
+                document.querySelectorAll('.planning-select').forEach(function (sel) { if (sel.value === '') sel.value = v; });
+            });
+            document.getElementById('bulk-toutes').addEventListener('click', function () {
+                const v = document.getElementById('bulk-action').value;
+                document.querySelectorAll('.planning-select').forEach(function (sel) { sel.value = v; });
+            });
+
+            document.getElementById('enregistrer-saison').addEventListener('click', async function () {
+                const btn = this;
+                const feedback = document.getElementById('saison-feedback');
+                btn.disabled = true;
+                feedback.textContent = 'Enregistrement...';
+                const selects = Array.from(document.querySelectorAll('.planning-select'));
+                let modifs = 0, erreurs = 0;
+                for (const sel of selects) {
+                    const initial = sel.getAttribute('data-initial') || '';
+                    if (sel.value === initial) continue;
+                    const semaine = Number(sel.getAttribute('data-semaine'));
+                    try {
+                        let r;
+                        if (sel.value === '') {
+                            r = await fetch('/api/planification/effacer', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ playerId: player.id, semaine })
+                            });
+                        } else {
+                            r = await fetch('/api/planification', {
+                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ playerId: player.id, semaine, action: sel.value })
+                            });
+                        }
+                        if (r.ok) { modifs++; sel.setAttribute('data-initial', sel.value); }
+                        else { erreurs++; }
+                    } catch (e) { erreurs++; }
+                }
+                btn.disabled = false;
+                if (modifs === 0 && erreurs === 0) feedback.textContent = 'Aucune modification à enregistrer.';
+                else feedback.textContent = modifs + ' semaine(s) enregistrée(s)' + (erreurs ? ', ' + erreurs + ' en échec (semaine verrouillée ?)' : '') + '.';
+            });
+        }
+
+        async function afficherJoueurCourant() {
+            const player = typeCourant === 'joueur' ? joueurData : joueuseData;
+            const container = document.getElementById('saison-container');
+            if (!player) {
+                container.innerHTML = '<p style="text-align:center; color:#8B98A5;">Ce personnage n\'existe pas encore.</p>';
+                return;
+            }
+            container.innerHTML = '<p style="text-align:center; color:#8B98A5;">Chargement...</p>';
+            await chargerSaison(player);
+        }
+
+        async function chargerOnglets() {
+            const response = await fetch('/api/joueurs/' + userId);
+            const data = await response.json();
+            if (!response.ok) { alert(data.error || 'Impossible de charger tes joueurs.'); return; }
+            if (data.players.length === 0) { window.location.href = 'creation-joueurs.html'; return; }
+
+            joueurData = data.players.find(function (p) { return p.type === 'joueur'; }) || null;
+            joueuseData = data.players.find(function (p) { return p.type === 'joueuse'; }) || null;
+            if (typeCourant === null) typeCourant = joueurData ? 'joueur' : 'joueuse';
+
+            const tabsNav = document.getElementById('tabs-nav');
+            tabsNav.innerHTML = `
+                <button class="tab-btn${typeCourant === 'joueur' ? ' active' : ''}" data-type="joueur">${joueurData ? formaterNom(joueurData.prenom, joueurData.nom) : 'Joueur'}</button>
+                <button class="tab-btn${typeCourant === 'joueuse' ? ' active' : ''}" data-type="joueuse">${joueuseData ? formaterNom(joueuseData.prenom, joueuseData.nom) : 'Joueuse'}</button>
+            `;
+            tabsNav.querySelectorAll('.tab-btn').forEach(function (bouton) {
+                bouton.addEventListener('click', function () {
+                    tabsNav.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                    bouton.classList.add('active');
+                    typeCourant = bouton.dataset.type;
+                    afficherJoueurCourant();
+                });
+            });
+
+            await afficherJoueurCourant();
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
+            localStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        chargerSemaine();
+        verifierAdmin();
+        chargerOnglets();
+    </script>
+    <script src="retour.js?v=20260829"></script>
+    <script src="theme-saison.js?v=20260831"></script>
+</body>
+</html>

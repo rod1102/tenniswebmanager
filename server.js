@@ -1116,6 +1116,65 @@ app.get('/api/planification/:playerId', (req, res) => {
     }
 });
 
+// Derniere semaine absolue "planifiable" de la saison en cours : positionSaison
+// LONGUEUR_SAISON - 1 (= S49, derniere semaine de type tournoi avant S50 qui est
+// la semaine de la moulinette, sans rien a planifier).
+function finSaisonAbsolue(semaineActuelle) {
+    const pos = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+    return semaineActuelle - (pos - 1) + (LONGUEUR_SAISON - 2);
+}
+
+// Planification "longue portee" (page planification-saison.html) : memes donnees
+// que /api/planification, mais sur toute la fin de la saison en cours au lieu de
+// la fenetre glissante de 5 semaines. Les ordres poses ici vivent dans la meme
+// table `plannings` et sont consommes de la meme facon par executerAvancementSemaine.
+// Demande explicite de l'utilisateur, 2026-09-02.
+app.get('/api/planification-saison/:playerId', (req, res) => {
+    try {
+        const { playerId } = req.params;
+        const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
+        if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const debut = etat.semaine_actuelle + 1;
+        const fin = finSaisonAbsolue(etat.semaine_actuelle);
+
+        const ordres = fin >= debut
+            ? db.prepare('SELECT semaine, action FROM plannings WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, debut, fin)
+            : [];
+
+        // Semaines occupees par un tournoi ou ce joueur est inscrit (tournoi_liste_attente
+        // = confirme OU en liste d'attente) - etendu a la 2e semaine pour les tournois
+        // sur 2 semaines. On part de `debut - 1` pour attraper un tournoi 2 semaines
+        // commence juste avant la fenetre.
+        const tournoisVerrous = {};
+        if (fin >= debut) {
+            db.prepare('SELECT calendrier_id, semaine FROM tournoi_liste_attente WHERE player_id = ? AND semaine BETWEEN ? AND ?')
+                .all(playerId, Math.max(1, debut - 1), fin)
+                .forEach(function (i) {
+                    const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === i.calendrier_id; });
+                    const duree = entree ? entree.duree : 1;
+                    const nom = entree ? entree.nom : i.calendrier_id;
+                    for (let d = 0; d < duree; d++) tournoisVerrous[i.semaine + d] = nom;
+                });
+        }
+
+        const coupes = {};
+        (fin >= debut ? joueursEngagesCoupeDavis(player, debut, fin) : []).forEach(function (c) { coupes[c.semaine] = c.nom; });
+
+        const phases = {};
+        for (let s = debut; s <= fin; s++) {
+            const p = phaseAffichee(s);
+            phases[s] = Object.assign({}, p, { finDeSaison: p.type === 'tournoi' && p.positionSemaine === LONGUEUR_SAISON - 2 });
+        }
+
+        res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournoisVerrous, coupes, phases });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Tournoi qui occupe une semaine ingame donnee pour un joueur reel precis (couvre
 // aussi les tournois sur 2 semaines, ex. Grand Chelem : semaine de depart + la
 // suivante, via CALENDRIER_TOURNOIS.duree - tournois.semaine ne stocke que le
@@ -1265,9 +1324,12 @@ app.post('/api/planification', (req, res) => {
 
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         const debut = etat.semaine_actuelle + 1;
-        const fin = debut + 4;
+        // Fenetre elargie a toute la saison en cours (2026-09-02) : la fiche joueur
+        // ne propose toujours que les 5 prochaines semaines, mais planification-saison.html
+        // peut poser un ordre sur n'importe quelle semaine restante de la saison.
+        const fin = finSaisonAbsolue(etat.semaine_actuelle);
         if (semaine < debut || semaine > fin) {
-            return res.status(400).json({ error: 'Cette semaine est en dehors de la fenetre de planification.' });
+            return res.status(400).json({ error: 'Cette semaine est en dehors de la fenetre de planification (saison en cours).' });
         }
         if (phaseDeSemaine(semaine).type !== 'tournoi') {
             return res.status(400).json({ error: 'Aucune planification possible pendant la Pre-saison ou la Semaine 0.' });
@@ -1304,6 +1366,27 @@ app.post('/api/planification', (req, res) => {
         db.prepare('INSERT INTO planning_historique (player_id, semaine, action, horodatage) VALUES (?, ?, ?, ?)')
             .run(playerId, semaine, action, new Date().toISOString());
 
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Retire un ordre deja pose pour une semaine future (page planification-saison) -
+// /api/planification n'accepte que des actions valides, jamais un "aucun".
+app.post('/api/planification/effacer', (req, res) => {
+    try {
+        const { playerId, semaine } = req.body;
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
+        if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        if (!semaine || semaine <= etat.semaine_actuelle) {
+            return res.status(400).json({ error: 'Cette semaine est deja passee ou en cours.' });
+        }
+        db.prepare('DELETE FROM plannings WHERE player_id = ? AND semaine = ?').run(playerId, semaine);
+        db.prepare('INSERT INTO planning_historique (player_id, semaine, action, horodatage) VALUES (?, ?, ?, ?)')
+            .run(playerId, semaine, 'efface', new Date().toISOString());
         res.json({ success: true });
     } catch (err) {
         console.error(err);

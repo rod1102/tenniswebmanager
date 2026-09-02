@@ -86,6 +86,18 @@
             return t.surface + (t.surface === 'dur' && t.indoor ? '-indoor' : '');
         }
 
+        // Nombre de tours d'un tournoi : le tableau est complete a la puissance de 2
+        // superieure (28->32, 48/56->64, 96->128), soit log2 de cette taille. Les
+        // Masters de fin de saison (format poules) comptent toujours 5 etapes.
+        function nombreTours(t) {
+            if (t.categorie === 'finals') return 5;
+            let p = 1;
+            while (p < t.taille_tableau) p *= 2;
+            let n = 0;
+            while (p >= 2) { n++; p = p / 2; }
+            return n;
+        }
+
         function flagImg(code) {
             if (!code) return '';
             return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
@@ -321,7 +333,7 @@
                     const nomClasse = t.circuit === 'ATP' ? 'tournoi-name-atp' : 'tournoi-name-wta';
                     carte.innerHTML = `
                         <span class="tournoi-card-name ${nomClasse}">${t.nom}</span>
-                        <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Tableau de ${t.taille_tableau}</div>
+                        <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Tableau de ${t.taille_tableau} · ${nombreTours(t)} tours</div>
                     `;
                     grille.appendChild(carte);
                 });
@@ -413,7 +425,7 @@
 
                     carte.innerHTML = `
                         <a class="tournoi-card-name ${nomClasse}" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>${avertissementObligatoire}
-                        <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Tableau de ${t.taille_tableau}</div>
+                        <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Tableau de ${t.taille_tableau} · ${nombreTours(t)} tours</div>
                         ${actionHtml}
                     `;
 
