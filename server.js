@@ -150,19 +150,49 @@ function authentifier(req, res, next) {
 app.use(authentifier);
 
 const BUDGET_POINTS = 120;
-// Un personnage cree en cours de saison part avec un budget de competences plus
-// eleve que 120 (rattrapage) : +4 points par semaine de tournoi deja ecoulee cette
-// saison (S1, S2, ... - la Pre-saison/Semaine 0 ne comptent pas, aucun tournoi ne
-// s'y joue). Demande explicite de l'utilisateur, 2026-08-28 : "si on arrive en S10
-// on aurait 160 xp a repartir" (120 + 4*10).
-const BONUS_BUDGET_PAR_SEMAINE = 4;
+const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
+
+// Un personnage cree en cours de saison (phase "tournoi") ne part plus avec un
+// budget forfaitaire (+4 pts/semaine ecoulee, ancien modele du 2026-08-28) mais
+// avec un budget cale sur le niveau des joueurs deja en jeu : 70 % de la moyenne
+// de la somme des 8 competences des joueurs reels ENCORE ACTIFS. Un joueur reel
+// dont les 3 dernieres semaines creditees sont TOUTES "afk" (coach qui ne planifie
+// plus rien) est exclu de cette moyenne. Jamais moins que le budget de base 120 ;
+// en Pre-saison / Semaine 0, ou s'il n'y a aucun joueur actif, on reste a 120.
+// Demande explicite de l'utilisateur, 2026-09-02.
+const RATIO_BUDGET_RATTRAPAGE = 0.70;
+const SEMAINES_INACTIVITE_EXCLUSION = 3;
+
+function sommeCompetences(p) {
+    return COMPETENCES.reduce(function (s, c) { return s + (p[c] || 0); }, 0);
+}
+
+// Un joueur reel est "actif" tant que ses SEMAINES_INACTIVITE_EXCLUSION dernieres
+// semaines creditees ne sont pas toutes "afk". Trop peu de recul (personnage tout
+// juste valide) = considere actif.
+function joueurReelActif(playerId) {
+    const rows = db.prepare(`
+        SELECT action_prevue FROM journal_semaine_joueur
+        WHERE player_id = ?
+        ORDER BY semaine DESC
+        LIMIT ?
+    `).all(playerId, SEMAINES_INACTIVITE_EXCLUSION);
+    if (rows.length < SEMAINES_INACTIVITE_EXCLUSION) return true;
+    return !rows.every(function (r) { return r.action_prevue === 'afk'; });
+}
+
 function budgetActuelCompetences() {
     const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
     const phase = phaseDeSemaine(etat.semaine_actuelle);
-    const bonus = phase.type === 'tournoi' ? phase.positionSemaine * BONUS_BUDGET_PAR_SEMAINE : 0;
-    return BUDGET_POINTS + bonus;
+    if (phase.type !== 'tournoi') return BUDGET_POINTS;
+
+    const reels = db.prepare("SELECT * FROM players WHERE statut = 'valide'").all();
+    const actifs = reels.filter(function (p) { return joueurReelActif(p.id); });
+    if (actifs.length === 0) return BUDGET_POINTS;
+
+    const moyenne = actifs.reduce(function (s, p) { return s + sommeCompetences(p); }, 0) / actifs.length;
+    return Math.max(BUDGET_POINTS, Math.round(moyenne * RATIO_BUDGET_RATTRAPAGE));
 }
-const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
 const DISPOSITIONS = ['adversite', 'coupeur_de_tetes', 'dernier_carre', 'premiers_tours', 'sang_froid', 'indoor', 'rivalite'];
 const STYLES_JEU = ['sprinter', 'prudence', 'en_avant', 'marathonien', 'mental_acier', 'reperage', 'aucun'];
 const BUDGET_DISPOSITIONS = 12;

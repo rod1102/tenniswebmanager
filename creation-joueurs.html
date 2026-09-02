@@ -658,11 +658,11 @@
         })();
 
         // Budget de base 120, corrige a la hausse par le serveur si la partie a deja
-        // avance (rattrapage pour un personnage cree en cours de saison, +4 points par
-        // semaine de tournoi ecoulee) - valeur d'affichage initiale, ecrasee des que
-        // /api/budget-creation repond (chargerBudget plus bas). La vraie validation
-        // reste cote serveur de toute facon (POST /api/joueurs recalcule son propre
-        // budget independamment).
+        // avance (rattrapage pour un personnage cree en cours de saison : 70 % de la
+        // moyenne des competences des joueurs reels actifs) - valeur d'affichage
+        // initiale, ecrasee des que /api/budget-creation repond (chargerBudget plus
+        // bas). La vraie validation reste cote serveur de toute facon (POST
+        // /api/joueurs recalcule son propre budget independamment).
         let BUDGET = 120;
         const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
         const BUDGET_DISP = 12;
@@ -723,7 +723,7 @@
         });
 
         // Rattrapage pour un personnage cree en cours de saison (demande explicite de
-        // l'utilisateur, 2026-08-28) : recupere le vrai budget aupres du serveur (peut
+        // l'utilisateur, 2026-09-02) : recupere le vrai budget aupres du serveur (peut
         // etre superieur a 120) et rafraichit l'affichage/la validation en consequence.
         // Echec silencieux si la requete rate - le budget reste a 120 par defaut, la
         // vraie validation cote serveur tranchera de toute facon a la soumission.
