@@ -1581,7 +1581,16 @@ function appliquerResetPreSaison(nouvelleSemaine) {
     `);
 
     joueurs.forEach(function (player) {
-        const dispositionsAGagner = player.points_dispositions_a_gagner + Math.max(0, variationDispositions);
+        // Gain de dispositions de l'intersaison : plafonne des le credit a la marge
+        // restante sous MAX_TOTAL_DISPOSITIONS (2026-09-02, demande de l'utilisateur).
+        // Ex. deja a 29/30 -> on ne credite qu'1 point meme si le palier en donne 3 ;
+        // deja a 30 -> 0. La marge de 40+ pts laissee par le plafond de 10 par
+        // disposition ne peut jamais brider un gain d'intersaison (max +3), inutile
+        // de la verifier ici. Les pertes ne sont pas plafonnees (elles descendent).
+        const gainPalier = Math.max(0, variationDispositions);
+        const sommeDispositions = DISPOSITIONS.reduce(function (s, cle) { return s + player['disposition_' + cle]; }, 0);
+        const margeAvantPlafond = Math.max(0, MAX_TOTAL_DISPOSITIONS - sommeDispositions - player.points_dispositions_a_gagner);
+        const dispositionsAGagner = player.points_dispositions_a_gagner + Math.min(gainPalier, margeAvantPlafond);
         const dispositionsARetirer = player.points_dispositions_a_retirer + Math.max(0, -variationDispositions);
         maj.run(dispositionsAGagner, dispositionsARetirer, player.id);
         majJournal.run(player.id, nouvelleSemaine);
