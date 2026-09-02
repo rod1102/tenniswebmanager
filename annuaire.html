@@ -93,12 +93,15 @@
                 return;
             }
 
+            const compteParNation = {};
+            liste.forEach(function (j) { compteParNation[j.nationalite] = (compteParNation[j.nationalite] || 0) + 1; });
+
             let html = '';
             let nationCourante = null;
             liste.forEach(function (j) {
                 if (j.nationalite !== nationCourante) {
                     nationCourante = j.nationalite;
-                    html += `<tr class="classement-separateur"><td colspan="2">${flagImg(j.drapeau)} <a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(j.nationalite)}">${j.nationalite}</a></td></tr>`;
+                    html += `<tr class="classement-separateur"><td colspan="2">${flagImg(j.drapeau)} <a class="lien-adversaire" href="pays.html?nation=${encodeURIComponent(j.nationalite)}">${j.nationalite}</a> <span style="color:#8B98A5; font-weight:400;">(${compteParNation[j.nationalite]})</span></td></tr>`;
                 }
                 html += `
                     <tr>
