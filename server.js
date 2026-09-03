@@ -1143,28 +1143,35 @@ app.get('/api/planification-saison/:playerId', (req, res) => {
             ? db.prepare('SELECT semaine, action FROM plannings WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, debut, fin)
             : [];
 
-        // Semaines occupees par un tournoi ou ce joueur est inscrit (tournoi_liste_attente
-        // = confirme OU en liste d'attente) - etendu a la 2e semaine pour les tournois
-        // sur 2 semaines. On part de `debut - 1` pour attraper un tournoi 2 semaines
-        // commence juste avant la fenetre.
-        const tournoisVerrous = {};
-        // Tournois "visés" via le coeur (tournoi_favoris) : pas encore une vraie
-        // inscription (l'auto-inscription se fait a l'ouverture des inscriptions,
-        // S-5), mais le coach a deja decide d'y jouer - la semaine ne doit donc pas
-        // proposer un entrainement sur la planification de saison. Demande explicite
-        // de l'utilisateur, 2026-09-02.
-        const favoris = {};
+        // Verrous de tournoi, calcules EN PARCOURANT LE CALENDRIER (pas les lignes
+        // tournoi_favoris/tournoi_liste_attente directement) : ces tables stockent une
+        // semaine ABSOLUE figee au moment du clic, jamais remigree quand le modele de
+        // saison change (ex. LONGUEUR_SAISON 51->52) ni purgee d'une saison a l'autre -
+        // les lire telles quelles donnait des tournois decales, dupliques, poses sur des
+        // semaines de Coupe Davis, avec le mauvais nom. On recale ici comme le fait deja
+        // /api/tournois/calendrier : pour chaque semaine du calendrier, on ne verrouille
+        // que si le joueur a une ligne EXACTE (meme calendrier_id + meme semaine absolue)
+        // pour ce creneau precis. Une ligne qui ne retombe sur aucun creneau reel est
+        // ignoree (elle sera de toute facon sans effet au moment venu).
+        const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
+        const tournoisVerrous = {}; // vraie inscription (tournoi_liste_attente = confirme OU liste d'attente)
+        const favoris = {};         // coeur pose mais pas encore d'inscription (auto-inscription a S-5)
         if (fin >= debut) {
-            const etendre = function (dest, rows) {
-                rows.forEach(function (i) {
-                    const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === i.calendrier_id; });
-                    const duree = entree ? entree.duree : 1;
-                    const nom = entree ? entree.nom : i.calendrier_id;
-                    for (let d = 0; d < duree; d++) dest[i.semaine + d] = nom;
-                });
-            };
-            etendre(tournoisVerrous, db.prepare('SELECT calendrier_id, semaine FROM tournoi_liste_attente WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, Math.max(1, debut - 1), fin));
-            etendre(favoris, db.prepare('SELECT calendrier_id, semaine FROM tournoi_favoris WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, Math.max(1, debut - 1), fin));
+            const cle = function (r) { return r.calendrier_id + '|' + r.semaine; };
+            const inscritSet = new Set(db.prepare('SELECT calendrier_id, semaine FROM tournoi_liste_attente WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, Math.max(1, debut - 1), fin).map(cle));
+            const favoriSet = new Set(db.prepare('SELECT calendrier_id, semaine FROM tournoi_favoris WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, Math.max(1, debut - 1), fin).map(cle));
+            for (let s = Math.max(1, debut - 1); s <= fin; s++) {
+                const phase = phaseDeSemaine(s);
+                if (phase.type !== 'tournoi') continue;
+                CALENDRIER_TOURNOIS
+                    .filter(function (t) { return t.circuit === circuit && t.semaine_debut === phase.positionSemaine; })
+                    .forEach(function (t) {
+                        const k = t.id + '|' + s;
+                        const dest = inscritSet.has(k) ? tournoisVerrous : (favoriSet.has(k) ? favoris : null);
+                        if (!dest) return;
+                        for (let d = 0; d < t.duree; d++) dest[s + d] = t.nom;
+                    });
+            }
         }
         // Une vraie inscription a la priorite sur un simple coeur pour la meme semaine.
         Object.keys(tournoisVerrous).forEach(function (s) { delete favoris[s]; });

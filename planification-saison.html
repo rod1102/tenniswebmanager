@@ -166,9 +166,9 @@
 
                 let lockLabel = null;
                 let lockFavori = false;
-                if (dataPlan.tournoisVerrous[s]) lockLabel = 'Tournoi : ' + dataPlan.tournoisVerrous[s];
+                if (dataPlan.coupes[s]) lockLabel = dataPlan.coupes[s];
+                else if (dataPlan.tournoisVerrous[s]) lockLabel = 'Tournoi : ' + dataPlan.tournoisVerrous[s];
                 else if (dataPlan.favoris && dataPlan.favoris[s]) { lockLabel = '♥ Tournoi visé : ' + dataPlan.favoris[s]; lockFavori = true; }
-                else if (dataPlan.coupes[s]) lockLabel = dataPlan.coupes[s];
                 else if (phaseInfo && phaseInfo.type !== 'tournoi') lockLabel = phaseInfo.type === 'presaison' ? 'Pré-saison — rien à planifier' : 'Semaine 0 — préparatifs';
                 else if (phaseInfo && phaseInfo.finDeSaison) lockLabel = 'Fin de saison : Moulinette';
 
