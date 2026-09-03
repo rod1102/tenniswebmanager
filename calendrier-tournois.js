@@ -152,7 +152,7 @@ const CALENDRIER_TOURNOIS = [
     { id: 'wta-linz', circuit: 'WTA', nom: 'Linz Open', pays: 'Autriche', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 6, duree: 1, bareme: 'WTA_500' },
     { id: 'wta-singapour', circuit: 'WTA', nom: 'Singapore Open', pays: 'Singapour', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 6, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-abou-dabi', circuit: 'WTA', nom: 'Abu Dhabi Open', pays: 'Emirats arabes unis', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 6, duree: 1, bareme: 'WTA_500' },
-    { id: 'wta-cluj', circuit: 'WTA', nom: 'Transylvania Open (Cluj-Napoca)', pays: 'Roumanie', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 6, duree: 1, bareme: 'WTA_250' },
+    // Transylvania Open (Cluj-Napoca) retire du calendrier le 2026-09-03 (demande de l'utilisateur).
 
     // --- WTA : Moyen-Orient + pre-Sunshine ---
     { id: 'wta-doha', circuit: 'WTA', nom: 'Qatar Open (Doha)', pays: 'Qatar', categorie: 1000, surface: 'dur', taille_tableau: 56, semaine_debut: 7, duree: 1, bareme: 'WTA_1000_56' },
