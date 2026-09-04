@@ -1653,6 +1653,7 @@ function fixerTop30Saison(nouvelleSemaine) {
 // Coeur de l'avancee de semaine, reutilise par la route admin ET par le scheduler
 // automatique (verifierAvancementAuto) - jamais duplique entre les deux.
 function executerAvancementSemaine() {
+        invaliderCachesLourds();
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         const semaine = etat.semaine_actuelle;
         const nouvelleSemaine = semaine + 1;
@@ -2467,6 +2468,9 @@ function executerAvancementTour(force) {
         }
     });
 
+    // Un tour simule = des resultats de match ecrits -> classements Live/Race et
+    // records de badges potentiellement changes : on vide les caches lourds.
+    if (quelqueChoseSimule) invaliderCachesLourds();
     return quelqueChoseSimule;
 }
 
@@ -3517,6 +3521,25 @@ function resultatsRetenusEntiteCircuit(circuit, cle, semaineMin, semaineActuelle
 // Les points d'un tournoi encore en cours (statut != 'termine') ne comptent pas
 // encore dans le classement, meme si certains joueurs sont deja elimines - ils ne
 // sont credites qu'une fois le tournoi entierement termine.
+// Cache memoire a TTL court pour les calculs lourds recalcules a l'identique sur
+// beaucoup de requetes (classement Live/Race complet d'un circuit, records du
+// circuit pour les badges) : ces resultats ne changent qu'a la simulation d'un
+// tour ou a l'avancee de semaine. Vide explicitement a ces deux moments
+// (invaliderCachesLourds), le TTL n'est qu'un filet de securite. Introduit le
+// 2026-09-04 : les fiches joueur recalculaient a chaque ouverture le classement
+// complet du circuit + un balayage des ~200 rivaux pour les records de badges.
+const _memoLourd = new Map();
+function memoLourd(cle, ttlMs, fn) {
+    const hit = _memoLourd.get(cle);
+    if (hit && hit.exp > Date.now()) return hit.val;
+    const val = fn();
+    _memoLourd.set(cle, { val: val, exp: Date.now() + ttlMs });
+    return val;
+}
+function invaliderCachesLourds() {
+    _memoLourd.clear();
+}
+
 function calculerClassementGlobal(circuit, semaineMin, semaineActuelle) {
     const pointsRetenus = pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle);
 
@@ -3563,25 +3586,29 @@ function classementPartage(circuit, semaineMin, semaineActuelle, monUserId) {
 // tableau d'un tournoi sans recalculer une requete par participant. Aussi utilise
 // pour afficher le "Classement" actuel sur une fiche adversaire (reel ou rival).
 function calculerRangsLiveGlobal(circuit) {
-    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
-    const liste = calculerClassementGlobal(circuit, etat.semaine_actuelle - FENETRE_LIVE, etat.semaine_actuelle);
-    const rangs = new Map();
-    liste.forEach(function (j, i) { rangs.set(j.cle, i + 1); });
-    return rangs;
+    return memoLourd('rangsLive:' + circuit, 30000, function () {
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const liste = calculerClassementGlobal(circuit, etat.semaine_actuelle - FENETRE_LIVE, etat.semaine_actuelle);
+        const rangs = new Map();
+        liste.forEach(function (j, i) { rangs.set(j.cle, i + 1); });
+        return rangs;
+    });
 }
 
 // Meme principe que calculerRangsLiveGlobal, fenetre Race (depuis le debut de la
 // saison en cours) au lieu de la fenetre Live glissante - reutilise la meme
 // formule de debut de saison que /api/classement/:userId.
 function calculerRangsRaceGlobal(circuit) {
-    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
-    const semaineActuelle = etat.semaine_actuelle;
-    const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
-    const debutSaison = semaineActuelle - positionSaisonBrute + 2;
-    const liste = calculerClassementGlobal(circuit, debutSaison, semaineActuelle);
-    const rangs = new Map();
-    liste.forEach(function (j, i) { rangs.set(j.cle, i + 1); });
-    return rangs;
+    return memoLourd('rangsRace:' + circuit, 30000, function () {
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+        const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+        const debutSaison = semaineActuelle - positionSaisonBrute + 2;
+        const liste = calculerClassementGlobal(circuit, debutSaison, semaineActuelle);
+        const rangs = new Map();
+        liste.forEach(function (j, i) { rangs.set(j.cle, i + 1); });
+        return rangs;
+    });
 }
 
 // Meilleur classement Live jamais atteint par un participant (rival ou joueur reel)
@@ -6985,7 +7012,35 @@ function matchsOrientes(filtreColonne, id) {
 // Jeux Olympiques delibirement absents (n'existent pas dans le jeu, cf. CLAUDE.md
 // "Pas encore fait") : "Grand chelem differents" plafonne donc a 4/5 realistement
 // tant que les JO ne sont pas implementes (choix explicite de l'utilisateur).
+// Tous les records absolus d'un circuit, en un seul objet memoise (TTL 60 s +
+// invalidation a l'avancee tour/semaine) : sans ca, chaque ouverture de fiche
+// joueur relancait ~15 agregats + un balayage des ~200 rivaux
+// (maxStatsSequentiellesCircuit) juste pour poser le drapeau "Legende" des badges.
+function recordsCircuit(circuit) {
+    return memoLourd('records:' + circuit, 60000, function () {
+        return {
+            victoires: maxVictoiresCircuit(circuit),
+            victoiresSurface: { dur: maxVictoiresParSurfaceCircuit(circuit, 'dur'), terre: maxVictoiresParSurfaceCircuit(circuit, 'terre'), herbe: maxVictoiresParSurfaceCircuit(circuit, 'herbe') },
+            titres: maxTitresCircuit(circuit),
+            titresCategorie: { slam: maxTitresParCategorieCircuit(circuit, 'slam'), '1000': maxTitresParCategorieCircuit(circuit, '1000'), finals: maxTitresParCategorieCircuit(circuit, 'finals') },
+            gcDifferents: maxGcDifferentsCircuit(circuit),
+            semainesTop10: maxSemainesRangCircuit(circuit, 'rang <= 10'),
+            semainesNum1: maxSemainesRangCircuit(circuit, 'rang = 1'),
+            qualifMasters: maxQualifMastersCircuit(circuit),
+            titresNom: {
+                "Open d'Australie": maxTitresParNomCircuit(circuit, "Open d'Australie"),
+                'Roland-Garros': maxTitresParNomCircuit(circuit, 'Roland-Garros'),
+                'Wimbledon': maxTitresParNomCircuit(circuit, 'Wimbledon'),
+                'US Open': maxTitresParNomCircuit(circuit, 'US Open')
+            },
+            sequentiels: maxStatsSequentiellesCircuit(circuit),
+            sangFroid: maxSangFroidCircuit(circuit)
+        };
+    });
+}
+
 function calculerBadges(circuit, cle, filtreColonne, id) {
+    const R = recordsCircuit(circuit);
     const filtreDirect = filtreColonne === 'player_id' ? 'player_id = ? AND est_reel = 1' : 'rival_id = ?';
     const filtreJoint = filtreColonne === 'player_id' ? 'tj.player_id = ? AND tj.est_reel = 1' : 'tj.rival_id = ?';
 
@@ -7048,7 +7103,11 @@ function calculerBadges(circuit, cle, filtreColonne, id) {
         if (m.victoire) { serieActuelle++; meilleureSerie = Math.max(meilleureSerie, serieActuelle); }
         else { serieActuelle = 0; }
     });
-    const maxSequentiels = maxStatsSequentiellesCircuit(circuit);
+    const maxSequentiels = R.sequentiels;
+    const titreAO = titresParNom('Open d\'Australie');
+    const titreRG = titresParNom('Roland-Garros');
+    const titreW = titresParNom('Wimbledon');
+    const titreUS = titresParNom('US Open');
 
     // Balles de break sauvees : uniquement trackees sur la table `matchs`, qui
     // n'existe que pour un VRAI joueur (jamais de ligne `matchs` pour un rival,
@@ -7064,43 +7123,43 @@ function calculerBadges(circuit, cle, filtreColonne, id) {
     // "Legende" des lors qu'il est le record (souvent le cas pour ce badge precis).
     return construireBadges([
         { id: 'victoires', nom: 'Victoires en tournoi', description: 'Matchs de tournoi remportés, toute la carrière', valeur: victoires, seuils: [50, 100, 150, 250, 500],
-            estRecord: victoires === maxVictoiresCircuit(circuit) },
+            estRecord: victoires === R.victoires },
         { id: 'victoires_dur', nom: 'Matchs gagnés sur dur', description: 'Matchs remportés sur surface dure', valeur: victoiresDur,
-            seuils: [1, 25, 50, 75, 150], estRecord: victoiresDur === maxVictoiresParSurfaceCircuit(circuit, 'dur') },
+            seuils: [1, 25, 50, 75, 150], estRecord: victoiresDur === R.victoiresSurface.dur },
         { id: 'victoires_terre', nom: 'Matchs gagnés sur terre', description: 'Matchs remportés sur terre battue', valeur: victoiresTerre,
-            seuils: [1, 25, 50, 75, 150], estRecord: victoiresTerre === maxVictoiresParSurfaceCircuit(circuit, 'terre') },
+            seuils: [1, 25, 50, 75, 150], estRecord: victoiresTerre === R.victoiresSurface.terre },
         { id: 'victoires_herbe', nom: 'Matchs gagnés sur herbe', description: 'Matchs remportés sur herbe', valeur: victoiresHerbe,
-            seuils: [1, 25, 50, 75, 150], estRecord: victoiresHerbe === maxVictoiresParSurfaceCircuit(circuit, 'herbe') },
+            seuils: [1, 25, 50, 75, 150], estRecord: victoiresHerbe === R.victoiresSurface.herbe },
         { id: 'titres', nom: 'Titres remportés', description: 'Tournois remportés, toutes catégories confondues', valeur: titres, seuils: [5, 10, 15, 25, 50],
-            estRecord: titres === maxTitresCircuit(circuit) },
+            estRecord: titres === R.titres },
         { id: 'titres_gc', nom: 'Titres du Grand Chelem', description: 'Open d\'Australie, Roland-Garros, Wimbledon, US Open remportés', valeur: titresGC, seuils: [5, 10, 15, 25, 50],
-            estRecord: titresGC === maxTitresParCategorieCircuit(circuit, 'slam') },
+            estRecord: titresGC === R.titresCategorie.slam },
         { id: 'gc_differents', nom: 'Grand Chelem différents gagnés', description: 'Nombre de Grand Chelem distincts remportés au moins une fois', valeur: gcDifferents, seuils: [1, 2, 3, 4, 5],
-            estRecord: gcDifferents === maxGcDifferentsCircuit(circuit) },
+            estRecord: gcDifferents === R.gcDifferents },
         { id: 'titres_m1000', nom: 'Titres Masters 1000', description: 'Tournois Masters 1000 remportés', valeur: titresM1000, seuils: [5, 10, 15, 25, 50],
-            estRecord: titresM1000 === maxTitresParCategorieCircuit(circuit, '1000') },
+            estRecord: titresM1000 === R.titresCategorie['1000'] },
         { id: 'top10', nom: 'Semaines dans le Top 10', description: 'Semaines passées dans le top 10 du classement Live', valeur: semainesTop10, seuils: [1, 10, 25, 50, 100],
-            estRecord: semainesTop10 === maxSemainesRangCircuit(circuit, 'rang <= 10') },
+            estRecord: semainesTop10 === R.semainesTop10 },
         { id: 'numero1', nom: 'Semaines N°1', description: 'Semaines passées n°1 du classement Live', valeur: semainesNum1, seuils: [1, 4, 12, 26, 52],
-            estRecord: semainesNum1 === maxSemainesRangCircuit(circuit, 'rang = 1') },
+            estRecord: semainesNum1 === R.semainesNum1 },
         { id: 'masters_qualif', nom: 'Qualifications aux Masters', description: 'Qualifications au tournoi des Masters de fin de saison', valeur: qualifMasters, seuils: [1, 10, 25, 50, 100],
-            estRecord: qualifMasters === maxQualifMastersCircuit(circuit) },
-        { id: 'victoire_ao', nom: 'Victoire Open d\'Australie', description: 'Titres remportés à l\'Open d\'Australie', valeur: titresParNom('Open d\'Australie'), seuils: [1, 2, 3, 5, 8],
-            estRecord: titresParNom('Open d\'Australie') === maxTitresParNomCircuit(circuit, 'Open d\'Australie') },
-        { id: 'victoire_rg', nom: 'Victoire Roland-Garros', description: 'Titres remportés à Roland-Garros', valeur: titresParNom('Roland-Garros'), seuils: [1, 2, 3, 5, 8],
-            estRecord: titresParNom('Roland-Garros') === maxTitresParNomCircuit(circuit, 'Roland-Garros') },
-        { id: 'victoire_wimbledon', nom: 'Victoire Wimbledon', description: 'Titres remportés à Wimbledon', valeur: titresParNom('Wimbledon'), seuils: [1, 2, 3, 5, 8],
-            estRecord: titresParNom('Wimbledon') === maxTitresParNomCircuit(circuit, 'Wimbledon') },
-        { id: 'victoire_usopen', nom: 'Victoire US Open', description: 'Titres remportés à l\'US Open', valeur: titresParNom('US Open'), seuils: [1, 2, 3, 5, 8],
-            estRecord: titresParNom('US Open') === maxTitresParNomCircuit(circuit, 'US Open') },
+            estRecord: qualifMasters === R.qualifMasters },
+        { id: 'victoire_ao', nom: 'Victoire Open d\'Australie', description: 'Titres remportés à l\'Open d\'Australie', valeur: titreAO, seuils: [1, 2, 3, 5, 8],
+            estRecord: titreAO === R.titresNom['Open d\'Australie'] },
+        { id: 'victoire_rg', nom: 'Victoire Roland-Garros', description: 'Titres remportés à Roland-Garros', valeur: titreRG, seuils: [1, 2, 3, 5, 8],
+            estRecord: titreRG === R.titresNom['Roland-Garros'] },
+        { id: 'victoire_wimbledon', nom: 'Victoire Wimbledon', description: 'Titres remportés à Wimbledon', valeur: titreW, seuils: [1, 2, 3, 5, 8],
+            estRecord: titreW === R.titresNom['Wimbledon'] },
+        { id: 'victoire_usopen', nom: 'Victoire US Open', description: 'Titres remportés à l\'US Open', valeur: titreUS, seuils: [1, 2, 3, 5, 8],
+            estRecord: titreUS === R.titresNom['US Open'] },
         { id: 'victoire_masters', nom: 'Victoire Masters', description: 'Titres remportés au tournoi des Masters de fin de saison', valeur: titresMasters, seuils: [1, 2, 3, 5, 8],
-            estRecord: titresMasters === maxTitresParCategorieCircuit(circuit, 'finals') },
+            estRecord: titresMasters === R.titresCategorie.finals },
         { id: 'intouchable', nom: 'Intouchable', description: 'Matchs remportés sans perdre le moindre jeu', valeur: intouchable, seuils: [1, 5, 15, 25, 50],
             estRecord: intouchable === maxSequentiels.maxIntouchable },
         { id: 'serie_victoires', nom: 'Série de victoires', description: 'Meilleure série de matchs gagnés à la suite', valeur: meilleureSerie, seuils: [5, 10, 15, 25, 50],
             estRecord: meilleureSerie === maxSequentiels.maxSerie },
         { id: 'sang_froid', nom: 'Sang-froid', description: 'Balles de break sauvées, cumulées sur la carrière', valeur: ballesBreakSauvees, seuils: [10, 25, 50, 100, 200],
-            estRecord: filtreColonne === 'player_id' && ballesBreakSauvees === maxSangFroidCircuit(circuit) }
+            estRecord: filtreColonne === 'player_id' && ballesBreakSauvees === R.sangFroid }
     ]);
 }
 
