@@ -860,12 +860,15 @@ nettoyerTournoisRetires('patch_retrait_houston_bucarest', ['atp-houston', 'atp-b
 nettoyerTournoisRetires('patch_retrait_wta_cluj', ['wta-cluj']);                              // 2026-09-03
 
 // Correction ponctuelle : age d'Ansgar Hakansson -> 19 ans (demande de l'utilisateur,
-// 2026-09-04). nom LIKE 'H_kansson' : le '_' tolere le 'a' ou le 'å' selon la graphie stockee.
-try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_age_ansgar_hakansson INTEGER DEFAULT 0"); } catch (e) {}
-if (db.prepare('SELECT patch_age_ansgar_hakansson AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
-    const r = db.prepare("UPDATE players SET age = 19 WHERE prenom = 'Ansgar' COLLATE NOCASE AND nom LIKE 'H_kansson'").run();
-    console.log('[patch_age_ansgar_hakansson] lignes mises a jour :', r.changes);
-    db.prepare("UPDATE jeu_etat SET patch_age_ansgar_hakansson = 1 WHERE id = 1").run();
+// 2026-09-04). v2 : match large (TRIM + LIKE 'H%kansson') apres un v1 qui n'avait
+// rien touche (espace parasite ou graphie du nom non prevue).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_age_hakansson_v2 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_age_hakansson_v2 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const cibles = db.prepare("SELECT id, prenom, nom, age FROM players WHERE type = 'joueur' AND TRIM(prenom) = 'Ansgar' COLLATE NOCASE AND TRIM(nom) LIKE 'H%kansson'").all();
+    console.log('[patch_age_hakansson_v2] cibles :', JSON.stringify(cibles));
+    const r = db.prepare("UPDATE players SET age = 19 WHERE type = 'joueur' AND TRIM(prenom) = 'Ansgar' COLLATE NOCASE AND TRIM(nom) LIKE 'H%kansson'").run();
+    console.log('[patch_age_hakansson_v2] lignes mises a jour :', r.changes);
+    db.prepare("UPDATE jeu_etat SET patch_age_hakansson_v2 = 1 WHERE id = 1").run();
 }
 
 module.exports = db;

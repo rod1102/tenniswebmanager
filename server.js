@@ -697,6 +697,29 @@ function estAdmin(adminId) {
     return user && user.role === 'admin';
 }
 
+// Recherche d'un joueur reel (admin) - utilitaire de diagnostic pour les
+// corrections ponctuelles de donnees (age, nationalite...). Retourne les valeurs
+// exactes stockees (prenom/nom sans reformatage) pour cibler une migration.
+app.get('/api/admin/chercher-joueur', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const q = '%' + String(req.query.q || '').trim() + '%';
+        const lignes = db.prepare(`
+            SELECT p.id, p.type, p.prenom, p.nom, p.age, p.taille, p.nationalite, p.statut,
+                   u.id AS user_id, u.pseudo AS coach
+            FROM players p JOIN users u ON u.id = p.user_id
+            WHERE p.prenom LIKE ? COLLATE NOCASE OR p.nom LIKE ? COLLATE NOCASE OR u.pseudo LIKE ? COLLATE NOCASE
+            ORDER BY p.nom, p.prenom
+        `).all(q, q, q);
+        res.json({ success: true, joueurs: lignes });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/admin/en-attente', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
