@@ -859,4 +859,13 @@ function nettoyerTournoisRetires(flagCol, calendrierIds) {
 nettoyerTournoisRetires('patch_retrait_houston_bucarest', ['atp-houston', 'atp-bucarest']); // 2026-09-02
 nettoyerTournoisRetires('patch_retrait_wta_cluj', ['wta-cluj']);                              // 2026-09-03
 
+// Correction ponctuelle : age d'Ansgar Hakansson -> 19 ans (demande de l'utilisateur,
+// 2026-09-04). nom LIKE 'H_kansson' : le '_' tolere le 'a' ou le 'å' selon la graphie stockee.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_age_ansgar_hakansson INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_age_ansgar_hakansson AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const r = db.prepare("UPDATE players SET age = 19 WHERE prenom = 'Ansgar' COLLATE NOCASE AND nom LIKE 'H_kansson'").run();
+    console.log('[patch_age_ansgar_hakansson] lignes mises a jour :', r.changes);
+    db.prepare("UPDATE jeu_etat SET patch_age_ansgar_hakansson = 1 WHERE id = 1").run();
+}
+
 module.exports = db;
