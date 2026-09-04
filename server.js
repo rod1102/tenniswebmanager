@@ -293,6 +293,17 @@ function ipReelle(req) {
     return candidat.trim().replace(/^::ffff:/i, '');
 }
 
+// Le pseudo de coach est l'identite publique unique d'un compte : deux coachs ne
+// peuvent pas porter le meme (comparaison insensible a la casse). Verifie a
+// l'inscription ET a l'edition du profil (exclureUserId = le compte en cours
+// d'edition, pour qu'il puisse re-soumettre son propre pseudo inchange).
+function pseudoDejaPris(pseudo, exclureUserId) {
+    const ligne = exclureUserId
+        ? db.prepare('SELECT id FROM users WHERE pseudo = ? COLLATE NOCASE AND id != ?').get(pseudo, exclureUserId)
+        : db.prepare('SELECT id FROM users WHERE pseudo = ? COLLATE NOCASE').get(pseudo);
+    return !!ligne;
+}
+
 app.post('/api/inscription', (req, res) => {
     try {
         const { email, password, pseudo } = req.body;
@@ -311,6 +322,9 @@ app.post('/api/inscription', (req, res) => {
         const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
         if (existing) {
             return res.status(409).json({ error: 'Un compte existe deja avec cet email.' });
+        }
+        if (pseudoDejaPris(pseudoNettoye, null)) {
+            return res.status(409).json({ error: 'Ce pseudo de coach est deja pris, choisis-en un autre.' });
         }
 
         const ip = ipReelle(req);
@@ -6536,6 +6550,9 @@ app.post('/api/coach/profil', (req, res) => {
         const pseudoNettoye = (pseudo || '').trim();
         if (!pseudoNettoye) {
             return res.status(400).json({ error: 'Le pseudo de coach est obligatoire.' });
+        }
+        if (pseudoDejaPris(pseudoNettoye, req.userId)) {
+            return res.status(409).json({ error: 'Ce pseudo de coach est deja pris par un autre coach.' });
         }
         const discordNettoye = (discord || '').trim() || null;
         db.prepare('UPDATE users SET pseudo = ?, discord = ? WHERE id = ?').run(pseudoNettoye, discordNettoye, req.userId);
