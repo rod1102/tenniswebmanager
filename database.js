@@ -887,4 +887,49 @@ if (db.prepare('SELECT patch_age_hakansson_v2 AS p FROM jeu_etat WHERE id = 1').
     db.prepare("UPDATE jeu_etat SET patch_age_hakansson_v2 = 1 WHERE id = 1").run();
 }
 
+// Menage ponctuel du 2026-09-04.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_menage_20260904 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_menage_20260904 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    // 1) Compte cree par erreur lors d'un test (email x@y.z) - aucun joueur associe.
+    const junk = db.prepare("SELECT id FROM users WHERE email = 'x@y.z'").get();
+    if (junk) {
+        db.prepare('DELETE FROM players WHERE user_id = ?').run(junk.id);
+        db.prepare('DELETE FROM sessions WHERE user_id = ?').run(junk.id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(junk.id);
+        console.log('[menage_20260904] compte test x@y.z supprime (id ' + junk.id + ')');
+    }
+
+    // 2) Refus des personnages "Mathias Part" / "Yona L'Hermitage" (prenom masculin
+    //    <-> feminin melange, demande de l'utilisateur). On supprime la paire en
+    //    attente du coach concerne et on lui laisse un motif visible a sa prochaine
+    //    connexion (meme mecanique que /api/admin/decision, cf. dernier_refus_motif).
+    const MOTIF = "Noms pas valides car erreur entre feminin et masculin sur les prenoms";
+    const cibles = db.prepare(`
+        SELECT id, user_id, type, prenom, nom, statut FROM players
+        WHERE (TRIM(prenom) = 'Mathias' COLLATE NOCASE AND TRIM(nom) LIKE 'Part' COLLATE NOCASE)
+           OR (TRIM(prenom) = 'Yona' COLLATE NOCASE AND TRIM(nom) LIKE 'L%Hermitage' COLLATE NOCASE)
+    `).all();
+    console.log('[menage_20260904] cibles Mathias/Yona :', JSON.stringify(cibles));
+    const usersConcernes = Array.from(new Set(cibles.filter(function (c) { return c.statut !== 'valide'; }).map(function (c) { return c.user_id; })));
+    cibles.filter(function (c) { return c.statut === 'valide'; }).forEach(function (c) {
+        console.log('[menage_20260904] ATTENTION cible DEJA VALIDEE, non supprimee (revue manuelle) :', JSON.stringify(c));
+    });
+    usersConcernes.forEach(function (uid) {
+        const aSupprimer = db.prepare("SELECT id FROM players WHERE user_id = ? AND statut != 'valide'").all(uid).map(function (r) { return r.id; });
+        if (aSupprimer.length) {
+            const ph = aSupprimer.map(function () { return '?'; }).join(',');
+            ['plannings', 'planning_historique', 'journal_semaine_joueur', 'tournoi_favoris', 'tournoi_liste_attente'].forEach(function (t) {
+                try { db.prepare(`DELETE FROM ${t} WHERE player_id IN (${ph})`).run(...aSupprimer); } catch (e) {}
+            });
+            try { db.prepare(`DELETE FROM tournoi_joueurs WHERE est_reel = 1 AND player_id IN (${ph})`).run(...aSupprimer); } catch (e) {}
+            db.prepare(`DELETE FROM players WHERE id IN (${ph})`).run(...aSupprimer);
+        }
+        db.prepare('UPDATE users SET dernier_refus_motif = ?, dernier_refus_date = ? WHERE id = ?')
+            .run(MOTIF, new Date().toISOString(), uid);
+        console.log('[menage_20260904] coach ' + uid + ' : ' + aSupprimer.length + ' perso(s) supprime(s) + motif pose');
+    });
+
+    db.prepare("UPDATE jeu_etat SET patch_menage_20260904 = 1 WHERE id = 1").run();
+}
+
 module.exports = db;
