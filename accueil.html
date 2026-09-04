@@ -114,13 +114,69 @@
 
         let estAdminCourant = false;
 
-        async function verifierAdmin() {
+        async function chargerUtilisateurCourant() {
             const response = await fetch('/api/utilisateur/' + userId);
             const data = await response.json();
-            if (response.ok && data.user.role === 'admin') {
+            if (!response.ok) return null;
+            if (data.user.role === 'admin') {
                 document.getElementById('admin-link').style.display = 'inline-block';
                 estAdminCourant = true;
             }
+            return data.user;
+        }
+
+        // Doublon de pseudo herite d'avant la verification d'unicite (2026-09-04) :
+        // popup bloquante, meme idiome que l'ecran d'inter-saison (.dispo-blocage-overlay),
+        // tant que ce coach n'a pas choisi un pseudo disponible. Seul le compte le
+        // plus RECENT des deux doublons voit cette popup (server.js,
+        // pseudoEnConflitPourUtilisateur) - l'autre garde son pseudo tranquillement.
+        function afficherConflitPseudo() {
+            if (document.getElementById('pseudo-conflit-overlay')) return;
+            const overlay = document.createElement('div');
+            overlay.id = 'pseudo-conflit-overlay';
+            overlay.className = 'dispo-blocage-overlay';
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box">
+                    <div class="stats-header" style="margin-top:0;">Pseudo déjà utilisé</div>
+                    <p class="planning-alerte-texte" style="margin-bottom:16px;">
+                        Ce pseudo est déjà utilisé, merci d'en choisir un nouveau.
+                    </p>
+                    <div class="form-group">
+                        <label for="pseudo-conflit-input">Nouveau pseudo</label>
+                        <input type="text" id="pseudo-conflit-input" maxlength="40" autocomplete="off">
+                    </div>
+                    <div id="pseudo-conflit-msg" class="planning-alerte-texte" style="min-height:18px; margin-bottom:12px;"></div>
+                    <button type="button" id="pseudo-conflit-btn" class="cta cta-primary" style="width:100%; padding:12px; font-size:0.85rem;">Valider mon nouveau pseudo</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+
+            const input = document.getElementById('pseudo-conflit-input');
+            const msg = document.getElementById('pseudo-conflit-msg');
+            const btn = document.getElementById('pseudo-conflit-btn');
+            input.focus();
+
+            async function valider() {
+                const valeur = input.value.trim();
+                msg.textContent = '';
+                if (!valeur) { msg.textContent = 'Le pseudo est obligatoire.'; return; }
+                btn.disabled = true;
+                try {
+                    const response = await fetch('/api/coach/resoudre-pseudo', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ pseudo: valeur })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) { msg.textContent = data.error || 'Impossible d\'enregistrer.'; btn.disabled = false; return; }
+                    overlay.remove();
+                } catch (e) {
+                    msg.textContent = 'Erreur reseau, reessaie.';
+                    btn.disabled = false;
+                }
+            }
+            btn.addEventListener('click', valider);
+            input.addEventListener('keydown', function (e) { if (e.key === 'Enter') valider(); });
         }
 
         // Bandeau admin : "X joueurs sont a valider", uniquement pour l'admin et
@@ -452,9 +508,10 @@
         });
 
         (async function () {
-            await verifierAdmin();
+            const utilisateur = await chargerUtilisateurCourant();
             chargerAnnonce();
             afficherValidationsAdmin();
+            if (utilisateur && utilisateur.pseudoEnConflit) afficherConflitPseudo();
         })();
         chargerSemaine();
         chargerAccueil();

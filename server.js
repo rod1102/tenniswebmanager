@@ -304,6 +304,21 @@ function pseudoDejaPris(pseudo, exclureUserId) {
     return !!ligne;
 }
 
+// Doublons herites d'avant la verification d'unicite (2026-09-04) : deux comptes
+// peuvent encore partager le meme pseudo aujourd'hui. Regle de depart tranchee
+// par l'utilisateur : le compte le plus ANCIEN (id le plus bas, AUTOINCREMENT
+// donc toujours dans l'ordre de creation) garde le pseudo sans etre derange ;
+// seul(s) le(s) compte(s) plus recent(s) partageant ce pseudo sont bloques par
+// la popup jusqu'a ce qu'ils en choisissent un autre.
+function pseudoEnConflitPourUtilisateur(userId) {
+    const user = db.prepare('SELECT pseudo FROM users WHERE id = ?').get(userId);
+    if (!user || !user.pseudo) return false;
+    const doublons = db.prepare('SELECT id FROM users WHERE pseudo = ? COLLATE NOCASE').all(user.pseudo);
+    if (doublons.length < 2) return false;
+    const plusAncienId = Math.min.apply(null, doublons.map(function (d) { return d.id; }));
+    return plusAncienId !== Number(userId);
+}
+
 app.post('/api/inscription', (req, res) => {
     try {
         const { email, password, pseudo } = req.body;
@@ -693,11 +708,12 @@ app.delete('/api/joueur/avatar/:playerId', (req, res) => {
 app.get('/api/utilisateur/:userId', (req, res) => {
     try {
         const userId = req.userId;
-        const user = db.prepare('SELECT id, email, role, est_redacteur, dernier_refus_motif, dernier_refus_date FROM users WHERE id = ?').get(userId);
+        const user = db.prepare('SELECT id, email, pseudo, role, est_redacteur, dernier_refus_motif, dernier_refus_date FROM users WHERE id = ?').get(userId);
 
         if (!user) {
             return res.status(404).json({ error: 'Utilisateur introuvable.' });
         }
+        user.pseudoEnConflit = pseudoEnConflitPourUtilisateur(userId);
 
         res.json({ success: true, user });
     } catch (err) {
@@ -6556,6 +6572,28 @@ app.post('/api/coach/profil', (req, res) => {
         }
         const discordNettoye = (discord || '').trim() || null;
         db.prepare('UPDATE users SET pseudo = ?, discord = ? WHERE id = ?').run(pseudoNettoye, discordNettoye, req.userId);
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Resolution de la popup bloquante "pseudo en double" (accueil.html) - distincte
+// de /api/coach/profil ci-dessus : ne touche QUE le pseudo, jamais discord (sinon
+// un coach qui ne fait que resoudre son conflit de pseudo effacerait son lien
+// Discord au passage). Demande explicite de l'utilisateur, 2026-09-04.
+app.post('/api/coach/resoudre-pseudo', (req, res) => {
+    try {
+        const { pseudo } = req.body;
+        const pseudoNettoye = (pseudo || '').trim();
+        if (!pseudoNettoye) {
+            return res.status(400).json({ error: 'Le pseudo est obligatoire.' });
+        }
+        if (pseudoDejaPris(pseudoNettoye, req.userId)) {
+            return res.status(409).json({ error: 'Ce pseudo de coach est deja pris, choisis-en un autre.' });
+        }
+        db.prepare('UPDATE users SET pseudo = ? WHERE id = ?').run(pseudoNettoye, req.userId);
         res.json({ success: true });
     } catch (err) {
         console.error(err);
