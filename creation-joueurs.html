@@ -53,7 +53,7 @@
 
             <form id="players-form">
                 <div class="creation-grid">
-                    <fieldset class="player-card">
+                    <fieldset class="player-card" id="p1-fieldset">
                         <legend class="player-label">Ton joueur</legend>
 
                         <div class="form-group">
@@ -336,7 +336,7 @@
                         <div class="budget-remaining" id="p1-disp-restant">12 points restants</div>
                     </fieldset>
 
-                    <fieldset class="player-card">
+                    <fieldset class="player-card" id="p2-fieldset">
                         <legend class="player-label">Ta joueuse</legend>
 
                         <div class="form-group">
@@ -620,7 +620,7 @@
                     </fieldset>
                 </div>
 
-                <button type="submit" class="cta cta-primary auth-submit">Valider mes deux champions</button>
+                <button type="submit" class="cta cta-primary auth-submit" id="submit-btn">Valider mes deux champions</button>
             </form>
         </div>
     </div>
@@ -656,6 +656,39 @@
                 banniere.innerHTML = '<strong style="color:#E24B4A;">Ta précédente inscription a été refusée.</strong>'
                     + (data.user.dernier_refus_motif ? '<br>Motif : ' + data.user.dernier_refus_motif : '');
             } catch (e) { /* pas bloquant si ca echoue */ }
+        })();
+
+        // Un compte peut atterrir ici avec DEJA un des deux personnages (bug de
+        // creation non atomique corrige le 2026-09-05, ou refus admin porté sur un
+        // seul des deux) : dans ce cas on ne montre/valide/envoie plus que celui qui
+        // manque, au lieu de forcer une resoumission complete de la paire (qui serait
+        // de toute facon refusee par le serveur pour le personnage deja existant).
+        let manqueJoueur = true;
+        let manqueJoueuse = true;
+        (async function verifierPersonnagesExistants() {
+            const userId = localStorage.getItem('currentUserId');
+            if (!userId) return;
+            try {
+                const response = await fetch('/api/joueurs/' + userId);
+                const data = await response.json();
+                if (!response.ok) return;
+                const aJoueur = data.players.some(function (p) { return p.type === 'joueur'; });
+                const aJoueuse = data.players.some(function (p) { return p.type === 'joueuse'; });
+                if (aJoueur && aJoueuse) {
+                    window.location.href = 'accueil.html';
+                    return;
+                }
+                manqueJoueur = !aJoueur;
+                manqueJoueuse = !aJoueuse;
+                if (aJoueur) {
+                    document.getElementById('p1-fieldset').style.display = 'none';
+                    document.getElementById('submit-btn').textContent = 'Valider ma nouvelle joueuse';
+                }
+                if (aJoueuse) {
+                    document.getElementById('p2-fieldset').style.display = 'none';
+                    document.getElementById('submit-btn').textContent = 'Valider mon nouveau joueur';
+                }
+            } catch (e) { /* pas bloquant si ca echoue - le serveur validera de toute facon */ }
         })();
 
         // Budget de base 120, corrige a la hausse par le serveur si la partie a deja
@@ -772,64 +805,47 @@
                 return /^\p{L}+([\s'-]\p{L}+)*$/u.test((texte || '').trim());
             }
 
-            if (!nomValide(document.getElementById('p1-prenom').value) || !nomValide(document.getElementById('p1-nom').value)) {
-                alert('Le prénom et le nom du joueur ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.');
-                return;
-            }
-            if (!nomValide(document.getElementById('p2-prenom').value) || !nomValide(document.getElementById('p2-nom').value)) {
-                alert('Le prénom et le nom de la joueuse ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.');
-                return;
-            }
-            const tropLong = ['p1-prenom', 'p1-nom', 'p2-prenom', 'p2-nom'].some(function (id) {
-                return document.getElementById(id).value.trim().length > 20;
-            });
-            if (tropLong) {
-                alert('Le prénom et le nom sont limités à 20 caractères chacun.');
-                return;
-            }
-            const ageHorsLimites = ['p1-age', 'p2-age'].some(function (id) {
-                const age = Number(document.getElementById(id).value);
-                return !Number.isFinite(age) || age < 15 || age > 39;
-            });
-            if (ageHorsLimites) {
-                alert('L\'âge doit être compris entre 15 et 39 ans.');
-                return;
+            const prefixesAValider = [];
+            if (manqueJoueur) prefixesAValider.push('p1');
+            if (manqueJoueuse) prefixesAValider.push('p2');
+
+            for (const prefix of prefixesAValider) {
+                if (!nomValide(document.getElementById(prefix + '-prenom').value) || !nomValide(document.getElementById(prefix + '-nom').value)) {
+                    alert('Le prénom et le nom ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.');
+                    return;
+                }
+                if (document.getElementById(prefix + '-prenom').value.trim().length > 20 || document.getElementById(prefix + '-nom').value.trim().length > 20) {
+                    alert('Le prénom et le nom sont limités à 20 caractères chacun.');
+                    return;
+                }
+                const age = Number(document.getElementById(prefix + '-age').value);
+                if (!Number.isFinite(age) || age < 15 || age > 39) {
+                    alert('L\'âge doit être compris entre 15 et 39 ans.');
+                    return;
+                }
+                if (majBudget(prefix) !== 0) {
+                    alert('Le total des points techniques doit être exactement de ' + BUDGET + '.');
+                    return;
+                }
+                if (majBudgetDispositions(prefix) !== 0) {
+                    alert('Le total des dispositions doit être exactement de ' + BUDGET_DISP + '.');
+                    return;
+                }
             }
 
-            if (majBudget('p1') !== 0) {
-                alert('Le total des points du joueur doit être exactement de ' + BUDGET + '.');
-                return;
-            }
-            if (majBudget('p2') !== 0) {
-                alert('Le total des points de la joueuse doit être exactement de ' + BUDGET + '.');
-                return;
-            }
-            if (majBudgetDispositions('p1') !== 0) {
-                alert('Le total des dispositions du joueur doit être exactement de ' + BUDGET_DISP + '.');
-                return;
-            }
-            if (majBudgetDispositions('p2') !== 0) {
-                alert('Le total des dispositions de la joueuse doit être exactement de ' + BUDGET_DISP + '.');
-                return;
+            function lirePersonnage(prefix) {
+                return Object.assign({
+                    prenom: document.getElementById(prefix + '-prenom').value,
+                    nom: document.getElementById(prefix + '-nom').value,
+                    age: document.getElementById(prefix + '-age').value,
+                    taille: document.getElementById(prefix + '-taille').value,
+                    nationalite: document.getElementById(prefix + '-nationalite').value,
+                    main: document.getElementById(prefix + '-main').value
+                }, lireCompetences(prefix), lireDispositions(prefix));
             }
 
-            const joueur = Object.assign({
-                prenom: document.getElementById('p1-prenom').value,
-                nom: document.getElementById('p1-nom').value,
-                age: document.getElementById('p1-age').value,
-                taille: document.getElementById('p1-taille').value,
-                nationalite: document.getElementById('p1-nationalite').value,
-                main: document.getElementById('p1-main').value
-            }, lireCompetences('p1'), lireDispositions('p1'));
-
-            const joueuse = Object.assign({
-                prenom: document.getElementById('p2-prenom').value,
-                nom: document.getElementById('p2-nom').value,
-                age: document.getElementById('p2-age').value,
-                taille: document.getElementById('p2-taille').value,
-                nationalite: document.getElementById('p2-nationalite').value,
-                main: document.getElementById('p2-main').value
-            }, lireCompetences('p2'), lireDispositions('p2'));
+            const joueur = manqueJoueur ? lirePersonnage('p1') : undefined;
+            const joueuse = manqueJoueuse ? lirePersonnage('p2') : undefined;
 
             const response = await fetch('/api/joueurs', {
                 method: 'POST',
@@ -844,7 +860,9 @@
                 return;
             }
 
-            alert('Bravo ! Tes deux personnages sont créés et en attente de validation par l\'administrateur.');
+            alert(manqueJoueur && manqueJoueuse
+                ? 'Bravo ! Tes deux personnages sont créés et en attente de validation par l\'administrateur.'
+                : 'Bravo ! Ton nouveau personnage est créé et en attente de validation par l\'administrateur.');
             window.location.href = 'accueil.html';
         });
 

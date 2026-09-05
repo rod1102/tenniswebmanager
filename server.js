@@ -423,80 +423,94 @@ function aDesCompetencesARepartir(playerId) {
     return !!player && player.points_competences_a_repartir > 0;
 }
 
+// Valide les champs d'UN personnage (nom/age/competences/dispositions) - factorise
+// pour /api/joueurs, qui peut avoir a valider soit la paire complete, soit un seul
+// personnage manquant (cf. plus bas). Retourne un message d'erreur ou null.
+function erreurValidationPersonnage(p, label, budgetCourant) {
+    if (!nomValide(p.prenom) || !nomValide(p.nom)) {
+        return 'Le prenom et le nom ' + label + ' ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.';
+    }
+    if (nomTropLong(p.prenom) || nomTropLong(p.nom)) {
+        return 'Le prenom et le nom sont limites a ' + MAX_LONGUEUR_NOM + ' caracteres chacun.';
+    }
+    if (!ageValide(p.age)) {
+        return 'L age doit etre compris entre ' + AGE_MIN_CREATION + ' et ' + AGE_MAX_CREATION + ' ans.';
+    }
+    if (!competencesValides(p, budgetCourant)) {
+        return 'Le total des competences ' + label + ' doit faire exactement ' + budgetCourant + ' points.';
+    }
+    if (!dispositionsValides(p)) {
+        return 'Le total des dispositions ' + label + ' doit faire exactement ' + BUDGET_DISPOSITIONS + ' points.';
+    }
+    return null;
+}
+
+const insertPersonnage = db.prepare(`
+    INSERT INTO players (
+        user_id, type, prenom, nom, age, taille, nationalite, main_forte, statut,
+        service, retour, coup_droit_revers, effet, volee, deplacement, puissance, resistance,
+        niveau, points_energie, points_experience,
+        surface_dur_automatismes, surface_terre_automatismes, surface_herbe_automatismes,
+        disposition_adversite, disposition_coupeur_de_tetes, disposition_dernier_carre,
+        disposition_premiers_tours, disposition_sang_froid, disposition_indoor, disposition_rivalite
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?, ?, ?, ?, ?, ?, ?, ?, ?, 50, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?)
+`);
+function creerPersonnage(userId, type, p) {
+    insertPersonnage.run(
+        userId, type, p.prenom, p.nom, p.age, p.taille, p.nationalite, p.main,
+        p.service, p.retour, p.coup_droit_revers, p.effet, p.volee, p.deplacement, p.puissance, p.resistance,
+        calculerNiveau(p),
+        p.disp_adversite, p.disp_coupeur_de_tetes, p.disp_dernier_carre,
+        p.disp_premiers_tours, p.disp_sang_froid, p.disp_indoor, p.disp_rivalite
+    );
+}
+
 app.post('/api/joueurs', (req, res) => {
     try {
         const userId = req.userId;
         const { joueur, joueuse } = req.body;
 
-        if (!joueur || !joueuse) {
-            return res.status(400).json({ error: 'Il manque les infos d un des deux personnages.' });
+        // Garde-fou anti-doublon (2026-08-20) affine le 2026-09-05 : verifie desormais
+        // par TYPE, pas juste "au moins un personnage existe" - un compte qui n'a par
+        // accident (bug de creation non atomique corrige ce jour-la, ou refus admin
+        // asymetrique d'un seul des deux) qu'UN SEUL des deux personnages doit pouvoir
+        // creer uniquement celui qui manque, plutot que rester bloque a vie par ce
+        // garde-fou (cas constate : un coach avec un joueur ATP valide, aucune joueuse).
+        const typesExistants = db.prepare("SELECT DISTINCT type FROM players WHERE user_id = ?").all(userId).map(function (r) { return r.type; });
+        const manqueJoueur = !typesExistants.includes('joueur');
+        const manqueJoueuse = !typesExistants.includes('joueuse');
+        if (!manqueJoueur && !manqueJoueuse) {
+            return res.status(400).json({ error: 'Ce compte a deja ses deux personnages.' });
         }
-        if (!nomValide(joueur.prenom) || !nomValide(joueur.nom)) {
-            return res.status(400).json({ error: 'Le prenom et le nom du joueur ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.' });
+        if (manqueJoueur && !joueur) {
+            return res.status(400).json({ error: 'Il manque les infos du joueur.' });
         }
-        if (!nomValide(joueuse.prenom) || !nomValide(joueuse.nom)) {
-            return res.status(400).json({ error: 'Le prenom et le nom de la joueuse ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.' });
-        }
-        if ([joueur.prenom, joueur.nom, joueuse.prenom, joueuse.nom].some(nomTropLong)) {
-            return res.status(400).json({ error: 'Le prenom et le nom sont limites a ' + MAX_LONGUEUR_NOM + ' caracteres chacun.' });
-        }
-        if (!ageValide(joueur.age) || !ageValide(joueuse.age)) {
-            return res.status(400).json({ error: 'L age doit etre compris entre ' + AGE_MIN_CREATION + ' et ' + AGE_MAX_CREATION + ' ans.' });
-        }
-        const budgetCourant = budgetActuelCompetences();
-        if (!competencesValides(joueur, budgetCourant)) {
-            return res.status(400).json({ error: 'Le total des competences du joueur doit faire exactement ' + budgetCourant + ' points.' });
-        }
-        if (!competencesValides(joueuse, budgetCourant)) {
-            return res.status(400).json({ error: 'Le total des competences de la joueuse doit faire exactement ' + budgetCourant + ' points.' });
-        }
-        if (!dispositionsValides(joueur)) {
-            return res.status(400).json({ error: 'Le total des dispositions du joueur doit faire exactement ' + BUDGET_DISPOSITIONS + ' points.' });
-        }
-        if (!dispositionsValides(joueuse)) {
-            return res.status(400).json({ error: 'Le total des dispositions de la joueuse doit faire exactement ' + BUDGET_DISPOSITIONS + ' points.' });
+        if (manqueJoueuse && !joueuse) {
+            return res.status(400).json({ error: 'Il manque les infos de la joueuse.' });
         }
 
-        // Garde-fou anti-doublon : rien n'empechait un double-clic/double-soumission
-        // du formulaire de creation de personnages de creer 2 fois la paire
-        // joueur+joueuse pour le meme compte, silencieusement (bug signale par
-        // l'utilisateur, 2026-08-20 - doublon visible dans l'annuaire).
-        const dejaCree = db.prepare('SELECT COUNT(*) AS n FROM players WHERE user_id = ?').get(userId).n;
-        if (dejaCree > 0) {
-            return res.status(400).json({ error: 'Ce compte a deja des personnages crees.' });
+        const budgetCourant = budgetActuelCompetences();
+        if (manqueJoueur) {
+            const err = erreurValidationPersonnage(joueur, 'du joueur', budgetCourant);
+            if (err) return res.status(400).json({ error: err });
+        }
+        if (manqueJoueuse) {
+            const err = erreurValidationPersonnage(joueuse, 'de la joueuse', budgetCourant);
+            if (err) return res.status(400).json({ error: err });
         }
 
         // Un motif de refus eventuel ne concernait que la tentative precedente -
-        // efface au moment ou une nouvelle paire est soumise.
+        // efface au moment ou une nouvelle soumission est faite.
         db.prepare('UPDATE users SET dernier_refus_motif = NULL, dernier_refus_date = NULL WHERE id = ?').run(userId);
 
-        const insert = db.prepare(`
-            INSERT INTO players (
-                user_id, type, prenom, nom, age, taille, nationalite, main_forte, statut,
-                service, retour, coup_droit_revers, effet, volee, deplacement, puissance, resistance,
-                niveau, points_energie, points_experience,
-                surface_dur_automatismes, surface_terre_automatismes, surface_herbe_automatismes,
-                disposition_adversite, disposition_coupeur_de_tetes, disposition_dernier_carre,
-                disposition_premiers_tours, disposition_sang_froid, disposition_indoor, disposition_rivalite
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?, ?, ?, ?, ?, ?, ?, ?, ?, 50, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?)
-        `);
-
-        insert.run(
-            userId, 'joueur', joueur.prenom, joueur.nom, joueur.age, joueur.taille, joueur.nationalite, joueur.main,
-            joueur.service, joueur.retour, joueur.coup_droit_revers, joueur.effet, joueur.volee, joueur.deplacement, joueur.puissance, joueur.resistance,
-            calculerNiveau(joueur),
-            joueur.disp_adversite, joueur.disp_coupeur_de_tetes, joueur.disp_dernier_carre,
-            joueur.disp_premiers_tours, joueur.disp_sang_froid, joueur.disp_indoor, joueur.disp_rivalite
-        );
-
-        insert.run(
-            userId, 'joueuse', joueuse.prenom, joueuse.nom, joueuse.age, joueuse.taille, joueuse.nationalite, joueuse.main,
-            joueuse.service, joueuse.retour, joueuse.coup_droit_revers, joueuse.effet, joueuse.volee, joueuse.deplacement, joueuse.puissance, joueuse.resistance,
-            calculerNiveau(joueuse),
-            joueuse.disp_adversite, joueuse.disp_coupeur_de_tetes, joueuse.disp_dernier_carre,
-            joueuse.disp_premiers_tours, joueuse.disp_sang_froid, joueuse.disp_indoor, joueuse.disp_rivalite
-        );
+        // Transaction : quand les deux personnages sont crees d'un coup, soit les
+        // deux passent, soit aucun - une erreur entre les deux insert.run() ne doit
+        // plus jamais laisser un personnage seul en base sans moyen de le completer.
+        db.transaction(function () {
+            if (manqueJoueur) creerPersonnage(userId, 'joueur', joueur);
+            if (manqueJoueuse) creerPersonnage(userId, 'joueuse', joueuse);
+        })();
 
         res.json({ success: true });
     } catch (err) {
