@@ -7376,8 +7376,8 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
             const matchs = db.prepare(`
                 SELECT tournoi_matchs.id, tournoi_matchs.numero_tour, tournoi_matchs.ordre, tournoi_matchs.score,
                        tournoi_matchs.evenements, tournoi_matchs.match_id, tournoi_matchs.match_id_j2,
-                       j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite,
-                       j2.nom AS joueur2_nom, j2.nationalite AS joueur2_nationalite
+                       j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite, j1.player_id AS joueur1_player_id, j1.rival_id AS joueur1_rival_id,
+                       j2.nom AS joueur2_nom, j2.nationalite AS joueur2_nationalite, j2.player_id AS joueur2_player_id, j2.rival_id AS joueur2_rival_id
                 FROM tournoi_matchs
                 JOIN tournoi_joueurs AS j1 ON j1.id = tournoi_matchs.joueur1_id
                 LEFT JOIN tournoi_joueurs AS j2 ON j2.id = tournoi_matchs.joueur2_id
@@ -7389,9 +7389,15 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
                   AND (m2.id IS NULL OR m2.user_id != ?)
                 ORDER BY tournoi_matchs.ordre
             `).all(t.id, userId, userId);
+            // Classement Live courant (nul pour un lambda, jamais classe) - meme
+            // convention que adversaireClassement sur la fiche adversaire, demande par
+            // l'utilisateur pour le Multiplex (2026-09-05).
+            const rangsCircuit = calculerRangsLiveGlobal(t.circuit);
             matchs.forEach(function (m) {
                 m.joueur1_drapeau = drapeau(m.joueur1_nationalite);
                 m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
+                m.joueur1_classement = rangsCircuit.get(m.joueur1_player_id ? 'joueur:' + m.joueur1_player_id : 'rival:' + m.joueur1_rival_id) || null;
+                m.joueur2_classement = m.joueur2_nom ? (rangsCircuit.get(m.joueur2_player_id ? 'joueur:' + m.joueur2_player_id : 'rival:' + m.joueur2_rival_id) || null) : null;
                 // Deroule complet jamais envoye ici (spoilerait le score des l'ouverture
                 // de la page) - juste un indicateur, le vrai contenu se recupere via
                 // /api/tournois/match-bot/:id au clic sur un mode de visionnage. La ligne
@@ -7459,6 +7465,10 @@ app.get('/api/matchs/:userId', (req, res) => {
             m.semaineLabel = phaseM.type === 'tournoi' ? ('Semaine ' + phaseM.positionSemaine)
                 : (phaseM.type === 'presaison' ? 'Pré-saison' : 'Semaine 0');
             m.joueur_drapeau = drapeau(m.nationalite);
+            // Classement Live courant du coach (toujours classe, c'est un joueur reel
+            // valide) - demande par l'utilisateur pour le Multiplex (2026-09-05).
+            const circuitM = m.type === 'joueur' ? 'ATP' : 'WTA';
+            m.classement = calculerRangsLiveGlobal(circuitM).get('joueur:' + m.player_id) || null;
             if (m.tournoi_id) {
                 // Un match reel-vs-reel a 2 lignes matchs distinctes (une par coach),
                 // reliees respectivement par match_id ET match_id_j2 - se fier a
@@ -7512,6 +7522,15 @@ app.get('/api/matchs/:userId', (req, res) => {
                     }
                     m.coupe_division = nbDivisionsCoupeCache[cleDivisions] > 1 ? tieCoupe.division : null;
                 }
+            }
+            // Nul pour un adversaire lambda (jamais classe) ou un double (pas d'identite
+            // unique liee ci-dessus) - meme convention que classementALaSemaine ailleurs.
+            if (m.adversaire_player_id || m.adversaire_rival_id) {
+                const circuitAdv = circuitM; // face-a-face toujours sur le meme circuit
+                m.adversaire_classement = calculerRangsLiveGlobal(circuitAdv)
+                    .get(m.adversaire_player_id ? 'joueur:' + m.adversaire_player_id : 'rival:' + m.adversaire_rival_id) || null;
+            } else {
+                m.adversaire_classement = null;
             }
         });
 
@@ -7626,9 +7645,17 @@ app.get('/api/tournois/match-bot/:tournoiMatchId', (req, res) => {
             return res.status(404).json({ error: 'Match introuvable.' });
         }
 
-        let evenements;
+        // cote1EstA : quel physique (joueur1 ou joueur2) correspond au cote "A" des
+        // evenements (jeuxA/setsA) - le moteur de simulation etiquette toujours un cote
+        // "A" en interne, sans lien fixe avec la position dans le tableau. Necessaire
+        // pour le tableau de score en direct du Multiplex (server ligne 4089 : "le
+        // joueur reel est toujours simule cote A", et resoudreMatchAdversaire ligne 4250
+        // : cote 100% lambda, j1 est toujours passe en A) - jamais utilise avant
+        // l'ajout du Multiplex, qui a besoin d'attribuer chaque score au bon joueur.
+        let evenements, cote1EstA;
         if (match.evenements) {
             evenements = JSON.parse(match.evenements);
+            cote1EstA = true;
         } else if (match.match_id || match.match_id_j2) {
             const ligne = db.prepare('SELECT player_id, evenements FROM matchs WHERE id = ?').get(match.match_id || match.match_id_j2);
             if (!ligne) {
@@ -7645,6 +7672,9 @@ app.get('/api/tournois/match-bot/:tournoiMatchId', (req, res) => {
             evenements = JSON.parse(ligne.evenements).map(function (evt) {
                 return evt.texte ? Object.assign({}, evt, { texte: evt.texte.replace(/\bToi\b/g, nomProprietaire).replace(/\bAdversaire\b/g, nomAdversaire) }) : evt;
             });
+            // Le proprietaire (quel qu'il soit) est toujours simule cote A (voir
+            // jouerMatchTournoi) - cote1EstA vaut donc vrai seulement s'il est aussi j1.
+            cote1EstA = proprietaireEstJ1;
         } else {
             return res.status(404).json({ error: 'Match introuvable.' });
         }
@@ -7653,6 +7683,7 @@ app.get('/api/tournois/match-bot/:tournoiMatchId', (req, res) => {
         match.joueur1_drapeau = drapeau(match.joueur1_nationalite);
         match.joueur2_drapeau = drapeau(match.joueur2_nationalite);
         match.evenements = evenements;
+        match.cote1EstA = cote1EstA;
         match.estSemaineActuelle = etat.semaine_actuelle - match.semaine <= 1;
 
         res.json({ success: true, match });

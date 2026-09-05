@@ -7,7 +7,7 @@
     <title>Matchs — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260829">
+    <link rel="stylesheet" href="style.css?v=20260905">
 </head>
 <body>
     <div class="dashboard-page">
@@ -40,10 +40,26 @@
                 <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
             </div>
 
-            <div class="match-list" id="match-list"></div>
+            <div class="tabs-nav" id="matchs-tabs-nav">
+                <button class="tab-btn active" data-vue="liste">Affichage en liste</button>
+                <button class="tab-btn" data-vue="multiplex">Multiplex</button>
+            </div>
 
-            <div class="stats-header">Autres matchs de la semaine</div>
-            <div class="match-list" id="autres-matchs-list"></div>
+            <div id="vue-liste">
+                <div class="match-list" id="match-list"></div>
+
+                <div class="stats-header">Autres matchs de la semaine</div>
+                <div class="match-list" id="autres-matchs-list"></div>
+            </div>
+
+            <div id="vue-multiplex" style="display:none;">
+                <div class="mx-filters" id="mx-filters">
+                    <button class="mx-filter active" data-filter="tous">Tous</button>
+                    <button class="mx-filter" data-filter="mien">Mes matchs</button>
+                    <button class="mx-filter" data-filter="autre">Autres matchs</button>
+                </div>
+                <div class="mx-grid" id="multiplex-grid"></div>
+            </div>
         </div>
     </div>
 
@@ -185,15 +201,19 @@
 
             arreterLive(matchId);
 
+            // Pas d'id sur ces elements : la vue Multiplex peut afficher le meme match
+            // (donc le meme matchId) qu'une carte de la vue liste, ce qui dupliquerait
+            // des id HTML et ferait retomber un getElementById global sur la mauvaise
+            // instance - on reste scope au conteneur "viewer" propre a la carte cliquee.
             viewer.innerHTML = `
-                <div class="live-score" id="live-score-${matchId}">C'est parti...</div>
-                <div class="live-log" id="live-log-${matchId}"></div>
-                <button class="cta cta-secondary live-skip-btn" id="live-skip-${matchId}" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
+                <div class="live-score">C'est parti...</div>
+                <div class="live-log"></div>
+                <button class="cta cta-secondary live-skip-btn" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
             `;
 
-            const scoreDiv = document.getElementById('live-score-' + matchId);
-            const logDiv = document.getElementById('live-log-' + matchId);
-            const skipBtn = document.getElementById('live-skip-' + matchId);
+            const scoreDiv = viewer.querySelector('.live-score');
+            const logDiv = viewer.querySelector('.live-log');
+            const skipBtn = viewer.querySelector('.live-skip-btn');
 
             let index = 0;
 
@@ -237,7 +257,12 @@
         }
 
         async function activerMode(matchId, mode, boutonClique) {
-            const carte = document.querySelector('.match-card[data-match-id="' + matchId + '"]');
+            // Cible la carte du bouton clique (closest), pas une recherche globale par
+            // id - la vue Multiplex affiche desormais les memes matchs que la vue liste
+            // dans une 2e carte independante portant le meme data-match-id, un
+            // querySelector global tomberait sur la mauvaise instance (bug trouve via
+            // test, 2026-09-05).
+            const carte = boutonClique.closest('.match-card');
             const viewer = carte.querySelector('.match-viewer');
 
             carte.querySelectorAll('.match-mode-btn').forEach(function (b) { b.classList.remove('active'); });
@@ -296,15 +321,16 @@
             const cle = 'bot-' + tournoiMatchId;
             arreterLive(cle);
 
+            // Meme raison que dans afficherLive : pas d'id, on reste scope au viewer.
             viewer.innerHTML = `
-                <div class="live-score" id="live-score-${cle}">C'est parti...</div>
-                <div class="live-log" id="live-log-${cle}"></div>
-                <button class="cta cta-secondary live-skip-btn" id="live-skip-${cle}" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
+                <div class="live-score">C'est parti...</div>
+                <div class="live-log"></div>
+                <button class="cta cta-secondary live-skip-btn" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
             `;
 
-            const scoreDiv = document.getElementById('live-score-' + cle);
-            const logDiv = document.getElementById('live-log-' + cle);
-            const skipBtn = document.getElementById('live-skip-' + cle);
+            const scoreDiv = viewer.querySelector('.live-score');
+            const logDiv = viewer.querySelector('.live-log');
+            const skipBtn = viewer.querySelector('.live-skip-btn');
 
             let index = 0;
 
@@ -346,7 +372,10 @@
         }
 
         async function activerModeBot(tournoiMatchId, mode, boutonClique) {
-            const carte = document.querySelector('.match-card[data-tournoi-match-id="' + tournoiMatchId + '"]');
+            // Meme raison qu'activerMode ci-dessus : cibler la carte du bouton clique,
+            // pas une recherche globale par id (desormais ambigue entre vue liste et
+            // vue Multiplex).
+            const carte = boutonClique.closest('.match-card');
             const viewer = carte.querySelector('.match-viewer');
 
             carte.querySelectorAll('.match-mode-btn').forEach(function (b) { b.classList.remove('active'); });
@@ -466,6 +495,281 @@
             return carte;
         }
 
+        function creerCarteBot(m, tournoi) {
+            const nomJ1 = flagImg(m.joueur1_drapeau) + ' ' + formaterNomComplet(m.joueur1_nom);
+            const nomJ2 = flagImg(m.joueur2_drapeau) + ' ' + formaterNomComplet(m.joueur2_nom);
+            const carte = document.createElement('div');
+            if (m.aReplayBot) {
+                carte.className = 'match-card';
+                carte.dataset.tournoiMatchId = m.id;
+                carte.innerHTML = `
+                    <div class="match-card-head">
+                        <div class="match-card-info">
+                            <div class="match-card-name">${nomJ1} vs ${nomJ2}</div>
+                            <div class="match-card-meta">${m.numero_tour}</div>
+                        </div>
+                    </div>
+                    <div class="match-card-actions">
+                        <button class="match-mode-btn" data-mode="live">Live</button>
+                        <button class="match-mode-btn" data-mode="resultat">Résultat direct</button>
+                        <button class="match-mode-btn" data-mode="teletexte">Téletexte</button>
+                    </div>
+                    <div class="match-viewer"></div>
+                `;
+                carte.querySelectorAll('.match-mode-btn').forEach(function (bouton) {
+                    bouton.addEventListener('click', function () {
+                        activerModeBot(m.id, bouton.dataset.mode, bouton);
+                    });
+                });
+                return carte;
+            }
+            carte.className = 'tournoi-card';
+            carte.innerHTML = `
+                <div class="tournoi-card-name">${nomJ1} vs ${nomJ2}</div>
+                <div class="match-card-meta">${m.numero_tour}${m.score ? ' · ' + m.score : ''}</div>
+            `;
+            return carte;
+        }
+
+        let matchsMiensCache = [];
+        let tournoisAutresCache = [];
+
+        // Moteur commun du Multiplex : fait progresser UNIQUEMENT le score (pas de
+        // texte, pas de journal) selon la demande explicite de l'utilisateur
+        // (2026-09-05) - "le but c'est vraiment de suivre les scores très simplement".
+        // rolePremier/roleSecond sont les 2 lignes .sb-row fixes de la tuile ;
+        // coteAEstPremier indique si jeuxA/setsA (evenements) correspond a la ligne
+        // "premier" ou "second" (peut varier selon qui est cote A dans le moteur -
+        // voir server.js, /api/tournois/match-bot/:id, champ cote1EstA).
+        function demarrerScoreEnDirect(tuile, cleUnique, evenements, coteAEstPremier, gagnantRole) {
+            const rowPremier = tuile.querySelector('.sb-row[data-role="premier"]');
+            const rowSecond = tuile.querySelector('.sb-row[data-role="second"]');
+            const rowPourA = coteAEstPremier ? rowPremier : rowSecond;
+            const rowPourB = coteAEstPremier ? rowSecond : rowPremier;
+            const statutLive = tuile.querySelector('.mx-status-live');
+            const skipBtn = tuile.querySelector('.mx-skip-btn');
+
+            statutLive.hidden = false;
+            if (skipBtn) skipBtn.hidden = false;
+
+            const colonnes = [];
+            let serveurCourant = null;
+
+            function redessiner() {
+                rowPourA.querySelector('.sb-sets').innerHTML = colonnes.map(function (c) { return '<span>' + c.a + '</span>'; }).join('');
+                rowPourB.querySelector('.sb-sets').innerHTML = colonnes.map(function (c) { return '<span>' + c.b + '</span>'; }).join('');
+                [rowPremier, rowSecond].forEach(function (row) {
+                    const estAuService = serveurCourant !== null && row === (serveurCourant === 'A' ? rowPourA : rowPourB);
+                    row.querySelector('.sb-serve').classList.toggle('actif', estAuService);
+                });
+            }
+
+            function terminer() {
+                arreterLive(cleUnique);
+                statutLive.hidden = true;
+                if (skipBtn) skipBtn.remove();
+                if (gagnantRole) {
+                    (gagnantRole === 'premier' ? rowPremier : rowSecond).classList.add('gagnant');
+                }
+            }
+
+            // Un jeu (evt.type === 'jeu') n'est PAS pousse pour le jeu decisif d'un
+            // tie-break (resolu directement dans la boucle du moteur, cf. server.js) -
+            // seul set_fin porte alors le score final du set (7-6 par ex.), d'ou la mise
+            // a jour systematique sur set_fin en plus de jeu (jamais juste l'un ou l'autre).
+            function traiter(evt) {
+                if (evt.type === 'set_debut') {
+                    colonnes.push({ a: 0, b: 0 });
+                    serveurCourant = evt.serveur;
+                } else if (evt.type === 'jeu') {
+                    colonnes[colonnes.length - 1].a = evt.jeuxA;
+                    colonnes[colonnes.length - 1].b = evt.jeuxB;
+                    serveurCourant = serveurCourant === 'A' ? 'B' : 'A';
+                } else if (evt.type === 'set_fin') {
+                    colonnes[colonnes.length - 1].a = evt.jeuxA;
+                    colonnes[colonnes.length - 1].b = evt.jeuxB;
+                } else if (evt.type === 'match_fin') {
+                    serveurCourant = null;
+                }
+                redessiner();
+                if (evt.type === 'match_fin') terminer();
+            }
+
+            let index = 0;
+            function avancer() {
+                if (index >= evenements.length) { terminer(); return; }
+                traiter(evenements[index]);
+                index++;
+            }
+
+            avancer();
+            // Rythme du Multiplex delibirement plus rapide que le Live de la vue liste
+            // (1500ms, texte a lire) - ici seul le score bouge, rien a lire pendant le
+            // delai : demande explicite de l'utilisateur, 2026-09-05 (400ms d'abord,
+            // juge trop rapide, remonte a 900ms le meme jour).
+            liveEnCours[cleUnique] = setInterval(avancer, 900);
+
+            if (skipBtn) {
+                skipBtn.addEventListener('click', function () {
+                    arreterLive(cleUnique);
+                    while (index < evenements.length) {
+                        traiter(evenements[index]);
+                        index++;
+                    }
+                });
+            }
+        }
+
+        function rangHtml(classement) {
+            return classement ? '<span class="sb-rank">#' + classement + '</span>' : '';
+        }
+
+        function squeletteTuileScore(nomPremier, drapeauPremier, classementPremier, nomSecond, drapeauSecond, classementSecond) {
+            return `
+                <div class="mx-scoreboard">
+                    <div class="sb-row" data-role="premier">
+                        <span class="sb-serve">🎾</span>
+                        ${flagImg(drapeauPremier)}
+                        <span class="sb-name">${nomPremier}${rangHtml(classementPremier)}</span>
+                        <span class="sb-sets"></span>
+                    </div>
+                    <div class="sb-row" data-role="second">
+                        <span class="sb-serve">🎾</span>
+                        ${flagImg(drapeauSecond)}
+                        <span class="sb-name">${nomSecond}${rangHtml(classementSecond)}</span>
+                        <span class="sb-sets"></span>
+                    </div>
+                </div>
+            `;
+        }
+
+        function creerTuileScore(match) {
+            const tuile = document.createElement('div');
+            tuile.className = 'mx-tile mx-tile-' + match.surface;
+            tuile.dataset.filtreGroupe = 'mien';
+
+            const circuit = match.type === 'joueur' ? 'ATP' : 'WTA';
+            const nomContexte = match.tournoi_nom
+                || (match.coupe_nation_domicile ? (match.coupe_nation_domicile + ' - ' + match.coupe_nation_exterieur) : '');
+
+            tuile.innerHTML = `
+                <div class="mx-tile-tags">
+                    <span class="tag-circuit">${circuit}</span>
+                    <span class="tag-you">Toi</span>
+                    <span class="mx-status-live" hidden><span class="status-dot"></span>En direct</span>
+                </div>
+                ${squeletteTuileScore(formaterNom(match.prenom, match.nom), match.joueur_drapeau, match.classement, formaterNomComplet(match.adversaire_nom || 'Adversaire'), match.adversaire_drapeau, match.adversaire_classement)}
+                <div class="mx-tile-meta">${nomContexte ? nomContexte + ' · ' : ''}${match.numero_tour || ''}</div>
+                <button type="button" class="cta cta-primary mx-launch-btn" style="width:100%; padding:10px 16px; font-size:0.8rem;">Lancer le match</button>
+                <button type="button" class="mx-skip-btn" hidden>Passer au score final</button>
+            `;
+
+            const btnLancer = tuile.querySelector('.mx-launch-btn');
+            btnLancer.addEventListener('click', async function () {
+                btnLancer.disabled = true;
+                btnLancer.textContent = 'Chargement...';
+                try {
+                    const detail = await obtenirDetail(match.id);
+                    const gagnantRole = match.vainqueur === 'joueur' ? 'premier' : 'second';
+                    btnLancer.remove();
+                    demarrerScoreEnDirect(tuile, match.id, detail.evenements, true, gagnantRole);
+                } catch (err) {
+                    btnLancer.disabled = false;
+                    btnLancer.textContent = 'Lancer le match';
+                    alert(err.message);
+                }
+            });
+
+            return tuile;
+        }
+
+        function creerTuileScoreBot(m, tournoi) {
+            if (!m.aReplayBot) {
+                const carte = document.createElement('div');
+                carte.className = 'tournoi-card tournoi-card-' + tournoi.surface;
+                carte.dataset.filtreGroupe = 'autre';
+                carte.innerHTML = `
+                    <div class="tournoi-card-name">${flagImg(m.joueur1_drapeau)} ${formaterNomComplet(m.joueur1_nom)}${rangHtml(m.joueur1_classement)} vs ${flagImg(m.joueur2_drapeau)} ${formaterNomComplet(m.joueur2_nom)}${rangHtml(m.joueur2_classement)}</div>
+                    <div class="match-card-meta">${tournoi.nom} · ${m.numero_tour}${m.score ? ' · ' + m.score : ''}</div>
+                `;
+                return carte;
+            }
+
+            const tuile = document.createElement('div');
+            tuile.className = 'mx-tile mx-tile-' + tournoi.surface;
+            tuile.dataset.filtreGroupe = 'autre';
+            tuile.innerHTML = `
+                <div class="mx-tile-tags">
+                    <span class="tag-circuit">${tournoi.circuit}</span>
+                    <span class="mx-status-live" hidden><span class="status-dot"></span>En direct</span>
+                </div>
+                ${squeletteTuileScore(formaterNomComplet(m.joueur1_nom), m.joueur1_drapeau, m.joueur1_classement, formaterNomComplet(m.joueur2_nom), m.joueur2_drapeau, m.joueur2_classement)}
+                <div class="mx-tile-meta">${tournoi.nom} · ${m.numero_tour}</div>
+                <button type="button" class="cta cta-primary mx-launch-btn" style="width:100%; padding:10px 16px; font-size:0.8rem;">Lancer le match</button>
+                <button type="button" class="mx-skip-btn" hidden>Passer au score final</button>
+            `;
+
+            const btnLancer = tuile.querySelector('.mx-launch-btn');
+            btnLancer.addEventListener('click', async function () {
+                btnLancer.disabled = true;
+                btnLancer.textContent = 'Chargement...';
+                try {
+                    const detail = await obtenirDetailBot(m.id);
+                    const gagnantRole = detail.vainqueur_nom === m.joueur1_nom ? 'premier' : 'second';
+                    const coteAEstPremier = detail.cote1EstA !== false;
+                    btnLancer.remove();
+                    demarrerScoreEnDirect(tuile, 'bot-' + m.id, detail.evenements, coteAEstPremier, gagnantRole);
+                } catch (err) {
+                    btnLancer.disabled = false;
+                    btnLancer.textContent = 'Lancer le match';
+                    alert(err.message);
+                }
+            });
+
+            return tuile;
+        }
+
+        function construireMultiplex() {
+            const grille = document.getElementById('multiplex-grid');
+            grille.innerHTML = '';
+            const tuiles = [];
+
+            matchsMiensCache.forEach(function (match) {
+                tuiles.push({ id: match.id, tour: match.numero_tour, node: creerTuileScore(match) });
+            });
+            tournoisAutresCache.forEach(function (tournoi) {
+                tournoi.matchs.forEach(function (m) {
+                    tuiles.push({ id: m.id, tour: m.numero_tour, node: creerTuileScoreBot(m, tournoi) });
+                });
+            });
+
+            if (tuiles.length === 0) {
+                grille.innerHTML = '<div class="match-hint">Aucun match joué pour le moment.</div>';
+                return;
+            }
+
+            // Le tour le plus avance en premier (demi-finale avant 8e de finale) - "id"
+            // n'est pas comparable entre "mes matchs" (table matchs) et "autres matchs"
+            // (table tournoi_matchs), 2 sequences d'identifiants distinctes, donc
+            // inutilisable seul comme critere de tri entre les deux sources. Le score
+            // etant deja visible sur chaque tuile sans clic, l'ordre "anti-spoiler"
+            // chronologique de la vue liste n'a plus lieu d'etre ici.
+            tuiles.sort(function (a, b) {
+                const ecart = rangTour(b.tour) - rangTour(a.tour);
+                return ecart !== 0 ? ecart : b.id - a.id;
+            });
+            tuiles.forEach(function (t) { grille.appendChild(t.node); });
+            appliquerFiltreMultiplex();
+        }
+
+        function appliquerFiltreMultiplex() {
+            const actif = document.querySelector('.mx-filter.active');
+            const filtre = actif ? actif.dataset.filter : 'tous';
+            document.querySelectorAll('#multiplex-grid [data-filtre-groupe]').forEach(function (carte) {
+                carte.style.display = (filtre === 'tous' || carte.dataset.filtreGroupe === filtre) ? '' : 'none';
+            });
+        }
+
         async function chargerMatchs() {
             const response = await fetch('/api/matchs/' + userId);
             const data = await response.json();
@@ -474,6 +778,8 @@
                 alert(data.error || 'Impossible de charger les matchs.');
                 return;
             }
+
+            matchsMiensCache = data.matchs;
 
             const liste = document.getElementById('match-list');
             liste.innerHTML = '';
@@ -526,9 +832,12 @@
             liste.innerHTML = '';
 
             if (!response.ok || data.tournois.length === 0) {
+                tournoisAutresCache = [];
                 liste.innerHTML = '<div class="match-hint">Aucun autre tournoi joué cette semaine.</div>';
                 return;
             }
+
+            tournoisAutresCache = data.tournois;
 
             data.tournois.forEach(function (tournoi) {
                 tournoi.matchs.sort(function (a, b) { return rangTour(a.numero_tour) - rangTour(b.numero_tour); });
@@ -543,40 +852,7 @@
                 `;
                 const conteneur = bloc.querySelector('.tournoi-list');
                 tournoi.matchs.forEach(function (m) {
-                    const nomJ1 = flagImg(m.joueur1_drapeau) + ' ' + formaterNomComplet(m.joueur1_nom);
-                    const nomJ2 = flagImg(m.joueur2_drapeau) + ' ' + formaterNomComplet(m.joueur2_nom);
-                    const carte = document.createElement('div');
-                    if (m.aReplayBot) {
-                        carte.className = 'match-card';
-                        carte.dataset.tournoiMatchId = m.id;
-                        carte.innerHTML = `
-                            <div class="match-card-head">
-                                <div class="match-card-info">
-                                    <div class="match-card-name">${nomJ1} vs ${nomJ2}</div>
-                                    <div class="match-card-meta">${m.numero_tour}</div>
-                                </div>
-                            </div>
-                            <div class="match-card-actions">
-                                <button class="match-mode-btn" data-mode="live">Live</button>
-                                <button class="match-mode-btn" data-mode="resultat">Résultat direct</button>
-                                <button class="match-mode-btn" data-mode="teletexte">Téletexte</button>
-                            </div>
-                            <div class="match-viewer"></div>
-                        `;
-                        conteneur.appendChild(carte);
-                        carte.querySelectorAll('.match-mode-btn').forEach(function (bouton) {
-                            bouton.addEventListener('click', function () {
-                                activerModeBot(m.id, bouton.dataset.mode, bouton);
-                            });
-                        });
-                        return;
-                    }
-                    carte.className = 'tournoi-card';
-                    carte.innerHTML = `
-                        <div class="tournoi-card-name">${nomJ1} vs ${nomJ2}</div>
-                        <div class="match-card-meta">${m.numero_tour}${m.score ? ' · ' + m.score : ''}</div>
-                    `;
-                    conteneur.appendChild(carte);
+                    conteneur.appendChild(creerCarteBot(m, tournoi));
                 });
                 liste.appendChild(bloc);
             });
@@ -599,10 +875,27 @@
             document.getElementById('nav-dropdown').classList.remove('open');
         });
 
+        document.querySelectorAll('#matchs-tabs-nav .tab-btn').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('#matchs-tabs-nav .tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                bouton.classList.add('active');
+                const vue = bouton.dataset.vue;
+                document.getElementById('vue-liste').style.display = vue === 'liste' ? '' : 'none';
+                document.getElementById('vue-multiplex').style.display = vue === 'multiplex' ? '' : 'none';
+            });
+        });
+
+        document.querySelectorAll('.mx-filter').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('.mx-filter').forEach(function (b) { b.classList.remove('active'); });
+                bouton.classList.add('active');
+                appliquerFiltreMultiplex();
+            });
+        });
+
         chargerSemaine();
         verifierAdmin();
-        chargerMatchs();
-        chargerAutresMatchs();
+        Promise.all([chargerMatchs(), chargerAutresMatchs()]).then(construireMultiplex);
     </script>
     <script src="retour.js?v=20260829"></script>
     <script src="theme-saison.js?v=20260831"></script>

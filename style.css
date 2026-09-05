@@ -1553,6 +1553,226 @@ h1 {
     font-weight: 600;
 }
 
+/* ---------- Page Matchs : vue Multiplex ---------- */
+
+.mx-filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 20px;
+}
+
+.mx-filter {
+    padding: 8px 16px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    color: #C4CDD6;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.78rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+
+.mx-filter:hover {
+    border-color: #D4F000;
+    color: #D4F000;
+}
+
+.mx-filter.active {
+    background: rgba(212, 240, 0, 0.15);
+    border-color: #D4F000;
+    color: #D4F000;
+}
+
+.mx-grid {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 14px;
+    align-items: start;
+}
+
+@media (min-width: 720px) {
+    .mx-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+.tag-you {
+    display: inline-block;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #D4F000;
+    background: rgba(212, 240, 0, 0.12);
+    border: 1px solid rgba(212, 240, 0, 0.4);
+    padding: 2px 7px;
+    border-radius: 5px;
+    vertical-align: middle;
+}
+
+.tag-circuit {
+    display: inline-block;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    color: #8B98A5;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 2px 7px;
+    border-radius: 5px;
+    vertical-align: middle;
+}
+
+.mx-tile {
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-left: 3px solid transparent;
+    border-radius: 14px;
+    padding: 16px 18px;
+}
+
+.mx-tile.mx-tile-dur { border-left-color: #5FA8E8; }
+.mx-tile.mx-tile-terre { border-left-color: #E08A4B; }
+.mx-tile.mx-tile-herbe { border-left-color: #5CC57F; }
+
+.mx-tile-tags {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+}
+
+.mx-status-live {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.62rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #D4F000;
+    background: rgba(212, 240, 0, 0.13);
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+/* display:inline-flex ci-dessus l'emporterait sinon sur le [hidden] natif du
+   navigateur (meme specificite, la regle auteur gagne) - la pastille resterait
+   visible en permanence malgre l'attribut hidden pose/retire en JS. */
+.mx-status-live[hidden] {
+    display: none;
+}
+
+.status-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: statut-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes statut-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .status-dot { animation: none; }
+}
+
+.mx-scoreboard {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 10px;
+}
+
+.sb-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 3px 0;
+}
+
+.sb-serve {
+    width: 16px;
+    flex-shrink: 0;
+    text-align: center;
+    font-size: 0.8rem;
+    visibility: hidden;
+}
+
+.sb-serve.actif {
+    visibility: visible;
+}
+
+.sb-name {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: #C4CDD6;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sb-row.gagnant .sb-name {
+    color: #F5F7FA;
+    font-weight: 700;
+}
+
+.sb-rank {
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: #8B98A5;
+    margin-left: 5px;
+}
+
+.sb-sets {
+    display: flex;
+    gap: 8px;
+    flex-shrink: 0;
+}
+
+.sb-sets span {
+    min-width: 20px;
+    text-align: center;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: #F5F7FA;
+}
+
+.mx-tile-meta {
+    font-size: 0.72rem;
+    color: #8B98A5;
+    margin-bottom: 12px;
+}
+
+.mx-skip-btn {
+    display: block;
+    margin: 8px auto 0;
+    background: none;
+    border: none;
+    color: #8B98A5;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.7rem;
+    text-decoration: underline;
+    cursor: pointer;
+    padding: 2px;
+}
+
+.mx-skip-btn[hidden] {
+    display: none;
+}
+
+.mx-skip-btn:hover {
+    color: #D4F000;
+}
+
 /* ---------- Page Tournois ---------- */
 
 .tournoi-joueur-bloc {
