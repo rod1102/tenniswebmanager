@@ -66,7 +66,7 @@
                         </div>
                         <div class="form-group">
                             <label for="p1-age">Âge</label>
-                            <input type="number" id="p1-age" name="p1-age" min="5" max="99" required>
+                            <input type="number" id="p1-age" name="p1-age" min="15" max="39" required>
                         </div>
                         <div class="form-group">
                             <label for="p1-taille">Taille (cm)</label>
@@ -349,7 +349,7 @@
                         </div>
                         <div class="form-group">
                             <label for="p2-age">Âge</label>
-                            <input type="number" id="p2-age" name="p2-age" min="5" max="99" required>
+                            <input type="number" id="p2-age" name="p2-age" min="15" max="39" required>
                         </div>
                         <div class="form-group">
                             <label for="p2-taille">Taille (cm)</label>
@@ -785,6 +785,14 @@
             });
             if (tropLong) {
                 alert('Le prénom et le nom sont limités à 20 caractères chacun.');
+                return;
+            }
+            const ageHorsLimites = ['p1-age', 'p2-age'].some(function (id) {
+                const age = Number(document.getElementById(id).value);
+                return !Number.isFinite(age) || age < 15 || age > 39;
+            });
+            if (ageHorsLimites) {
+                alert('L\'âge doit être compris entre 15 et 39 ans.');
                 return;
             }
 

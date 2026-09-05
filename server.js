@@ -394,6 +394,15 @@ function nomTropLong(texte) {
     return (texte || '').trim().length > MAX_LONGUEUR_NOM;
 }
 
+// Age a la creation du personnage : borne a une fourchette de joueur de tennis
+// professionnel plausible (demande explicite de l'utilisateur, 2026-09-05).
+const AGE_MIN_CREATION = 15;
+const AGE_MAX_CREATION = 39;
+function ageValide(age) {
+    const n = Number(age);
+    return Number.isInteger(n) && n >= AGE_MIN_CREATION && n <= AGE_MAX_CREATION;
+}
+
 function calculerNiveau(joueur) {
     const total = COMPETENCES.reduce(function (somme, cle) { return somme + Number(joueur[cle]); }, 0);
     return Math.round((total / COMPETENCES.length) * 10) / 10;
@@ -430,6 +439,9 @@ app.post('/api/joueurs', (req, res) => {
         }
         if ([joueur.prenom, joueur.nom, joueuse.prenom, joueuse.nom].some(nomTropLong)) {
             return res.status(400).json({ error: 'Le prenom et le nom sont limites a ' + MAX_LONGUEUR_NOM + ' caracteres chacun.' });
+        }
+        if (!ageValide(joueur.age) || !ageValide(joueuse.age)) {
+            return res.status(400).json({ error: 'L age doit etre compris entre ' + AGE_MIN_CREATION + ' et ' + AGE_MAX_CREATION + ' ans.' });
         }
         const budgetCourant = budgetActuelCompetences();
         if (!competencesValides(joueur, budgetCourant)) {
