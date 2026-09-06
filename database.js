@@ -766,7 +766,15 @@ const migrations = [
     // affiche vaut 120 + round(cet accumulateur). DEFAULT 0 = "repart de 0 au
     // deploiement" (choix explicite de l'utilisateur, pas de reconstitution
     // retroactive depuis l'historique du journal).
-    "ALTER TABLE jeu_etat ADD COLUMN budget_creation_accumule REAL DEFAULT 0"
+    "ALTER TABLE jeu_etat ADD COLUMN budget_creation_accumule REAL DEFAULT 0",
+    // Demande de renommage d'un personnage DEJA VALIDE (contrairement a
+    // dernier_refus_motif, qui accompagne toujours une suppression) - un admin peut
+    // exiger qu'un coach change juste le prenom/nom d'un personnage existant (ex. jeu
+    // de mots non autorise) sans perdre sa progression. renommage_requis_type vaut
+    // 'joueur' ou 'joueuse' (le circuit concerne) ou NULL si rien n'est en attente ;
+    // efface automatiquement des que POST /api/joueurs/renommer aboutit.
+    "ALTER TABLE users ADD COLUMN renommage_requis_type TEXT",
+    "ALTER TABLE users ADD COLUMN renommage_requis_motif TEXT"
 ];
 
 migrations.forEach(function (sql) {
@@ -930,6 +938,30 @@ if (db.prepare('SELECT patch_menage_20260904 AS p FROM jeu_etat WHERE id = 1').g
     });
 
     db.prepare("UPDATE jeu_etat SET patch_menage_20260904 = 1 WHERE id = 1").run();
+}
+
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_renommage_20260907 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_renommage_20260907 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    // Personnage garde (contrairement a Mathias/Yona) : "Ella Vantage" reste jouable
+    // telle quelle, seul le prenom/nom devra changer - le coach le fera lui-meme via
+    // POST /api/joueurs/renommer, ce patch pose juste l'exigence + le motif. Cible
+    // par nom (pas juste l'id) pour ne rien poser si la ligne a deja change entre
+    // temps (deja renommee, supprimee...).
+    const MOTIF_RENOMMAGE = "Merci de changer le nom et prénom de votre joueuse. Les jeux de mots ne sont pas autorisés.";
+    const cible = db.prepare(`
+        SELECT id, user_id, type, prenom, nom, statut FROM players
+        WHERE TRIM(prenom) = 'Ella' COLLATE NOCASE AND TRIM(nom) = 'Vantage' COLLATE NOCASE AND type = 'joueuse'
+    `).get();
+    console.log('[renommage_20260907] cible Ella Vantage :', JSON.stringify(cible));
+    if (cible && cible.statut === 'valide') {
+        db.prepare('UPDATE users SET renommage_requis_type = ?, renommage_requis_motif = ? WHERE id = ?')
+            .run(cible.type, MOTIF_RENOMMAGE, cible.user_id);
+        console.log('[renommage_20260907] exigence de renommage posee sur le coach ' + cible.user_id);
+    } else {
+        console.log('[renommage_20260907] cible introuvable ou non valide, rien fait');
+    }
+
+    db.prepare("UPDATE jeu_etat SET patch_renommage_20260907 = 1 WHERE id = 1").run();
 }
 
 module.exports = db;

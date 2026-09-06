@@ -43,6 +43,8 @@
 
             <div class="tabs-nav" id="tabs-nav"></div>
 
+            <div id="renommage-banner" style="display:none;"></div>
+
             <div id="semaine-info-container" style="text-align:center; margin-bottom:16px;"></div>
 
             <div id="planning-container"></div>
@@ -221,6 +223,50 @@
             if (response.ok && data.user.role === 'admin') {
                 document.getElementById('admin-link').style.display = 'inline-block';
             }
+        }
+
+        // Bandeau d'exigence de renommage (personnage DEJA valide, contrairement au
+        // bandeau de refus de creation-joueurs.html qui accompagne une suppression) -
+        // reutilise /api/utilisateur deja appele par verifierAdmin, pas de fetch dedie.
+        async function chargerRenommageRequis(player) {
+            const container = document.getElementById('renommage-banner');
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (!response.ok || !data.user.renommage_requis_type || data.user.renommage_requis_type !== player.type) {
+                container.style.display = 'none';
+                container.innerHTML = '';
+                return;
+            }
+            const motif = data.user.renommage_requis_motif || 'Merci de changer le nom et prénom de ce personnage.';
+            container.style.display = 'block';
+            container.innerHTML = `
+                <div style="background:rgba(226,75,74,0.12); border:1px solid #E24B4A; border-radius:10px; padding:14px 16px; margin-bottom:16px; font-size:0.8rem; line-height:1.6; color:#F0D0D0;">
+                    <div style="margin-bottom:10px;">${motif}</div>
+                    <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                        <input type="text" id="renommage-prenom" maxlength="20" placeholder="Prénom" value="${player.prenom}" style="padding:8px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:#0A1628; color:#F5F7FA; font-size:0.8rem; width:140px;">
+                        <input type="text" id="renommage-nom" maxlength="20" placeholder="Nom" value="${player.nom}" style="padding:8px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.2); background:#0A1628; color:#F5F7FA; font-size:0.8rem; width:140px;">
+                        <button class="cta cta-primary" id="renommage-btn" style="padding:8px 16px; font-size:0.75rem;">Enregistrer</button>
+                    </div>
+                    <div id="renommage-erreur" style="color:#E24B4A; font-size:0.72rem; margin-top:6px;"></div>
+                </div>
+            `;
+            document.getElementById('renommage-btn').addEventListener('click', async function () {
+                const prenom = document.getElementById('renommage-prenom').value;
+                const nom = document.getElementById('renommage-nom').value;
+                const erreurDiv = document.getElementById('renommage-erreur');
+                erreurDiv.textContent = '';
+                const res = await fetch('/api/joueurs/renommer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ playerId: player.id, prenom, nom })
+                });
+                const resData = await res.json();
+                if (!res.ok) {
+                    erreurDiv.textContent = resData.error || 'Impossible d\'enregistrer.';
+                    return;
+                }
+                window.location.reload();
+            });
         }
 
         async function chargerSemaineInfo(player) {
@@ -1215,6 +1261,8 @@ async function afficherJoueurCourant() {
             const lienHistorique = document.getElementById('historique-matchs-link');
 
             if (!player) {
+                document.getElementById('renommage-banner').innerHTML = '';
+                document.getElementById('renommage-banner').style.display = 'none';
                 document.getElementById('semaine-info-container').innerHTML = '';
                 document.getElementById('planning-container').innerHTML = '';
                 document.getElementById('style-container').innerHTML = '';
@@ -1235,6 +1283,8 @@ async function afficherJoueurCourant() {
                 return;
             }
             fermerEcranIntersaison();
+
+            await chargerRenommageRequis(player).catch(function (e) { console.error(e); });
 
             // Chaque section se charge independamment : une erreur dans l'une (ex.
             // reponse serveur inattendue) ne doit plus bloquer le rendu des sections

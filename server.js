@@ -519,6 +519,43 @@ app.post('/api/joueurs', (req, res) => {
     }
 });
 
+// Renommage d'un personnage DEJA VALIDE, uniquement quand l'admin l'exige
+// explicitement (users.renommage_requis_type, cf. database.js) - contrairement a la
+// creation, ne touche a rien d'autre (stats/classement/historique intacts). Le motif
+// d'affichage reste au coach jusqu'a ce que cette route reussisse, moment ou elle
+// s'efface d'elle-meme. Demande explicite de l'utilisateur, 2026-09-07.
+app.post('/api/joueurs/renommer', (req, res) => {
+    try {
+        const userId = req.userId;
+        const { playerId, prenom, nom } = req.body;
+
+        const player = db.prepare('SELECT id, user_id, type, statut FROM players WHERE id = ?').get(playerId);
+        if (!player || player.user_id !== userId) {
+            return res.status(404).json({ error: 'Personnage introuvable.' });
+        }
+
+        const user = db.prepare('SELECT renommage_requis_type FROM users WHERE id = ?').get(userId);
+        if (!user.renommage_requis_type || user.renommage_requis_type !== player.type) {
+            return res.status(400).json({ error: 'Aucun renommage attendu pour ce personnage.' });
+        }
+
+        if (!nomValide(prenom) || !nomValide(nom)) {
+            return res.status(400).json({ error: 'Le prenom et le nom ne peuvent contenir que des lettres, espaces, apostrophes ou tirets.' });
+        }
+        if (nomTropLong(prenom) || nomTropLong(nom)) {
+            return res.status(400).json({ error: 'Le prenom et le nom sont limites a ' + MAX_LONGUEUR_NOM + ' caracteres chacun.' });
+        }
+
+        db.prepare('UPDATE players SET prenom = ?, nom = ? WHERE id = ?').run(prenom.trim(), nom.trim(), playerId);
+        db.prepare('UPDATE users SET renommage_requis_type = NULL, renommage_requis_motif = NULL WHERE id = ?').run(userId);
+
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Expose le budget de competences ACTUEL (voir budgetActuelCompetences) a
 // creation-joueurs.html, pour afficher/valider le bon total avant meme la
 // soumission - la route de creation elle-meme recalcule ce budget independamment
@@ -734,7 +771,7 @@ app.delete('/api/joueur/avatar/:playerId', (req, res) => {
 app.get('/api/utilisateur/:userId', (req, res) => {
     try {
         const userId = req.userId;
-        const user = db.prepare('SELECT id, email, pseudo, role, est_redacteur, dernier_refus_motif, dernier_refus_date FROM users WHERE id = ?').get(userId);
+        const user = db.prepare('SELECT id, email, pseudo, role, est_redacteur, dernier_refus_motif, dernier_refus_date, renommage_requis_type, renommage_requis_motif FROM users WHERE id = ?').get(userId);
 
         if (!user) {
             return res.status(404).json({ error: 'Utilisateur introuvable.' });
