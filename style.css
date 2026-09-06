@@ -825,6 +825,13 @@ h1 {
     padding: 8px 0;
 }
 
+.planning-week-hint {
+    font-size: 0.64rem;
+    color: #8B98A5;
+    margin-top: 6px;
+    line-height: 1.35;
+}
+
 .xp-pool-panel {
     background: rgba(212, 240, 0, 0.06);
     border: 1px solid rgba(212, 240, 0, 0.2);

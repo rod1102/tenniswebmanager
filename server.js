@@ -1168,6 +1168,29 @@ app.get('/api/planification/:playerId', (req, res) => {
               AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
         `).all(debut, fin, playerId);
 
+        // 2e semaine d'un tournoi 2 semaines (Grand Chelem/M1000 96 places) dont la 1ere
+        // semaine (celle qui est verrouillee ci-dessus) tombe juste avant la fenetre -
+        // jamais garantie (elimination possible en semaine 1), donc PAS verrouillee :
+        // reste planifiable, avec juste une note. duree max actuellement connue = 2,
+        // un ecart d'1 semaine en arriere suffit donc a la retrouver. Corrige
+        // l'incoherence signalee par l'utilisateur avec /api/planification-saison, qui
+        // verrouillait purement et simplement cette meme semaine (2026-09-06).
+        const tournoisConditionnels = {};
+        db.prepare(`
+            SELECT tournois.semaine, tournois.nom, tournois.calendrier_id
+            FROM tournois
+            JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
+            WHERE tournois.semaine BETWEEN ? AND ?
+              AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
+        `).all(Math.max(1, debut - 1), fin, playerId).forEach(function (ins) {
+            const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === ins.calendrier_id; });
+            const duree = entree ? entree.duree : 1;
+            for (let d = 1; d < duree; d++) {
+                const s = ins.semaine + d;
+                if (s >= debut && s <= fin) tournoisConditionnels[s] = ins.nom;
+            }
+        });
+
         // Meme principe pour une semaine de Coupe Davis/Fed Cup ou ce joueur est
         // selectionne dans la composition de sa nation (pas juste "sa nation joue" -
         // un joueur non retenu cette manche-la garde sa planification normale).
@@ -1188,7 +1211,7 @@ app.get('/api/planification/:playerId', (req, res) => {
             phases[s] = Object.assign({}, p, { finDeSaison: p.type === 'tournoi' && p.positionSemaine === LONGUEUR_SAISON - 2 });
         }
 
-        res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournois, coupes, phases });
+        res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournois, tournoisConditionnels, coupes, phases });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
@@ -1235,6 +1258,13 @@ app.get('/api/planification-saison/:playerId', (req, res) => {
         const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
         const tournoisVerrous = {}; // vraie inscription (tournoi_liste_attente = confirme OU liste d'attente)
         const favoris = {};         // coeur pose mais pas encore d'inscription (auto-inscription a S-5)
+        // 2e (+) semaine d'un tournoi 2 semaines : jamais garantie (elimination possible
+        // en semaine 1), donc plus verrouillee comme avant - juste signalee ici pour que
+        // le front affiche une note, la semaine reste planifiable. Corrige l'incoherence
+        // signalee par l'utilisateur avec /api/planification, qui laissait deja cette
+        // semaine planifiable (sans aucune explication, faute d'y avoir seulement pense)
+        // alors que cette route-ci la verrouillait purement et simplement (2026-09-06).
+        const tournoisConditionnels = {};
         if (fin >= debut) {
             const cle = function (r) { return r.calendrier_id + '|' + r.semaine; };
             const inscritSet = new Set(db.prepare('SELECT calendrier_id, semaine FROM tournoi_liste_attente WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, Math.max(1, debut - 1), fin).map(cle));
@@ -1248,12 +1278,18 @@ app.get('/api/planification-saison/:playerId', (req, res) => {
                         const k = t.id + '|' + s;
                         const dest = inscritSet.has(k) ? tournoisVerrous : (favoriSet.has(k) ? favoris : null);
                         if (!dest) return;
-                        for (let d = 0; d < t.duree; d++) dest[s + d] = t.nom;
+                        dest[s] = t.nom;
+                        for (let d = 1; d < t.duree; d++) {
+                            const s2 = s + d;
+                            if (s2 >= debut && s2 <= fin) tournoisConditionnels[s2] = t.nom;
+                        }
                     });
             }
         }
-        // Une vraie inscription a la priorite sur un simple coeur pour la meme semaine.
-        Object.keys(tournoisVerrous).forEach(function (s) { delete favoris[s]; });
+        // Une vraie inscription a la priorite sur un simple coeur pour la meme semaine ;
+        // un verrou ferme (semaine 1, quelle que soit sa source) prime sur une simple note.
+        Object.keys(tournoisVerrous).forEach(function (s) { delete favoris[s]; delete tournoisConditionnels[s]; });
+        Object.keys(favoris).forEach(function (s) { delete tournoisConditionnels[s]; });
 
         const coupes = {};
         (fin >= debut ? joueursEngagesCoupeDavis(player, debut, fin) : []).forEach(function (c) { coupes[c.semaine] = c.nom; });
@@ -1264,7 +1300,7 @@ app.get('/api/planification-saison/:playerId', (req, res) => {
             phases[s] = Object.assign({}, p, { finDeSaison: p.type === 'tournoi' && p.positionSemaine === LONGUEUR_SAISON - 2 });
         }
 
-        res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournoisVerrous, favoris, coupes, phases });
+        res.json({ success: true, semaine_actuelle: etat.semaine_actuelle, debut, fin, ordres, tournoisVerrous, favoris, tournoisConditionnels, coupes, phases });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });

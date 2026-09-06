@@ -7,9 +7,8 @@
     <title>Planifier la saison — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260829">
+    <link rel="stylesheet" href="style.css?v=20260906">
     <style>
-        .planning-week-hint { font-size: 0.64rem; color: #8B98A5; margin-top: 6px; line-height: 1.35; }
         .planning-bulk {
             display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
             background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.12);
@@ -188,6 +187,13 @@
                             ${hint}
                         </div>`;
                     continue;
+                }
+
+                // 2e semaine d'un tournoi 2 semaines (Grand Chelem/M1000 96 places) : pas
+                // verrouillee (elimination possible en semaine 1) - juste une note, la
+                // semaine reste planifiable normalement. Demande utilisateur, 2026-09-06.
+                if (dataPlan.tournoisConditionnels && dataPlan.tournoisConditionnels[s]) {
+                    hint += '<div class="planning-week-hint">2ᵉ semaine de ' + dataPlan.tournoisConditionnels[s] + ' : appliqué seulement en cas d\'élimination avant cette semaine, sinon le tournoi continue.</div>';
                 }
 
                 const valeurActuelle = ordresInitiaux[s] || '';

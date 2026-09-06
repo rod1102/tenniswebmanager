@@ -7,7 +7,7 @@
     <title>Mes joueurs — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260829">
+    <link rel="stylesheet" href="style.css?v=20260906">
 </head>
 <body>
     <div class="dashboard-page">
@@ -255,6 +255,11 @@
             const tournoisExistants = {};
             dataPlan.tournois.forEach(function (t) { tournoisExistants[t.semaine] = t.nom; });
 
+            // 2e semaine d'un tournoi 2 semaines (Grand Chelem/M1000 96 places) : pas
+            // verrouillee (elimination possible en semaine 1), juste signalee pour
+            // afficher une note sous le select - demande utilisateur, 2026-09-06.
+            const tournoisConditionnels = dataPlan.tournoisConditionnels || {};
+
             // Meme principe pour une semaine de Coupe Davis/Fed Cup ou ce joueur est
             // selectionne dans la composition de sa nation (dataPlan.coupes) - demande
             // explicite de l'utilisateur, 2026-08-26.
@@ -375,11 +380,15 @@
                 Object.keys(ACTIONS_LABELS).forEach(function (val) {
                     optionsHtml += `<option value="${val}" ${val === valeurActuelle ? 'selected' : ''}>${ACTIONS_LABELS[val]}</option>`;
                 });
+                const noteConditionnelle = tournoisConditionnels[s]
+                    ? '<div class="planning-week-hint">2ᵉ semaine de ' + tournoisConditionnels[s] + ' : appliqué seulement en cas d\'élimination avant cette semaine, sinon le tournoi continue.</div>'
+                    : '';
                 weeksHtml += `
                     <div class="planning-week-card${bientotPerdue ? ' planning-week-alerte' : ''}">
                         <label>${labelSemaine}</label>
                         <select class="planning-select" data-semaine="${s}">${optionsHtml}</select>
                         ${bientotPerdue ? '<div class="planning-alerte-texte">Non planifiée — bientôt trop tard</div>' : ''}
+                        ${noteConditionnelle}
                     </div>
                 `;
             }
