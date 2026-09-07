@@ -116,7 +116,7 @@
             }).join('');
 
             panneau.innerHTML = `
-                <div class="match-hint">Pronostic simple : le vainqueur du tournoi, 3 points si tu trouves juste.</div>
+                <div class="match-hint">Pronostic simple : le vainqueur du tournoi, ${data.tournoi.categorie === 'finals' ? 5 : 3} points si tu trouves juste.</div>
                 <div class="style-tour-grid">
                     <div class="style-tour-card">
                         <label>Vainqueur</label>
@@ -177,7 +177,7 @@
             }
 
             function rendre() {
-                let html = '<div class="match-hint">1 pt par bon huitième, 2 en quart, 3 en demie, 4 en finale, 5 pour le vainqueur.</div>';
+                let html = '<div class="match-hint">Barème par tour — <strong>8es</strong> : 1 pt par joueur qui atteint vraiment ce tour, +1 si toute l\'affiche est juste, +6 si les 16 sont bons (max 30). <strong>Quarts</strong> : 4 / +2 / +10 (max 50). <strong>Demies</strong> : 10 / +5 / +20 (max 70). <strong>Finale</strong> : 20 par finaliste juste, +25 pour l\'affiche, +35 si tu as le vainqueur (max 100). Jusqu\'à 250 pts — <strong>doublés en Grand Chelem</strong> (500).</div>';
 
                 html += '<div class="stats-header">Huitièmes de finale</div><div class="style-tour-grid">';
                 for (let i = 0; i < 16; i++) {

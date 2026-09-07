@@ -774,7 +774,12 @@ const migrations = [
     // 'joueur' ou 'joueuse' (le circuit concerne) ou NULL si rien n'est en attente ;
     // efface automatiquement des que POST /api/joueurs/renommer aboutit.
     "ALTER TABLE users ADD COLUMN renommage_requis_type TEXT",
-    "ALTER TABLE users ADD COLUMN renommage_requis_motif TEXT"
+    "ALTER TABLE users ADD COLUMN renommage_requis_motif TEXT",
+    // Marqueur du recalcul retroactif des pronostics lie au nouveau bareme cascade
+    // (2026-09-07 : 8es/quarts/demies/finale avec bonus d'affiche + tour parfait,
+    // total 250 pts/M1000, double en GC). Voir recalculerTousLesPronostics dans
+    // server.js, declenche une seule fois au demarrage.
+    "ALTER TABLE jeu_etat ADD COLUMN patch_bareme_pronos_20260907 INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {

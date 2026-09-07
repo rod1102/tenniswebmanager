@@ -3311,12 +3311,58 @@ function aAtteintTour(tourElimineReel, tourCible, labelsTours) {
     return idxReel >= idxCible;
 }
 
+// Bareme cascade (2026-09-07, demande explicite de l'utilisateur - remplace
+// l'ancien 1/2/3/4 pts par tour + 5 pour le vainqueur). Pour chaque tour de la
+// phase finale (8es -> finale) :
+//   - "joueur juste"  : le joueur pronostique a bien atteint ce tour       -> parJoueur pts
+//   - "affiche juste" : les 2 joueurs d'un meme match sont justes tous les 2 -> parAffiche pts (en plus)
+//   - "tour parfait"  : les `taille` joueurs du tour sont tous justes       -> bonusTour pts (en plus)
+// Le bloc Finale ajoute BONUS_VAINQUEUR si le vainqueur pronostique gagne vraiment.
+// Les bornes de la structure du tableau garantissent que 2 joueurs justes dans le
+// meme match se sont forcement rencontres : "affiche juste" == "les 2 slots justes".
+//   8e     : 1  / +1  / +6   -> 16 + 8  + 6  = 30 max
+//   1/4    : 4  / +2  / +10  -> 32 + 8  + 10 = 50 max
+//   1/2    : 10 / +5  / +20  -> 40 + 10 + 20 = 70 max
+//   Finale : 20 / +25 / (+35 vainqueur) -> 40 + 25 + 35 = 100 max
+// Total recuperable : 250 pts par M1000 ; DOUBLE pour un Grand Chelem (categorie
+// 'slam') -> 500 pts, pour qu'un GC pese plus qu'un M1000.
 const BAREME_CASCADE = [
-    { cle: 'huitiemes', tour: '8e de finale', pts: 1 },
-    { cle: 'quarts', tour: '1/4 finale', pts: 2 },
-    { cle: 'demies', tour: '1/2 finale', pts: 3 },
-    { cle: 'finale', tour: 'Finale', pts: 4 }
+    { cle: 'huitiemes', tour: '8e de finale', taille: 16, parJoueur: 1,  parAffiche: 1,  bonusTour: 6 },
+    { cle: 'quarts',    tour: '1/4 finale',   taille: 8,  parJoueur: 4,  parAffiche: 2,  bonusTour: 10 },
+    { cle: 'demies',    tour: '1/2 finale',   taille: 4,  parJoueur: 10, parAffiche: 5,  bonusTour: 20 },
+    { cle: 'finale',    tour: 'Finale',       taille: 2,  parJoueur: 20, parAffiche: 25, bonusTour: 0 }
 ];
+const BONUS_VAINQUEUR_CASCADE = 35;
+
+// Points d'un pronostic (simple OU cascade) une fois le tournoi joue. Isolee pour
+// etre partagee entre le calcul normal (calculerPointsPronostics, a la fin d'un
+// tournoi) et le recalcul retroactif de l'historique (recalculerTousLesPronostics).
+function scorerPronostic(tournoi, predictions, tourEliminePar, labelsTours) {
+    if (!predictions) return 0;
+
+    if (typePronostic(tournoi) === 'simple') {
+        return tourEliminePar.get(predictions.vainqueur) === 'Vainqueur' ? pointsVainqueurSimple(tournoi) : 0;
+    }
+
+    let points = 0;
+    BAREME_CASCADE.forEach(function (etape) {
+        const picks = predictions[etape.cle] || [];
+        const justes = picks.map(function (id) {
+            const tourReel = tourEliminePar.get(id);
+            return !!(tourReel && aAtteintTour(tourReel, etape.tour, labelsTours));
+        });
+        let nbJustes = 0;
+        justes.forEach(function (ok) { if (ok) { points += etape.parJoueur; nbJustes += 1; } });
+        for (let m = 0; m * 2 + 1 < justes.length; m++) {
+            if (justes[2 * m] && justes[2 * m + 1]) points += etape.parAffiche;
+        }
+        if (nbJustes === etape.taille) points += etape.bonusTour;
+    });
+    if (tourEliminePar.get(predictions.vainqueur) === 'Vainqueur') points += BONUS_VAINQUEUR_CASCADE;
+
+    if (tournoi.categorie === 'slam') points *= 2;
+    return points;
+}
 
 // Calcule et enregistre les points de tous les pronostics en attente pour un
 // tournoi qui vient d'etre simule. Appelee juste apres simulerTournoi/
@@ -3328,39 +3374,43 @@ function calculerPointsPronostics(tournoiId) {
 
     const entrants = db.prepare('SELECT id, tour_elimine FROM tournoi_joueurs WHERE tournoi_id = ?').all(tournoiId);
     const tourEliminePar = new Map(entrants.map(function (e) { return [e.id, e.tour_elimine]; }));
-
-    const type = typePronostic(tournoi);
-    const labelsTours = type === 'cascade' ? calculerLabelsTours(tournoi.taille_tableau, tournoi.format) : null;
+    const labelsTours = typePronostic(tournoi) === 'cascade' ? calculerLabelsTours(tournoi.taille_tableau, tournoi.format) : null;
 
     enAttente.forEach(function (p) {
         let predictions;
         try { predictions = JSON.parse(p.predictions); } catch (e) { predictions = null; }
-        if (!predictions) {
-            db.prepare('UPDATE pronostics SET points_gagnes = 0 WHERE id = ?').run(p.id);
-            return;
-        }
-
-        let points = 0;
-        if (type === 'simple') {
-            if (tourEliminePar.get(predictions.vainqueur) === 'Vainqueur') {
-                points = pointsVainqueurSimple(tournoi);
-            }
-        } else {
-            BAREME_CASCADE.forEach(function (etape) {
-                (predictions[etape.cle] || []).forEach(function (id) {
-                    const tourReel = tourEliminePar.get(id);
-                    if (tourReel && aAtteintTour(tourReel, etape.tour, labelsTours)) {
-                        points += etape.pts;
-                    }
-                });
-            });
-            if (tourEliminePar.get(predictions.vainqueur) === 'Vainqueur') {
-                points += 5;
-            }
-        }
-
+        const points = scorerPronostic(tournoi, predictions, tourEliminePar, labelsTours);
         db.prepare('UPDATE pronostics SET points_gagnes = ? WHERE id = ?').run(points, p.id);
     });
+}
+
+// Recalcul retroactif de TOUS les pronostics deja notes - one-shot au demarrage,
+// garde par jeu_etat.patch_bareme_pronos_20260907. Le passage au nouveau bareme
+// cascade multiplie les points par ~8 : sans re-notation de l'historique, le
+// classement Pronos melangerait deux echelles. Les donnees de tableau
+// (tour_elimine) restent en base, donc le recalcul est exact.
+function recalculerTousLesPronostics() {
+    const tournois = db.prepare(`
+        SELECT DISTINCT t.* FROM tournois t
+        JOIN pronostics p ON p.tournoi_id = t.id
+        WHERE p.points_gagnes IS NOT NULL
+    `).all();
+    let nbPronos = 0;
+    db.transaction(function () {
+        tournois.forEach(function (tournoi) {
+            const entrants = db.prepare('SELECT id, tour_elimine FROM tournoi_joueurs WHERE tournoi_id = ?').all(tournoi.id);
+            const tourEliminePar = new Map(entrants.map(function (e) { return [e.id, e.tour_elimine]; }));
+            const labelsTours = typePronostic(tournoi) === 'cascade' ? calculerLabelsTours(tournoi.taille_tableau, tournoi.format) : null;
+            db.prepare('SELECT id, predictions FROM pronostics WHERE tournoi_id = ? AND points_gagnes IS NOT NULL').all(tournoi.id).forEach(function (p) {
+                let predictions;
+                try { predictions = JSON.parse(p.predictions); } catch (e) { predictions = null; }
+                const points = scorerPronostic(tournoi, predictions, tourEliminePar, labelsTours);
+                db.prepare('UPDATE pronostics SET points_gagnes = ? WHERE id = ?').run(points, p.id);
+                nbPronos += 1;
+            });
+        });
+    })();
+    console.log('[bareme_pronos_20260907] ' + nbPronos + ' pronostic(s) re-notes sur ' + tournois.length + ' tournoi(s)');
 }
 
 function melanger(liste) {
@@ -7391,7 +7441,7 @@ function calculerBadgesCoach(userId) {
         { id: 'gc_cumules', nom: 'Grand Chelems cumulés', description: 'Titres du Grand Chelem, cumulés sur les 2 personnages', valeur: gcCumules, seuils: [2, 5, 10, 20, 30] },
         { id: 'gc_meme_saison', nom: 'Grand Chelem la même saison', description: 'Saisons où les 2 personnages ont chacun remporté un Grand Chelem', valeur: gcMemeSaison, seuils: [1, 2, 3, 4, 5] },
         { id: 'masters_cumules', nom: 'Masters de fin d\'année cumulés', description: 'Titres du tournoi des Masters, cumulés sur les 2 personnages', valeur: mastersCumules, seuils: [1, 2, 3, 5, 8] },
-        { id: 'points_pronos', nom: 'Points de pronostics', description: 'Points de pronostics cumulés, toute la carrière', valeur: pointsPronos, seuils: [25, 40, 70, 100, 200] },
+        { id: 'points_pronos', nom: 'Points de pronostics', description: 'Points de pronostics cumulés, toute la carrière', valeur: pointsPronos, seuils: [200, 750, 1500, 2500, 5000] },
         { id: 'top10_simultane', nom: 'Semaines dans le Top 10 ensemble', description: 'Semaines où les 2 personnages sont dans le top 10 du classement Live en même temps', valeur: top10Simultanees, seuils: [1, 2, 3, 5, 10] },
         { id: 'saisons_jouees', nom: 'Saisons jouées', description: 'Saisons avec au moins un pronostic soumis', valeur: saisonsJouees, seuils: [1, 3, 5, 10, 20] },
         { id: 'appel_kine', nom: 'Appel au kiné', description: 'Interventions du kiné, cumulées sur les 2 personnages', valeur: appelKine, seuils: [5, 10, 15, 25, 50] }
@@ -9745,6 +9795,17 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
 app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
 });
+
+// Recalage unique de l'historique des pronostics sur le nouveau bareme cascade
+// (2026-09-07). Garde par jeu_etat.patch_bareme_pronos_20260907.
+try {
+    if (db.prepare('SELECT patch_bareme_pronos_20260907 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+        recalculerTousLesPronostics();
+        db.prepare('UPDATE jeu_etat SET patch_bareme_pronos_20260907 = 1 WHERE id = 1').run();
+    }
+} catch (err) {
+    console.error('[bareme_pronos_20260907] echec du recalcul :', err.message);
+}
 
 verifierAvancementAuto();
 setInterval(verifierAvancementAuto, 15 * 60 * 1000);
