@@ -49,11 +49,13 @@
             <div class="tab-panel" id="tab-confrontations"><p class="match-hint">Chargement...</p></div>
             <div class="tab-panel" id="tab-almanach" style="display:none;"><p class="match-hint">Chargement...</p></div>
             <div class="tab-panel" id="tab-pantheon" style="display:none;">
-                <div class="tabs-nav" id="pantheon-vue-nav" style="margin-bottom:10px;">
+                <div style="text-align:center; margin-bottom:14px;">
+                    <button class="cta cta-secondary" id="pantheon-aide-btn" style="padding:9px 18px; font-size:0.82rem;">Pour tout comprendre au Panthéon</button>
+                </div>
+                <div class="tabs-nav" id="pantheon-vue-nav" style="margin-bottom:12px;">
                     <button class="tab-btn active" data-vue="ATP">ATP</button>
                     <button class="tab-btn" data-vue="WTA">WTA</button>
                 </div>
-                <p class="match-hint" style="margin-bottom:12px;">Classement de carrière des personnages des vrais coachs. Points cumulés sur toute la carrière : semaines passées n°1 mondial (3 pts) ou dans le top 10 (0,75 pt), plus les résultats en tournoi selon leur importance (Grand Chelem &gt; Masters &gt; M1000 &gt; 500 &gt; 250).</p>
                 <div id="pantheon-liste"><p class="match-hint">Chargement...</p></div>
             </div>
             <div class="tab-panel" id="tab-records" style="display:none;">
@@ -285,6 +287,69 @@
                 chargerPantheon();
             });
         });
+
+        function ouvrirAidePantheon() {
+            const ligneTournoi = function (cat, cells) {
+                return `<tr><td style="text-align:left; font-weight:600;">${cat}</td>${cells.map(function (c) { return `<td style="text-align:center;">${c}</td>`; }).join('')}</tr>`;
+            };
+            const overlay = document.createElement('div');
+            overlay.className = 'dispo-blocage-overlay';
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box">
+                    <div class="stats-header" style="margin-top:0;">Pour tout comprendre au Panthéon</div>
+                    <p class="match-hint" style="margin-bottom:14px;">
+                        Le Panthéon classe les personnages des vrais coachs (les rivaux gérés par le jeu n'y figurent pas)
+                        selon un total de points accumulés sur <strong>toute la carrière</strong>, saison après saison.
+                        Chaque personnage a son propre total : il ne baisse jamais, il ne fait que grimper.
+                    </p>
+
+                    <div class="stats-header" style="font-size:0.9rem;">Place au classement mondial</div>
+                    <div class="stat-row"><span class="stat-label">Chaque semaine terminée n°1 mondial (classement Live)</span><span class="stat-value">3 pts</span></div>
+                    <div class="stat-row"><span class="stat-label">Chaque semaine terminée entre la 2<sup>e</sup> et la 10<sup>e</sup> place</span><span class="stat-value">0,75 pt</span></div>
+                    <p class="match-hint" style="margin:6px 0 16px;">
+                        Une semaine n°1 rapporte 3 pts et rien de plus (elle ne compte pas <em>aussi</em> comme une semaine
+                        dans le top 10). Seules les semaines écoulées depuis la mise en place du suivi des classements
+                        (fin juillet 2026) sont comptabilisées.
+                    </p>
+
+                    <div class="stats-header" style="font-size:0.9rem;">Résultats en tournoi</div>
+                    <div style="overflow-x:auto;">
+                        <table class="classement-table" style="width:100%; margin-top:6px;">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;">Catégorie</th>
+                                    <th style="text-align:center;">Victoire</th>
+                                    <th style="text-align:center;">Finale</th>
+                                    <th style="text-align:center;">½ finale</th>
+                                    <th style="text-align:center;">¼ finale</th>
+                                    <th style="text-align:center;">8<sup>e</sup></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                ${ligneTournoi('Grand Chelem', ['100', '60', '30', '10', '4'])}
+                                ${ligneTournoi('Masters', ['65', '35', '20', '—', '—'])}
+                                ${ligneTournoi('Masters 1000', ['40', '25', '14', '5', '—'])}
+                                ${ligneTournoi('ATP / WTA 500', ['20', '6', '—', '—', '—'])}
+                                ${ligneTournoi('ATP / WTA 250', ['12', '3', '—', '—', '—'])}
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="match-hint" style="margin:10px 0 0;">
+                        Seul le meilleur résultat de chaque participation compte (une victoire en Grand Chelem rapporte
+                        100 pts, pas 100 + 60 + 30…). Pour le Masters de fin de saison, être qualifié — donc présent dans
+                        le tableau, quelle que soit la sortie — vaut déjà <strong>10 pts</strong>. Seuls les tournois
+                        terminés sont pris en compte.
+                    </p>
+
+                    <button class="cta cta-secondary" id="pantheon-aide-fermer" style="margin-top:18px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+            document.getElementById('pantheon-aide-fermer').addEventListener('click', function () { overlay.remove(); });
+        }
+
+        document.getElementById('pantheon-aide-btn').addEventListener('click', ouvrirAidePantheon);
 
         const STATS_DEFS = [
             { cle: 'rivalite', titre: 'Plus grande rivalité', parSurface: true, type: 'rivalite' },
