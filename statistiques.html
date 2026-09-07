@@ -42,11 +42,20 @@
             <div class="tabs-nav" id="tabs-nav">
                 <button class="tab-btn active" data-tab="confrontations">Confrontations</button>
                 <button class="tab-btn" data-tab="almanach">Almanach</button>
+                <button class="tab-btn" data-tab="pantheon">Panthéon</button>
                 <button class="tab-btn" data-tab="records">Records</button>
             </div>
 
             <div class="tab-panel" id="tab-confrontations"><p class="match-hint">Chargement...</p></div>
             <div class="tab-panel" id="tab-almanach" style="display:none;"><p class="match-hint">Chargement...</p></div>
+            <div class="tab-panel" id="tab-pantheon" style="display:none;">
+                <div class="tabs-nav" id="pantheon-vue-nav" style="margin-bottom:10px;">
+                    <button class="tab-btn active" data-vue="ATP">ATP</button>
+                    <button class="tab-btn" data-vue="WTA">WTA</button>
+                </div>
+                <p class="match-hint" style="margin-bottom:12px;">Classement de carrière des personnages des vrais coachs. Points cumulés sur toute la carrière : semaines passées n°1 mondial (3 pts) ou dans le top 10 (0,75 pt), plus les résultats en tournoi selon leur importance (Grand Chelem &gt; Masters &gt; M1000 &gt; 500 &gt; 250).</p>
+                <div id="pantheon-liste"><p class="match-hint">Chargement...</p></div>
+            </div>
             <div class="tab-panel" id="tab-records" style="display:none;">
                 <div class="tabs-nav" id="records-vue-nav" style="margin-bottom:10px;">
                     <button class="tab-btn active" data-vue="ATP">ATP</button>
@@ -220,6 +229,63 @@
             container.innerHTML = data.saisons.map(carteSaison).join('');
         }
 
+        let pantheonData = null;
+        let vuePantheon = 'ATP';
+
+        function formatPts(n) {
+            return (Math.round(n * 100) / 100).toLocaleString('fr-FR');
+        }
+
+        async function chargerPantheon() {
+            const container = document.getElementById('pantheon-liste');
+            if (!pantheonData) {
+                const response = await fetch('/api/statistiques/pantheon');
+                const data = await response.json();
+                if (!response.ok) {
+                    container.innerHTML = '<p class="match-hint">Impossible de charger le Panthéon.</p>';
+                    return;
+                }
+                pantheonData = data;
+            }
+
+            const liste = vuePantheon === 'ATP' ? pantheonData.atp : pantheonData.wta;
+            const type = vuePantheon === 'ATP' ? 'joueur' : 'joueuse';
+
+            if (!liste || liste.length === 0) {
+                container.innerHTML = '<p class="match-hint">Aucun joueur au Panthéon pour le moment — les personnages doivent d\'abord jouer des tournois ou grimper au classement.</p>';
+                return;
+            }
+
+            const lignes = liste.map(function (j) {
+                const d = j.detail;
+                const meta = [];
+                if (d.semainesNum1) meta.push(d.semainesNum1 + ' sem. n°1');
+                if (d.semainesTop10) meta.push(d.semainesTop10 + ' sem. top 10');
+                if (d.pointsTournois) meta.push(formatPts(d.pointsTournois) + ' pts en tournoi');
+                return `
+                    <tr>
+                        <td class="rang">${j.rang}</td>
+                        <td>
+                            <a class="lien-adversaire ${classeCircuit(type)}" href="${lienJoueurReel(j.id)}">${flagImg(j.drapeau)} ${formaterNom(j.prenom, j.nom)}</a>
+                            ${meta.length ? `<div class="tournoi-card-meta">${meta.join(' · ')}</div>` : ''}
+                        </td>
+                        <td class="pts">${formatPts(j.points)}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            container.innerHTML = `<table class="classement-table"><tbody>${lignes}</tbody></table>`;
+        }
+
+        document.querySelectorAll('#pantheon-vue-nav .tab-btn').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('#pantheon-vue-nav .tab-btn').forEach(function (b) { b.classList.remove('active'); });
+                bouton.classList.add('active');
+                vuePantheon = bouton.dataset.vue;
+                chargerPantheon();
+            });
+        });
+
         const STATS_DEFS = [
             { cle: 'rivalite', titre: 'Plus grande rivalité', parSurface: true, type: 'rivalite' },
             { cle: 'trophees', titre: 'Record de trophées', parSurface: true, type: 'valeur' },
@@ -339,6 +405,7 @@
         verifierAdmin();
         chargerConfrontations();
         chargerAlmanach();
+        chargerPantheon();
         chargerRecords();
     </script>
     <script src="retour.js?v=20260829"></script>

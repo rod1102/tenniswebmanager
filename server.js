@@ -116,7 +116,8 @@ function estRoutePublique(req) {
     if (req.method === 'GET') {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
-            '/api/statistiques/almanach', '/api/statistiques/records', '/api/annonce'].includes(req.path)) {
+            '/api/statistiques/almanach', '/api/statistiques/records', '/api/statistiques/pantheon',
+            '/api/annonce'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -7953,6 +7954,92 @@ app.get('/api/statistiques/almanach', (req, res) => {
         saisons.sort(function (a, b) { return b.numeroSaison - a.numeroSaison; });
 
         res.json({ success: true, saisons });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// ---------- Statistiques : Pantheon ----------
+// Classement de carriere des VRAIS joueurs uniquement (rivaux exclus, comme
+// Confrontations/Records - choix explicite de l'utilisateur, 2026-09-07). Points
+// cumules sur toutes les saisons : semaines passees en tete du classement Live +
+// resultats en tournoi ponderes par categorie. Bareme fourni par l'utilisateur.
+//   - Semaine n°1 : 3 pts ; semaine aux rangs 2 a 10 : 0,75 pt. EXCLUSIF : une
+//     semaine n°1 ne compte pas aussi comme une semaine top 10.
+//   - classement_historique n'a pas d'historique retroactif (alimente depuis le
+//     2026-07-24 seulement), meme limite que les badges "Semaines N°1".
+const PANTHEON_BAREME = {
+    slam:   { 'Vainqueur': 100, 'Finale': 60, '1/2 finale': 30, '1/4 finale': 10, '8e de finale': 4 },
+    finals: { 'Vainqueur': 65, 'Finale': 35, 'Demi-finale': 20, '1/2 finale': 20 },
+    '1000': { 'Vainqueur': 40, 'Finale': 25, '1/2 finale': 14, '1/4 finale': 5 },
+    '500':  { 'Vainqueur': 20, 'Finale': 6 },
+    '250':  { 'Vainqueur': 12, 'Finale': 3 }
+};
+// Masters de fin de saison : y etre qualifie (present dans le tableau, quelle que
+// soit la sortie) vaut deja 10 pts - plancher sous le bareme ci-dessus.
+const PANTHEON_FINALS_PARTICIPATION = 10;
+
+function pointsPantheonResultat(categorie, tourElimine) {
+    const table = PANTHEON_BAREME[categorie];
+    const brut = table ? (table[tourElimine] || 0) : 0;
+    return categorie === 'finals' ? Math.max(PANTHEON_FINALS_PARTICIPATION, brut) : brut;
+}
+
+function pantheonCircuit(circuit) {
+    const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
+    const joueurs = db.prepare("SELECT id, prenom, nom, nationalite FROM players WHERE type = ? AND statut = 'valide'").all(type);
+
+    // Semaines n°1 / top 10 par cle 'joueur:ID' (classement_historique = photo Live
+    // hebdomadaire de tout le circuit, rivaux compris, mais on ne garde que les reels).
+    const rangs = new Map();
+    db.prepare(`
+        SELECT cle,
+               SUM(CASE WHEN rang = 1 THEN 1 ELSE 0 END) AS sem1,
+               SUM(CASE WHEN rang BETWEEN 2 AND 10 THEN 1 ELSE 0 END) AS semTop10
+        FROM classement_historique
+        WHERE circuit = ? AND cle LIKE 'joueur:%'
+        GROUP BY cle
+    `).all(circuit).forEach(function (r) {
+        rangs.set(Number(r.cle.split(':')[1]), { sem1: r.sem1, semTop10: r.semTop10 });
+    });
+
+    // Points de tournoi (tournois termines uniquement).
+    const tournoiPts = new Map();
+    db.prepare(`
+        SELECT tj.player_id AS playerId, t.categorie AS categorie, tj.tour_elimine AS tourElimine
+        FROM tournoi_joueurs tj
+        JOIN tournois t ON t.id = tj.tournoi_id
+        JOIN players p ON p.id = tj.player_id
+        WHERE tj.est_reel = 1 AND p.type = ? AND p.statut = 'valide' AND t.statut = 'termine'
+    `).all(type).forEach(function (r) {
+        tournoiPts.set(r.playerId, (tournoiPts.get(r.playerId) || 0) + pointsPantheonResultat(r.categorie, r.tourElimine));
+    });
+
+    const liste = joueurs.map(function (p) {
+        const rg = rangs.get(p.id) || { sem1: 0, semTop10: 0 };
+        const ptsClassement = rg.sem1 * 3 + rg.semTop10 * 0.75;
+        const ptsTournois = tournoiPts.get(p.id) || 0;
+        return {
+            id: p.id, prenom: p.prenom, nom: p.nom, drapeau: drapeau(p.nationalite),
+            points: Math.round((ptsClassement + ptsTournois) * 100) / 100,
+            detail: {
+                semainesNum1: rg.sem1,
+                semainesTop10: rg.semTop10,
+                pointsClassement: Math.round(ptsClassement * 100) / 100,
+                pointsTournois: ptsTournois
+            }
+        };
+    });
+
+    liste.sort(function (a, b) { return b.points - a.points || a.nom.localeCompare(b.nom); });
+    liste.forEach(function (p, i) { p.rang = i + 1; });
+    return liste;
+}
+
+app.get('/api/statistiques/pantheon', (req, res) => {
+    try {
+        res.json({ success: true, atp: pantheonCircuit('ATP'), wta: pantheonCircuit('WTA') });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
