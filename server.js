@@ -4842,6 +4842,28 @@ app.get('/api/tournois/historique/:playerId', (req, res) => {
     }
 });
 
+// Nombre de joueurs REELS engages par tournoi (cle 'calendrier_id-semaine'), pour
+// l'affichage "X/taille" sur les cartes de calendrier : liste d'attente
+// (tournoi_liste_attente) tant que le tableau n'est pas tire - peut depasser la
+// taille du tableau, c'est assume -, puis entrants reels du tableau
+// (tournoi_joueurs.est_reel = 1) une fois le tableau tire (la liste d'attente est
+// alors purgee, cf. tirerAuSort). Un tournoi donne n'est jamais dans les deux
+// etats a la fois ; l'ecrasement par la 2e passe couvre la transition.
+function compterInscritsReelsParTournoi(debut, finAnnee) {
+    const parCle = new Map();
+    db.prepare(`
+        SELECT calendrier_id, semaine, COUNT(*) AS n FROM tournoi_liste_attente
+        WHERE semaine BETWEEN ? AND ? GROUP BY calendrier_id, semaine
+    `).all(debut, finAnnee).forEach(function (r) { parCle.set(r.calendrier_id + '-' + r.semaine, r.n); });
+    db.prepare(`
+        SELECT t.calendrier_id, t.semaine, COUNT(*) AS n
+        FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE t.semaine BETWEEN ? AND ? AND tj.est_reel = 1
+        GROUP BY t.calendrier_id, t.semaine
+    `).all(debut, finAnnee).forEach(function (r) { parCle.set(r.calendrier_id + '-' + r.semaine, r.n); });
+    return parCle;
+}
+
 app.get('/api/tournois/calendrier/:playerId', (req, res) => {
     try {
         const { playerId } = req.params;
@@ -4917,6 +4939,8 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
         const estTop30 = !!db.prepare('SELECT 1 FROM classement_top30 WHERE saison = ? AND circuit = ? AND cle = ?')
             .get(saisonAffichee, circuit, 'joueur:' + playerId);
 
+        const nbInscritsMap = compterInscritsReelsParTournoi(debut, finAnnee);
+
         eligibles.forEach(function (t) {
             const tournoi = tournoiMap.get(t.id + '-' + t.semaine);
             t.inscrit = inscritSet.has(t.id + '-' + t.semaine);
@@ -4926,6 +4950,7 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
             t.inscriptionFermee = !!tournoi && tournoi.statut !== 'inscriptions';
             t.favori = favoriSet.has(t.id + '-' + t.semaine);
             t.estObligatoire = !t.estCoupe && estTop30 && estTournoiObligatoireTop30(circuit, t.id, t.categorie);
+            t.nbInscrits = t.estCoupe ? null : (nbInscritsMap.get(t.id + '-' + t.semaine) || 0);
         });
 
         res.json({ success: true, semaineActuelle: etat.semaine_actuelle, debut, finOuvert, tournois: eligibles });
@@ -4972,10 +4997,13 @@ app.get('/api/tournois/calendrier-circuit/:circuit', (req, res) => {
         const tournoisExistants = db.prepare('SELECT id, calendrier_id, semaine, statut FROM tournois WHERE semaine BETWEEN ? AND ?').all(debut, finAnnee);
         const tournoiMap = new Map(tournoisExistants.map(function (t) { return [t.calendrier_id + '-' + t.semaine, t]; }));
 
+        const nbInscritsMap = compterInscritsReelsParTournoi(debut, finAnnee);
+
         eligibles.forEach(function (t) {
             const tournoi = tournoiMap.get(t.id + '-' + t.semaine);
             t.tournoiId = tournoi ? tournoi.id : null;
             t.inscriptionFermee = !!tournoi && tournoi.statut !== 'inscriptions';
+            t.nbInscrits = t.estCoupe ? null : (nbInscritsMap.get(t.id + '-' + t.semaine) || 0);
         });
 
         res.json({ success: true, semaineActuelle: etat.semaine_actuelle, debut, finOuvert, tournois: eligibles });

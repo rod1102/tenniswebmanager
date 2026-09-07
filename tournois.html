@@ -336,7 +336,7 @@
                     const nomClasse = t.circuit === 'ATP' ? 'tournoi-name-atp' : 'tournoi-name-wta';
                     carte.innerHTML = `
                         <span class="tournoi-card-name ${nomClasse}">${t.nom}</span>
-                        <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Tableau de ${t.taille_tableau} · ${nombreTours(t)} tours</div>
+                        <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · ${t.nbInscrits}/${t.taille_tableau} inscrits · ${nombreTours(t)} tours</div>
                     `;
                     grille.appendChild(carte);
                 });
@@ -428,7 +428,7 @@
 
                     carte.innerHTML = `
                         <a class="tournoi-card-name ${nomClasse}" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>${avertissementObligatoire}
-                        <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · Tableau de ${t.taille_tableau} · ${nombreTours(t)} tours</div>
+                        <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · ${t.nbInscrits}/${t.taille_tableau} inscrits · ${nombreTours(t)} tours</div>
                         ${actionHtml}
                     `;
 
