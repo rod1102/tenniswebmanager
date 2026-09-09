@@ -8670,6 +8670,17 @@ function assurerRosterMinimalNation(circuit, nation) {
     const estFeminin = circuit === 'WTA';
     const cleNation = normaliserPays(nation);
     const nomsExistants = new Set(db.prepare('SELECT nom FROM classement_joueurs WHERE circuit = ?').all(circuit).map(function (r) { return r.nom; }));
+    // Ne jamais donner a un rival le nom exact d'un vrai personnage du jeu, ni le
+    // prenom d'un vrai joueur de la meme nation (pas de "rapport avec un joueur reel").
+    const nomsReels = new Set(db.prepare('SELECT prenom, nom FROM players').all().map(function (p) { return normaliserPays(p.prenom + ' ' + p.nom).replace(/\s+/g, ' ').trim(); }));
+    const prenomsReelsNation = new Set(
+        db.prepare('SELECT prenom FROM players WHERE nationalite = ? AND type = ?').all(nation, circuit === 'ATP' ? 'joueur' : 'joueuse')
+            .map(function (p) { return normaliserPays(p.prenom).trim(); })
+    );
+    const estNomReel = function (nomComplet) {
+        if (nomsReels.has(normaliserPays(nomComplet).replace(/\s+/g, ' ').trim())) return true;
+        return prenomsReelsNation.has(normaliserPays(nomComplet.split(' ')[0]).trim());
+    };
     const insert = db.prepare('INSERT INTO classement_joueurs (circuit, nom, nationalite, niveau) VALUES (?, ?, ?, ?)');
     for (let i = 0; i < manquants; i++) {
         const categorie = CATEGORIES_ROSTER[Math.floor(Math.random() * CATEGORIES_ROSTER.length)];
@@ -8678,8 +8689,8 @@ function assurerRosterMinimalNation(circuit, nation) {
         do {
             nomFinal = genererNomLocal(cleNation, estFeminin) || genererJoueurLambda(categorie, estFeminin).nom;
             essais += 1;
-        } while (nomsExistants.has(nomFinal) && essais < 60);
-        if (nomsExistants.has(nomFinal)) continue;
+        } while ((nomsExistants.has(nomFinal) || estNomReel(nomFinal)) && essais < 60);
+        if (nomsExistants.has(nomFinal) || estNomReel(nomFinal)) continue;
         nomsExistants.add(nomFinal);
         const fourchette = NIVEAU_ROSTER_PAR_CATEGORIE[categorie];
         const niveau = Math.round(fourchette.min + Math.random() * (fourchette.max - fourchette.min));

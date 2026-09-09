@@ -1153,4 +1153,76 @@ if (db.prepare('SELECT patch_pseudo_prepelic AS p FROM jeu_etat WHERE id = 1').g
     db.prepare("UPDATE jeu_etat SET patch_pseudo_prepelic = 1 WHERE id = 1").run();
 }
 
+// 2026-09-10 (4), demande explicite de l'utilisateur : les noms locaux des rivaux
+// ne doivent JAMAIS evoquer un joueur reel, "sous aucun pretexte". noms-locaux.js
+// a ete purge de tout patronyme de joueur ATP/WTA connu -> on re-renomme les
+// rivaux des pays concernes (deja renommes une 1re fois par
+// patch_noms_locaux_rivaux) avec les nouvelles banques, en re-tirant tant que le
+// nom coincide avec celui d'un vrai personnage present en base.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_noms_locaux_rivaux_v2 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_noms_locaux_rivaux_v2 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const { normaliserPays } = require('./calendrier-tournois');
+    const { genererNomLocal, aBanque } = require('./noms-locaux');
+
+    const cleNom = function (s) { return normaliserPays(String(s || '')).replace(/\s+/g, ' ').trim(); };
+
+    db.transaction(function () {
+        // Noms interdits : tous les vrais personnages (players), pour ne jamais
+        // qu'un rival porte exactement le nom d'un joueur reel du jeu.
+        const nomsReels = new Set(
+            db.prepare('SELECT prenom, nom FROM players').all().map(function (p) { return cleNom(p.prenom + ' ' + p.nom); })
+        );
+        const nomsRoster = new Set(db.prepare('SELECT nom FROM classement_joueurs').all().map(function (r) { return r.nom; }));
+        const majNom = db.prepare('UPDATE classement_joueurs SET nom = ? WHERE id = ?');
+        let renommes = 0;
+        const sansBanque = new Set();
+
+        [['ATP', 'joueur', false], ['WTA', 'joueuse', true]].forEach(function (spec) {
+            const circuit = spec[0], typeReel = spec[1], estFeminin = spec[2];
+
+            // Par pays concerne : cle -> Set des prenoms des joueurs reels de ce
+            // pays sur ce circuit (un rival ne doit pas non plus partager le prenom
+            // d'un vrai joueur du meme pays - "aient un rapport avec un joueur reel").
+            const clesConcernees = new Set();
+            const prenomsReelsParCle = new Map();
+            db.prepare("SELECT prenom, nationalite FROM players WHERE type = ? AND statut = 'valide'").all(typeReel).forEach(function (r) {
+                const cle = normaliserPays(r.nationalite);
+                clesConcernees.add(cle);
+                if (!prenomsReelsParCle.has(cle)) prenomsReelsParCle.set(cle, new Set());
+                prenomsReelsParCle.get(cle).add(normaliserPays(r.prenom).trim());
+            });
+            if (clesConcernees.size === 0) return;
+
+            db.prepare('SELECT id, nom, nationalite FROM classement_joueurs WHERE circuit = ?').all(circuit).forEach(function (rv) {
+                const cle = normaliserPays(rv.nationalite);
+                if (!clesConcernees.has(cle)) return;
+                if (!aBanque(cle)) { sansBanque.add(rv.nationalite); return; }
+                const prenomsInterdits = prenomsReelsParCle.get(cle) || new Set();
+
+                let nouveau = null, essais = 0;
+                while (essais < 80) {
+                    const candidat = genererNomLocal(cle, estFeminin);
+                    essais += 1;
+                    if (!candidat) break;
+                    if (nomsRoster.has(candidat)) continue;
+                    if (nomsReels.has(cleNom(candidat))) continue;
+                    if (prenomsInterdits.has(normaliserPays(candidat.split(' ')[0]).trim())) continue;
+                    nouveau = candidat;
+                    break;
+                }
+                if (!nouveau) return; // banque trop petite : on garde le nom courant
+                nomsRoster.delete(rv.nom);
+                nomsRoster.add(nouveau);
+                majNom.run(nouveau, rv.id);
+                renommes += 1;
+            });
+        });
+
+        console.log('[noms_locaux_rivaux_v2] ' + renommes + ' rival(aux) renomme(s)');
+        if (sansBanque.size) console.log('[noms_locaux_rivaux_v2] AUCUNE banque de noms pour : ' + Array.from(sansBanque).join(', '));
+    })();
+
+    db.prepare("UPDATE jeu_etat SET patch_noms_locaux_rivaux_v2 = 1 WHERE id = 1").run();
+}
+
 module.exports = db;
