@@ -300,15 +300,17 @@ function choixAleatoire(liste) {
     return liste[Math.floor(Math.random() * liste.length)];
 }
 
+const { genererNomLocal } = require('./noms-locaux');
+
 function genererJoueurLambda(categorie, estFeminin) {
     const fourchette = NIVEAU_LAMBDA_PAR_CATEGORIE[categorie] || NIVEAU_LAMBDA_PAR_CATEGORIE[250];
     const niveau = Math.round(fourchette.min + Math.random() * (fourchette.max - fourchette.min));
-    const prenom = choixAleatoire(estFeminin ? PRENOMS_LAMBDA_F : PRENOMS_LAMBDA);
-    return {
-        nom: prenom + ' ' + choixAleatoire(NOMS_LAMBDA),
-        nationalite: choixAleatoire(NATIONALITES_LAMBDA),
-        niveau
-    };
+    const nationalite = choixAleatoire(NATIONALITES_LAMBDA);
+    // Nom coherent avec la nationalite si une banque locale existe (noms-locaux.js),
+    // sinon retombe sur le pot generique.
+    const nom = genererNomLocal(normaliserPays(nationalite), estFeminin)
+        || (choixAleatoire(estFeminin ? PRENOMS_LAMBDA_F : PRENOMS_LAMBDA) + ' ' + choixAleatoire(NOMS_LAMBDA));
+    return { nom, nationalite, niveau };
 }
 
 const LONGUEUR_SAISON = 52; // 1 Pre-saison + 1 Semaine 0 + S1-S49 (tournois) + S50 (semaine de la moulinette, sans tournoi individuel) - passe de 51 a 52 le 2026-08-30 pour que la moulinette (entree en S-2 = S50) ne tombe plus sur la finale de Coupe Davis (S49)

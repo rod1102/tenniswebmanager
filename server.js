@@ -9,6 +9,7 @@ const cookieParser = require('cookie-parser');
 const { Resend } = require('resend');
 const db = require('./database');
 const { BAREME_POINTS, CALENDRIER_TOURNOIS, SEMAINES_COUPES_EQUIPE, genererJoueurLambda, drapeau, normaliserPays, phaseDeSemaine, LONGUEUR_SAISON } = require('./calendrier-tournois');
+const { genererNomLocal } = require('./noms-locaux');
 
 // Fenetre du classement Live (52 dernieres semaines glissantes) : un nombre fixe,
 // independant de LONGUEUR_SAISON (duree du cycle de saison ingame, cf.
@@ -8667,16 +8668,22 @@ function assurerRosterMinimalNation(circuit, nation) {
     if (manquants <= 0) return;
 
     const estFeminin = circuit === 'WTA';
+    const cleNation = normaliserPays(nation);
     const nomsExistants = new Set(db.prepare('SELECT nom FROM classement_joueurs WHERE circuit = ?').all(circuit).map(function (r) { return r.nom; }));
     const insert = db.prepare('INSERT INTO classement_joueurs (circuit, nom, nationalite, niveau) VALUES (?, ?, ?, ?)');
     for (let i = 0; i < manquants; i++) {
         const categorie = CATEGORIES_ROSTER[Math.floor(Math.random() * CATEGORIES_ROSTER.length)];
-        let rival;
-        do { rival = genererJoueurLambda(categorie, estFeminin); } while (nomsExistants.has(rival.nom));
-        nomsExistants.add(rival.nom);
+        // Nom coherent avec `nation` si une banque locale existe, sinon nom generique.
+        let nomFinal, essais = 0;
+        do {
+            nomFinal = genererNomLocal(cleNation, estFeminin) || genererJoueurLambda(categorie, estFeminin).nom;
+            essais += 1;
+        } while (nomsExistants.has(nomFinal) && essais < 60);
+        if (nomsExistants.has(nomFinal)) continue;
+        nomsExistants.add(nomFinal);
         const fourchette = NIVEAU_ROSTER_PAR_CATEGORIE[categorie];
         const niveau = Math.round(fourchette.min + Math.random() * (fourchette.max - fourchette.min));
-        insert.run(circuit, rival.nom, nation, niveau);
+        insert.run(circuit, nomFinal, nation, niveau);
     }
 }
 

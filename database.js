@@ -1080,4 +1080,53 @@ if (db.prepare('SELECT patch_min4_rivaux_pays AS p FROM jeu_etat WHERE id = 1').
     db.prepare("UPDATE jeu_etat SET patch_min4_rivaux_pays = 1 WHERE id = 1").run();
 }
 
+// 2026-09-10 (2), demande explicite de l'utilisateur ("Chris COSTA ca fait pas
+// norvegien") : donner aux rivaux des pays "concernes" (>= 1 joueur reel valide
+// sur le circuit) des prenoms/noms coherents avec leur nationalite, quand une
+// banque locale existe (noms-locaux.js). Couvre aussi bien les rivaux
+// re-nationalises par patch_min4_rivaux_pays que les compatriotes deja presents.
+// (genererJoueurLambda produit desormais deja des noms locaux pour les rivaux et
+// lambdas crees ensuite.)
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_noms_locaux_rivaux INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_noms_locaux_rivaux AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const { normaliserPays } = require('./calendrier-tournois');
+    const { genererNomLocal, aBanque } = require('./noms-locaux');
+
+    db.transaction(function () {
+        const nomsRoster = new Set(db.prepare('SELECT nom FROM classement_joueurs').all().map(function (r) { return r.nom; }));
+        const majNom = db.prepare('UPDATE classement_joueurs SET nom = ? WHERE id = ?');
+        let renommes = 0;
+        const sansBanque = new Set();
+
+        [['ATP', 'joueur', false], ['WTA', 'joueuse', true]].forEach(function (spec) {
+            const circuit = spec[0], typeReel = spec[1], estFeminin = spec[2];
+
+            const clesConcernees = new Set(
+                db.prepare("SELECT DISTINCT nationalite FROM players WHERE type = ? AND statut = 'valide'").all(typeReel)
+                    .map(function (r) { return normaliserPays(r.nationalite); })
+            );
+            if (clesConcernees.size === 0) return;
+
+            db.prepare('SELECT id, nom, nationalite FROM classement_joueurs WHERE circuit = ?').all(circuit).forEach(function (rv) {
+                const cle = normaliserPays(rv.nationalite);
+                if (!clesConcernees.has(cle)) return;
+                if (!aBanque(cle)) { sansBanque.add(rv.nationalite); return; }
+
+                let nouveau, essais = 0;
+                do { nouveau = genererNomLocal(cle, estFeminin); essais += 1; } while (nouveau && nomsRoster.has(nouveau) && essais < 60);
+                if (!nouveau || nomsRoster.has(nouveau)) return; // banque trop petite : on garde l'ancien nom
+                nomsRoster.delete(rv.nom);
+                nomsRoster.add(nouveau);
+                majNom.run(nouveau, rv.id);
+                renommes += 1;
+            });
+        });
+
+        console.log('[noms_locaux_rivaux] ' + renommes + ' rival(aux) renomme(s)');
+        if (sansBanque.size) console.log('[noms_locaux_rivaux] AUCUNE banque de noms pour : ' + Array.from(sansBanque).join(', '));
+    })();
+
+    db.prepare("UPDATE jeu_etat SET patch_noms_locaux_rivaux = 1 WHERE id = 1").run();
+}
+
 module.exports = db;
