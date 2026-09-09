@@ -1129,4 +1129,28 @@ if (db.prepare('SELECT patch_noms_locaux_rivaux AS p FROM jeu_etat WHERE id = 1'
     db.prepare("UPDATE jeu_etat SET patch_noms_locaux_rivaux = 1 WHERE id = 1").run();
 }
 
+// 2026-09-10 (3), demande de l'utilisateur : renommer le pseudo du compte id 112
+// ("Prepelic" -> "LeBretto"). Cible par id ET pseudo actuel ; abandon si le
+// nouveau pseudo est deja pris par un autre compte (comparaison insensible a la
+// casse, meme regle que pseudoDejaPris cote serveur).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_pseudo_prepelic INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_pseudo_prepelic AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const NOUVEAU = 'LeBretto';
+    const cible = db.prepare('SELECT id, pseudo FROM users WHERE id = 112').get();
+    if (!cible) {
+        console.log('[pseudo_prepelic] compte 112 introuvable, rien fait');
+    } else if ((cible.pseudo || '').toLowerCase() !== 'prepelic') {
+        console.log('[pseudo_prepelic] pseudo actuel du compte 112 inattendu (' + cible.pseudo + '), rien fait');
+    } else {
+        const conflit = db.prepare('SELECT id FROM users WHERE pseudo = ? COLLATE NOCASE AND id != 112').get(NOUVEAU);
+        if (conflit) {
+            console.log('[pseudo_prepelic] "' + NOUVEAU + '" deja pris par le compte ' + conflit.id + ', rien fait');
+        } else {
+            db.prepare('UPDATE users SET pseudo = ? WHERE id = 112').run(NOUVEAU);
+            console.log('[pseudo_prepelic] compte 112 : "' + cible.pseudo + '" -> "' + NOUVEAU + '"');
+        }
+    }
+    db.prepare("UPDATE jeu_etat SET patch_pseudo_prepelic = 1 WHERE id = 1").run();
+}
+
 module.exports = db;
