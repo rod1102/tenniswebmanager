@@ -262,7 +262,7 @@ const CODES_PAYS = {
     'burundi': 'bi', 'cambodge': 'kh', 'cameroun': 'cm', 'canada': 'ca', 'cap-vert': 'cv',
     'republique centrafricaine': 'cf', 'chili': 'cl', 'chine': 'cn', 'chypre': 'cy', 'colombie': 'co',
     'comores': 'km', 'congo': 'cg', 'republique democratique du congo': 'cd', 'coree du nord': 'kp',
-    'coree du sud': 'kr', 'costa rica': 'cr', "cote d'ivoire": 'ci', 'croatie': 'hr', 'cuba': 'cu',
+    'coree du sud': 'kr', 'costa rica': 'cr', "cote d'ivoire": 'ci', 'croatie': 'hr', 'cuba': 'cu', 'curacao': 'cw',
     'danemark': 'dk', 'djibouti': 'dj', 'egypte': 'eg', 'emirats arabes unis': 'ae', 'equateur': 'ec',
     'erythree': 'er', 'espagne': 'es', 'estonie': 'ee', 'eswatini': 'sz', 'etats-unis': 'us',
     'ethiopie': 'et', 'fidji': 'fj', 'finlande': 'fi', 'france': 'fr', 'gabon': 'ga', 'gambie': 'gm',
