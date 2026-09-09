@@ -969,4 +969,115 @@ if (db.prepare('SELECT patch_renommage_20260907 AS p FROM jeu_etat WHERE id = 1'
     db.prepare("UPDATE jeu_etat SET patch_renommage_20260907 = 1 WHERE id = 1").run();
 }
 
+// 2026-09-10, demande explicite de l'utilisateur :
+//  1) Sophia D'ASPREMONT-LYNDEN (player id 87) passe en nationalite "Curaçao".
+//  2) Rivaux : pour chaque (circuit, pays) ayant au moins UN joueur reel valide
+//     sur ce circuit, garantir un total (reels + rivaux) d'au moins 4 joueurs,
+//     en re-nationalisant + renommant le nombre necessaire de rivaux "sans
+//     attache" (pays sans aucun joueur reel), du moins etabli au plus etabli
+//     (apparitions en tournoi, puis niveau). Snapshot a l'instant du deploiement :
+//     les pays des coachs qui s'inscriront plus tard ne sont pas re-completes.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_min4_rivaux_pays INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_min4_rivaux_pays AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const { genererJoueurLambda, normaliserPays } = require('./calendrier-tournois');
+    const MIN_PAR_PAYS = 4;
+
+    db.transaction(function () {
+        // --- 1) Sophia D'ASPREMONT-LYNDEN -> Curaçao (cible par id ET nom) ---
+        const sophia = db.prepare("SELECT id, type, prenom, nom, nationalite FROM players WHERE id = 87").get();
+        if (sophia && normaliserPays(sophia.prenom) === 'sophia' && normaliserPays(sophia.nom).indexOf('aspremont') !== -1) {
+            db.prepare("UPDATE players SET nationalite = 'Curaçao' WHERE id = 87").run();
+            console.log('[min4_rivaux_pays] player 87 (' + sophia.prenom + ' ' + sophia.nom + ') : ' + sophia.nationalite + ' -> Curaçao');
+        } else {
+            console.log('[min4_rivaux_pays] player 87 introuvable ou nom inattendu, nationalite non modifiee :', JSON.stringify(sophia));
+        }
+
+        // --- 2) Minimum de 4 joueurs par (circuit, pays concerne) ---
+        const nomsRoster = new Set(db.prepare('SELECT nom FROM classement_joueurs').all().map(function (r) { return r.nom; }));
+        const apparitions = new Map(
+            db.prepare('SELECT rival_id, COUNT(*) AS n FROM tournoi_joueurs WHERE rival_id IS NOT NULL GROUP BY rival_id').all()
+                .map(function (r) { return [r.rival_id, r.n]; })
+        );
+        const majRival = db.prepare('UPDATE classement_joueurs SET nom = ?, nationalite = ? WHERE id = ?');
+        const rapport = [];
+
+        const majNationalite = db.prepare('UPDATE classement_joueurs SET nationalite = ? WHERE id = ?');
+
+        [['ATP', 'joueur', false], ['WTA', 'joueuse', true]].forEach(function (spec) {
+            const circuit = spec[0], typeReel = spec[1], estFeminin = spec[2];
+
+            // Pays concernes = au moins 1 joueur reel valide sur CE circuit. On garde
+            // la graphie exacte du joueur reel (accents) comme forme a ecrire.
+            const canoniqueParCle = new Map();
+            const nbReelsParCle = new Map();
+            db.prepare("SELECT nationalite FROM players WHERE type = ? AND statut = 'valide'").all(typeReel).forEach(function (r) {
+                const cle = normaliserPays(r.nationalite);
+                if (!canoniqueParCle.has(cle)) canoniqueParCle.set(cle, r.nationalite);
+                nbReelsParCle.set(cle, (nbReelsParCle.get(cle) || 0) + 1);
+            });
+            if (canoniqueParCle.size === 0) return;
+
+            const rivaux = db.prepare('SELECT id, nom, nationalite, niveau FROM classement_joueurs WHERE circuit = ?').all(circuit);
+
+            // Harmonisation : les rivaux d'un pays concerne dont l'orthographe (sans
+            // accent, issue de genererJoueurLambda) differe de celle du joueur reel
+            // sont recales sur la graphie du joueur reel - sinon les recherches par
+            // egalite exacte (assurerRosterMinimalNation / joueursEligiblesNation,
+            // Coupe Davis) ne les voient pas comme compatriotes du joueur reel.
+            rivaux.forEach(function (rv) {
+                const cle = normaliserPays(rv.nationalite);
+                const graphie = canoniqueParCle.get(cle);
+                if (graphie && rv.nationalite !== graphie) {
+                    majNationalite.run(graphie, rv.id);
+                    rapport.push(circuit + ' : ' + rv.nom + ' ' + rv.nationalite + ' -> ' + graphie + ' (harmonisation)');
+                    rv.nationalite = graphie;
+                }
+            });
+
+            const nbRivauxParCle = new Map();
+            rivaux.forEach(function (rv) {
+                const cle = normaliserPays(rv.nationalite);
+                nbRivauxParCle.set(cle, (nbRivauxParCle.get(cle) || 0) + 1);
+            });
+
+            const manques = [];
+            canoniqueParCle.forEach(function (graphie, cle) {
+                const total = (nbReelsParCle.get(cle) || 0) + (nbRivauxParCle.get(cle) || 0);
+                if (total < MIN_PAR_PAYS) manques.push({ graphie: graphie, manque: MIN_PAR_PAYS - total });
+            });
+            if (manques.length === 0) return;
+
+            // Pool reassignable : rivaux d'un pays NON concerne (pour ne jamais faire
+            // passer un pays concerne sous son total). Du moins au plus etabli.
+            const pool = rivaux
+                .filter(function (rv) { return !canoniqueParCle.has(normaliserPays(rv.nationalite)); })
+                .sort(function (a, b) {
+                    return (apparitions.get(a.id) || 0) - (apparitions.get(b.id) || 0)
+                        || a.niveau - b.niveau || a.id - b.id;
+                });
+
+            let i = 0;
+            manques.forEach(function (m) {
+                for (let k = 0; k < m.manque && i < pool.length; k++, i++) {
+                    const cible = pool[i];
+                    let nouveauNom;
+                    do { nouveauNom = genererJoueurLambda(250, estFeminin).nom; } while (nomsRoster.has(nouveauNom));
+                    nomsRoster.add(nouveauNom);
+                    nomsRoster.delete(cible.nom);
+                    majRival.run(nouveauNom, m.graphie, cible.id);
+                    rapport.push(circuit + ' : ' + cible.nom + ' (' + cible.nationalite + ') -> ' + nouveauNom + ' (' + m.graphie + ')');
+                }
+            });
+            if (i < manques.reduce(function (s, m) { return s + m.manque; }, 0)) {
+                console.log('[min4_rivaux_pays] ATTENTION ' + circuit + ' : pool de rivaux epuise avant de combler tous les manques');
+            }
+        });
+
+        console.log('[min4_rivaux_pays] ' + rapport.length + ' rival(aux) reassigne(s)');
+        rapport.forEach(function (l) { console.log('  ' + l); });
+    })();
+
+    db.prepare("UPDATE jeu_etat SET patch_min4_rivaux_pays = 1 WHERE id = 1").run();
+}
+
 module.exports = db;
