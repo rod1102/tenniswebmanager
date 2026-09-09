@@ -270,6 +270,31 @@ function conditionSestDegradee(avant, apres) {
 // compte" habituel puisque ca s'applique aussi en dev/local).
 const LIMITE_COMPTES_PAR_IP = 1;
 
+// Exceptions ponctuelles : certaines IP ont droit a plus d'un compte (foyers
+// partages, etc.). Deux facons de declarer une exception :
+//   - IP_LIMITES_EXPLICITES : IP en clair -> limite (si on connait l'IP)
+//   - IP_LIMITE_PAR_COMPTE : "l'IP d'inscription du compte users.id = X" -> limite,
+//     resolue a la volee (pratique quand on ne connait que le compte, pas l'IP ;
+//     l'exception s'eteint d'elle-meme si le compte est supprime)
+// 2026-09-09, demande explicite de l'utilisateur : l'IP depuis laquelle "Mirat"
+// (users.id = 46) s'est inscrit a droit a 4 comptes.
+const IP_LIMITES_EXPLICITES = {
+    // '1.2.3.4': 4,
+};
+const IP_LIMITE_PAR_COMPTE = {
+    46: 4,
+};
+
+function limiteComptesPourIp(ip) {
+    if (!ip) return LIMITE_COMPTES_PAR_IP;
+    if (IP_LIMITES_EXPLICITES[ip]) return IP_LIMITES_EXPLICITES[ip];
+    for (const userIdStr of Object.keys(IP_LIMITE_PAR_COMPTE)) {
+        const ref = db.prepare('SELECT ip_inscription FROM users WHERE id = ?').get(Number(userIdStr));
+        if (ref && ref.ip_inscription && ref.ip_inscription === ip) return IP_LIMITE_PAR_COMPTE[userIdStr];
+    }
+    return LIMITE_COMPTES_PAR_IP;
+}
+
 // Determination de la vraie IP du visiteur derriere le proxy de Railway.
 //
 // Historique : "trust proxy: 1" + req.ip renvoyait un hop interne Railway,
@@ -345,7 +370,7 @@ app.post('/api/inscription', (req, res) => {
 
         const ip = ipReelle(req);
         const nbComptesIp = db.prepare('SELECT COUNT(*) AS n FROM users WHERE ip_inscription = ?').get(ip).n;
-        if (nbComptesIp >= LIMITE_COMPTES_PAR_IP) {
+        if (nbComptesIp >= limiteComptesPourIp(ip)) {
             return res.status(409).json({ error: 'Limite IP atteinte : un compte a deja ete cree depuis cette connexion (un seul compte par personne).' });
         }
 
