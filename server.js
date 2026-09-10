@@ -840,6 +840,57 @@ app.get('/api/admin/chercher-joueur', (req, res) => {
     }
 });
 
+// Diagnostic (admin) du niveau des bots d'un tournoi : moyenne du niveau de jeu
+// des joueurs reels du circuit SUR LA SURFACE, bande 50-70 % qui en decoule, et
+// niveau stocke de chaque bot (fige au tirage par recalerNiveauxBotsTournoi).
+app.get('/api/admin/tournoi-niveaux/:calendrierId/:semaine', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?')
+            .get(req.params.calendrierId, Number(req.params.semaine));
+        if (!tournoi) {
+            return res.status(404).json({ error: 'Tournoi introuvable pour ce calendrier_id / cette semaine.' });
+        }
+
+        const type = tournoi.circuit === 'ATP' ? 'joueur' : 'joueuse';
+        const reels = db.prepare("SELECT * FROM players WHERE type = ? AND statut = 'valide'").all(type)
+            .map(function (p) {
+                return { nom: p.prenom + ' ' + p.nom, nationalite: p.nationalite, niveauSurface: Math.round(niveauNormal(p, tournoi.surface)) };
+            })
+            .sort(function (a, b) { return b.niveauSurface - a.niveauSurface; });
+
+        const moyenne = moyenneNiveauJeuReels(tournoi.circuit, tournoi.surface);
+        const plancherApplique = reels.length < NIVEAU_BOT_MIN_REELS
+            || (reels.reduce(function (s, r) { return s + r.niveauSurface; }, 0) / Math.max(1, reels.length)) < NIVEAU_BOT_PLANCHER;
+
+        const rangs = calculerRangsLiveGlobal(tournoi.circuit);
+        const bots = db.prepare("SELECT nom, nationalite, niveau, rival_id FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 0 AND nom != 'BYE'").all(tournoi.id)
+            .map(function (b) { return { nom: b.nom, nationalite: b.nationalite, niveau: b.niveau, rangLive: b.rival_id ? (rangs.get('rival:' + b.rival_id) || null) : null }; })
+            .sort(function (a, b) { return b.niveau - a.niveau; });
+
+        res.json({
+            success: true,
+            tournoi: { id: tournoi.id, nom: tournoi.nom, circuit: tournoi.circuit, surface: tournoi.surface, taille_tableau: tournoi.taille_tableau, semaine: tournoi.semaine, statut: tournoi.statut, tour_actuel: tournoi.tour_actuel },
+            moyenneNiveauReelsSurface: Math.round(moyenne * 10) / 10,
+            plancherApplique,
+            bandeBots: { pourcentage: '50-70 %', bas: Math.round(moyenne * 0.50), haut: Math.round(moyenne * 0.70) },
+            nbReels: reels.length,
+            reels,
+            bots,
+            botsStats: bots.length ? {
+                min: Math.min.apply(null, bots.map(function (b) { return b.niveau; })),
+                max: Math.max.apply(null, bots.map(function (b) { return b.niveau; })),
+                moyenne: Math.round(bots.reduce(function (s, b) { return s + b.niveau; }, 0) / bots.length)
+            } : null
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/admin/en-attente', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
