@@ -47,6 +47,9 @@
                 Grands Chelems, le pari se joue en cascade : choisis d'abord tes 16 joueurs en huitièmes, puis
                 enchaîne jusqu'au vainqueur.
             </p>
+            <div style="text-align:center; margin-bottom:16px;">
+                <button class="cta cta-secondary" id="bareme-btn" style="padding:9px 18px; font-size:0.82rem;">Barème des points</button>
+            </div>
 
             <div class="tabs-nav" id="tabs-nav"></div>
             <div id="tab-panels"></div>
@@ -116,7 +119,6 @@
             }).join('');
 
             panneau.innerHTML = `
-                <div class="match-hint">Pronostic simple : le vainqueur du tournoi, ${data.tournoi.categorie === 'finals' ? 5 : 3} points si tu trouves juste.</div>
                 <div class="style-tour-grid">
                     <div class="style-tour-card">
                         <label>Vainqueur</label>
@@ -177,9 +179,7 @@
             }
 
             function rendre() {
-                let html = '<div class="match-hint">Barème par tour — <strong>8es</strong> : 1 pt par joueur qui atteint vraiment ce tour, +1 si toute l\'affiche est juste, +6 si les 16 sont bons (max 30). <strong>Quarts</strong> : 4 / +2 / +10 (max 50). <strong>Demies</strong> : 10 / +5 / +20 (max 70). <strong>Finale</strong> : 20 par finaliste juste, +25 pour l\'affiche, +35 si tu as le vainqueur (max 100). Jusqu\'à 250 pts — <strong>doublés en Grand Chelem</strong> (500).</div>';
-
-                html += '<div class="stats-header">Huitièmes de finale</div><div class="style-tour-grid">';
+                let html = '<div class="stats-header">Huitièmes de finale</div><div class="style-tour-grid">';
                 for (let i = 0; i < 16; i++) {
                     html += carteSelect('Tranche ' + (i + 1), 'huitiemes', i, etat.huitiemes[i], data.tranchesHuitiemes[i]);
                 }
@@ -331,6 +331,57 @@
             localStorage.removeItem('currentUserId');
             window.location.href = 'index.html';
         });
+
+        function ouvrirBareme() {
+            const overlay = document.createElement('div');
+            overlay.className = 'dispo-blocage-overlay';
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box">
+                    <div class="stats-header" style="margin-top:0;">Barème des points</div>
+
+                    <div class="stats-header" style="font-size:0.9rem;">Pronostic simple <span class="match-hint">(ATP/WTA 250, 500, Masters de fin de saison)</span></div>
+                    <p class="match-hint" style="margin-bottom:8px;">On parie uniquement sur le vainqueur du tournoi. Points si tu trouves juste :</p>
+                    <div class="stat-row"><span class="stat-label">Tournoi 250 ou 500</span><span class="stat-value">3 pts</span></div>
+                    <div class="stat-row"><span class="stat-label">Masters de fin de saison</span><span class="stat-value">5 pts</span></div>
+
+                    <div class="stats-header" style="font-size:0.9rem; margin-top:18px;">Pronostic en cascade <span class="match-hint">(Masters 1000 et Grands Chelems)</span></div>
+                    <p class="match-hint" style="margin-bottom:8px;">
+                        On pronostique tour par tour, des huitièmes jusqu'au vainqueur. Pour chaque tour :
+                        des points par joueur qui atteint vraiment ce tour, un bonus si toute l'affiche d'un match est juste,
+                        et un bonus si TOUS les joueurs du tour sont bons.
+                    </p>
+                    <div style="overflow-x:auto;">
+                        <table class="classement-table" style="width:100%; margin-top:6px;">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;">Tour</th>
+                                    <th style="text-align:center;">Par joueur juste</th>
+                                    <th style="text-align:center;">Affiche complète</th>
+                                    <th style="text-align:center;">Tour parfait</th>
+                                    <th style="text-align:center;">Max du tour</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td style="text-align:left; font-weight:600;">8<sup>es</sup></td><td style="text-align:center;">1</td><td style="text-align:center;">+1</td><td style="text-align:center;">+6</td><td style="text-align:center;">30</td></tr>
+                                <tr><td style="text-align:left; font-weight:600;">Quarts</td><td style="text-align:center;">4</td><td style="text-align:center;">+2</td><td style="text-align:center;">+10</td><td style="text-align:center;">50</td></tr>
+                                <tr><td style="text-align:left; font-weight:600;">Demies</td><td style="text-align:center;">10</td><td style="text-align:center;">+5</td><td style="text-align:center;">+20</td><td style="text-align:center;">70</td></tr>
+                                <tr><td style="text-align:left; font-weight:600;">Finale</td><td style="text-align:center;">20</td><td style="text-align:center;">+25</td><td style="text-align:center;">—</td><td style="text-align:center;">100</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="match-hint" style="margin:10px 0 0;">
+                        En finale, <strong>+35 pts</strong> supplémentaires si tu as trouvé le vainqueur du tournoi.
+                        Total récupérable : <strong>250 pts</strong> par Masters 1000, <strong>doublé (500 pts) en Grand Chelem</strong>.
+                    </p>
+
+                    <button class="cta cta-secondary" id="bareme-fermer" style="margin-top:18px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+            document.getElementById('bareme-fermer').addEventListener('click', function () { overlay.remove(); });
+        }
+        document.getElementById('bareme-btn').addEventListener('click', ouvrirBareme);
 
         document.getElementById('nav-toggle').addEventListener('click', function (e) {
             e.stopPropagation();
