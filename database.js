@@ -787,7 +787,10 @@ const migrations = [
     // Marqueur du recalcul retroactif des pronostics apres le bump du bareme SIMPLE
     // (2026-09-10 : 250 -> 12, 500 -> 25, Masters de fin de saison -> 40 ; etait
     // 3/3/5). Relance recalculerTousLesPronostics au demarrage (server.js).
-    "ALTER TABLE jeu_etat ADD COLUMN patch_bareme_simple_20260910 INTEGER DEFAULT 0"
+    "ALTER TABLE jeu_etat ADD COLUMN patch_bareme_simple_20260910 INTEGER DEFAULT 0",
+    // 2e ajustement du bareme simple le meme jour : 250 -> 25, 500 -> 50, Masters
+    // de fin de saison -> 80. Nouveau recalcul retroactif.
+    "ALTER TABLE jeu_etat ADD COLUMN patch_bareme_simple_v2_20260910 INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {
