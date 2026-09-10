@@ -5121,6 +5121,16 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
         const favoris = db.prepare('SELECT calendrier_id, semaine FROM tournoi_favoris WHERE player_id = ? AND semaine BETWEEN ? AND ?').all(playerId, debut, finAnnee);
         const favoriSet = new Set(favoris.map(function (f) { return f.calendrier_id + '-' + f.semaine; }));
 
+        // Inscription "validee" = le joueur occupe vraiment un slot du tableau
+        // (tournoi_joueurs.est_reel = 1), pas juste une ligne en liste d'attente.
+        const slotsConfirmes = new Set(
+            db.prepare(`
+                SELECT t.calendrier_id, t.semaine FROM tournoi_joueurs tj
+                JOIN tournois t ON t.id = tj.tournoi_id
+                WHERE tj.est_reel = 1 AND tj.player_id = ? AND t.semaine BETWEEN ? AND ?
+            `).all(playerId, debut, finAnnee).map(function (r) { return r.calendrier_id + '-' + r.semaine; })
+        );
+
         // estTop30 : le joueur est-il dans le Top 30 fixe de la saison en cours -
         // detrmine si "estObligatoire" doit vraiment declencher l'avertissement pour
         // CE coach (un tournoi obligatoire ne concerne que les joueurs Top 30, cf.
@@ -5142,6 +5152,7 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
             // de la fenetre de 5 semaines : coherent avec le vrai delai avant tirage au sort.
             t.inscriptionFermee = !!tournoi && tournoi.statut !== 'inscriptions';
             t.favori = favoriSet.has(t.id + '-' + t.semaine);
+            t.inscritConfirme = slotsConfirmes.has(t.id + '-' + t.semaine);
             t.estObligatoire = !t.estCoupe && estTop30 && estTournoiObligatoireTop30(circuit, t.id, t.categorie);
             t.nbInscrits = t.estCoupe ? null : (nbInscritsMap.get(t.id + '-' + t.semaine) || 0);
         });

@@ -426,8 +426,12 @@
                         ? ` <span title="Tournoi obligatoire pour ton classement Top 30 : si tu n'y participes pas, il comptera quand même dans ton classement Live/Race avec 0 point.">⚠️</span>`
                         : '';
 
+                    const indicateurInscrit = t.inscritConfirme
+                        ? ` <span title="${formaterNom(player.prenom, player.nom)} est inscrit(e) à ce tournoi — inscription validée.">🎾</span>`
+                        : '';
+
                     carte.innerHTML = `
-                        <a class="tournoi-card-name ${nomClasse}" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>${avertissementObligatoire}
+                        <a class="tournoi-card-name ${nomClasse}" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>${indicateurInscrit}${avertissementObligatoire}
                         <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · ${t.nbInscrits}/${t.taille_tableau} inscrits · ${nombreTours(t)} tours</div>
                         ${actionHtml}
                     `;
