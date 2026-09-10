@@ -779,7 +779,11 @@ const migrations = [
     // (2026-09-07 : 8es/quarts/demies/finale avec bonus d'affiche + tour parfait,
     // total 250 pts/M1000, double en GC). Voir recalculerTousLesPronostics dans
     // server.js, declenche une seule fois au demarrage.
-    "ALTER TABLE jeu_etat ADD COLUMN patch_bareme_pronos_20260907 INTEGER DEFAULT 0"
+    "ALTER TABLE jeu_etat ADD COLUMN patch_bareme_pronos_20260907 INTEGER DEFAULT 0",
+    // Marqueur du recalibrage des bots des tournois deja tires (mais pas commences)
+    // sur le critere "moyenne des inscrits reels du tournoi" au lieu de la moyenne
+    // du circuit (2026-09-10). Voir le bloc garde dans server.js (au demarrage).
+    "ALTER TABLE jeu_etat ADD COLUMN patch_bots_reels_inscrits_20260910 INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {

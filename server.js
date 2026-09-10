@@ -841,8 +841,9 @@ app.get('/api/admin/chercher-joueur', (req, res) => {
 });
 
 // Diagnostic (admin) du niveau des bots d'un tournoi : moyenne du niveau de jeu
-// des joueurs reels du circuit SUR LA SURFACE, bande 50-70 % qui en decoule, et
-// niveau stocke de chaque bot (fige au tirage par recalerNiveauxBotsTournoi).
+// des joueurs reels REELLEMENT INSCRITS (celle qui calibre les bots), moyenne du
+// circuit (repli), bande 50-70 % qui en decoule, et niveau stocke de chaque bot
+// (fige au tirage par recalerNiveauxBotsTournoi).
 app.get('/api/admin/tournoi-niveaux/:calendrierId/:semaine', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
@@ -854,16 +855,22 @@ app.get('/api/admin/tournoi-niveaux/:calendrierId/:semaine', (req, res) => {
             return res.status(404).json({ error: 'Tournoi introuvable pour ce calendrier_id / cette semaine.' });
         }
 
-        const type = tournoi.circuit === 'ATP' ? 'joueur' : 'joueuse';
-        const reels = db.prepare("SELECT * FROM players WHERE type = ? AND statut = 'valide'").all(type)
-            .map(function (p) {
-                return { nom: p.prenom + ' ' + p.nom, nationalite: p.nationalite, niveauSurface: Math.round(niveauNormal(p, tournoi.surface)) };
-            })
-            .sort(function (a, b) { return b.niveauSurface - a.niveauSurface; });
+        const surface = tournoi.surface;
+        const infoReel = function (p) {
+            return { nom: p.prenom + ' ' + p.nom, nationalite: p.nationalite, niveauSurface: Math.round(niveauNormal(p, surface)) };
+        };
 
-        const moyenne = moyenneNiveauJeuReels(tournoi.circuit, tournoi.surface);
-        const plancherApplique = reels.length < NIVEAU_BOT_MIN_REELS
-            || (reels.reduce(function (s, r) { return s + r.niveauSurface; }, 0) / Math.max(1, reels.length)) < NIVEAU_BOT_PLANCHER;
+        const type = tournoi.circuit === 'ATP' ? 'joueur' : 'joueuse';
+        const reelsCircuit = db.prepare("SELECT * FROM players WHERE type = ? AND statut = 'valide'").all(type)
+            .map(infoReel).sort(function (a, b) { return b.niveauSurface - a.niveauSurface; });
+        const reelsInscrits = db.prepare(`
+            SELECT p.* FROM tournoi_joueurs tj JOIN players p ON p.id = tj.player_id
+            WHERE tj.tournoi_id = ? AND tj.est_reel = 1
+        `).all(tournoi.id).map(infoReel).sort(function (a, b) { return b.niveauSurface - a.niveauSurface; });
+
+        const moyenneCircuit = moyenneNiveauJeuReels(tournoi.circuit, surface);
+        const moyenne = moyenneNiveauReelsTournoi(tournoi.id, tournoi.circuit, surface); // celle qui calibre
+        const sourceReference = reelsInscrits.length > 0 ? 'inscrits du tournoi' : 'moyenne du circuit (aucun inscrit reel)';
 
         const rangs = calculerRangsLiveGlobal(tournoi.circuit);
         const bots = db.prepare("SELECT nom, nationalite, niveau, rival_id FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 0 AND nom != 'BYE'").all(tournoi.id)
@@ -872,12 +879,16 @@ app.get('/api/admin/tournoi-niveaux/:calendrierId/:semaine', (req, res) => {
 
         res.json({
             success: true,
-            tournoi: { id: tournoi.id, nom: tournoi.nom, circuit: tournoi.circuit, surface: tournoi.surface, taille_tableau: tournoi.taille_tableau, semaine: tournoi.semaine, statut: tournoi.statut, tour_actuel: tournoi.tour_actuel },
-            moyenneNiveauReelsSurface: Math.round(moyenne * 10) / 10,
-            plancherApplique,
+            tournoi: { id: tournoi.id, nom: tournoi.nom, circuit: tournoi.circuit, surface: surface, taille_tableau: tournoi.taille_tableau, semaine: tournoi.semaine, statut: tournoi.statut, tour_actuel: tournoi.tour_actuel },
+            sourceReference,
+            moyenneReference: Math.round(moyenne * 10) / 10,
+            moyenneNiveauReelsInscrits: reelsInscrits.length ? Math.round((reelsInscrits.reduce(function (s, r) { return s + r.niveauSurface; }, 0) / reelsInscrits.length) * 10) / 10 : null,
+            moyenneNiveauReelsCircuit: Math.round(moyenneCircuit * 10) / 10,
             bandeBots: { pourcentage: '50-70 %', bas: Math.round(moyenne * 0.50), haut: Math.round(moyenne * 0.70) },
-            nbReels: reels.length,
-            reels,
+            nbReelsInscrits: reelsInscrits.length,
+            reelsInscrits,
+            nbReelsCircuit: reelsCircuit.length,
+            reelsCircuit,
             bots,
             botsStats: bots.length ? {
                 min: Math.min.apply(null, bots.map(function (b) { return b.niveau; })),
@@ -3519,26 +3530,52 @@ function melanger(liste) {
 }
 
 // --- Niveau des bots cale sur celui des joueurs reels (demande explicite de
-// l'utilisateur, 2026-08-31 ; ajuste le 2026-09-09) ---
+// l'utilisateur, 2026-08-31 ; ajuste le 2026-09-09 et le 2026-09-10) ---
 // Le niveau de jeu d'un bot (rival persistant OU lambda jetable) n'est plus une
 // valeur fixe : a chaque tirage de tournoi (et a chaque rencontre de Coupe Davis/
-// BJK Cup), il est tire dans une bande de 50 a 70 % de la MOYENNE du niveau de
-// jeu des joueurs reels valides du circuit SUR LA SURFACE concernee - avec un
-// plancher a 270 tant qu'il y a moins de 4 reels ou que leur moyenne est basse.
-// Reference "niveau de jeu" = niveauNormal(joueur, surface) pour la surface du
-// tournoi/de la rencontre (forme/energie/automatismes du moment inclus), et non
-// plus la moyenne des 3 surfaces. Les niveaux d'un meme tournoi sont rendus
-// distincts tant que la largeur de bande le permet.
+// BJK Cup), il est tire dans une bande de 50 a 70 % d'une MOYENNE de reference du
+// niveau de jeu des joueurs reels SUR LA SURFACE concernee - avec un plancher a 270.
+//   - Tournoi : moyenne des joueurs reels REELLEMENT INSCRITS dans son tableau
+//     (moyenneNiveauReelsTournoi), avec repli sur la moyenne du circuit si aucun
+//     inscrit reel (2026-09-10 : avant c'etait toujours la moyenne circuit).
+//   - Coupe Davis / repli : moyenne des joueurs reels valides du circuit
+//     (moyenneNiveauJeuReels), plancher 270 si < 4 reels ou moyenne basse.
+// Reference "niveau de jeu" = niveauNormal(joueur, surface) (forme/energie/
+// automatismes du moment inclus), pas la moyenne des 3 surfaces. Les niveaux d'un
+// meme tournoi sont rendus distincts tant que la largeur de bande le permet.
 const NIVEAU_BOT_PLANCHER = 270;
 const NIVEAU_BOT_MIN_REELS = 4;
 const NIVEAU_BOT_BANDE_BAS = 0.50;
 const NIVEAU_BOT_BANDE_HAUT = 0.70;
 
+function moyenneNiveau(reels, surface) {
+    if (reels.length === 0) return null;
+    return reels.reduce(function (s, p) { return s + niveauNormal(p, surface); }, 0) / reels.length;
+}
+
+// Moyenne du niveau de jeu (sur `surface`) des joueurs reels VALIDES du circuit -
+// repli quand on n'a pas de champ precis (Coupe Davis, ou tournoi sans aucun
+// inscrit reel). Plancher NIVEAU_BOT_PLANCHER si trop peu de reels / moyenne basse.
 function moyenneNiveauJeuReels(circuit, surface) {
     const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
     const reels = db.prepare("SELECT * FROM players WHERE type = ? AND statut = 'valide'").all(type);
     if (reels.length < NIVEAU_BOT_MIN_REELS) return NIVEAU_BOT_PLANCHER;
-    const moy = reels.reduce(function (s, p) { return s + niveauNormal(p, surface); }, 0) / reels.length;
+    return Math.max(NIVEAU_BOT_PLANCHER, moyenneNiveau(reels, surface));
+}
+
+// Moyenne de reference pour les bots d'UN tournoi precis : les joueurs reels
+// REELLEMENT engages dans son tableau (est_reel = 1), sur la surface du tournoi.
+// Repli sur la moyenne circuit si le tableau ne compte aucun inscrit reel.
+// Demande explicite de l'utilisateur, 2026-09-10 (avant : toujours la moyenne
+// circuit, ce qui gonflait les bots d'un tournoi snobe par les tops).
+function moyenneNiveauReelsTournoi(tournoiId, circuit, surface) {
+    const reels = db.prepare(`
+        SELECT p.* FROM tournoi_joueurs tj
+        JOIN players p ON p.id = tj.player_id
+        WHERE tj.tournoi_id = ? AND tj.est_reel = 1
+    `).all(tournoiId);
+    const moy = moyenneNiveau(reels, surface);
+    if (moy === null) return moyenneNiveauJeuReels(circuit, surface);
     return Math.max(NIVEAU_BOT_PLANCHER, moy);
 }
 
@@ -3553,7 +3590,7 @@ function recalerNiveauxBotsTournoi(tournoiId, circuit) {
     const bots = db.prepare("SELECT id FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 0 AND nom != 'BYE'").all(tournoiId);
     if (bots.length === 0) return;
     const surface = db.prepare('SELECT surface FROM tournois WHERE id = ?').get(tournoiId).surface;
-    const M = moyenneNiveauJeuReels(circuit, surface);
+    const M = moyenneNiveauReelsTournoi(tournoiId, circuit, surface);
     const bas = Math.round(M * NIVEAU_BOT_BANDE_BAS);
     const haut = Math.round(M * NIVEAU_BOT_BANDE_HAUT);
     const largeur = Math.max(1, haut - bas);
@@ -10088,6 +10125,21 @@ try {
     }
 } catch (err) {
     console.error('[bareme_pronos_20260907] echec du recalcul :', err.message);
+}
+
+// Recalibrage unique des bots des tournois deja tires mais PAS commences, sur le
+// nouveau critere "moyenne des inscrits reels du tournoi" (2026-09-10). Les
+// tournois en cours (tour_actuel > 0) et ceux pas encore tires (statut
+// 'inscriptions', recalibres a leur tirage) sont laisses tels quels.
+try {
+    if (db.prepare('SELECT patch_bots_reels_inscrits_20260910 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+        const aRecaler = db.prepare("SELECT id, circuit FROM tournois WHERE statut = 'a_venir' AND tour_actuel = 0").all();
+        aRecaler.forEach(function (t) { recalerNiveauxBotsTournoi(t.id, t.circuit); });
+        db.prepare('UPDATE jeu_etat SET patch_bots_reels_inscrits_20260910 = 1 WHERE id = 1').run();
+        console.log('[bots_reels_inscrits] ' + aRecaler.length + ' tournoi(s) a_venir recalibre(s)');
+    }
+} catch (err) {
+    console.error('[bots_reels_inscrits] echec :', err.message);
 }
 
 verifierAvancementAuto();
