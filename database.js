@@ -783,7 +783,11 @@ const migrations = [
     // Marqueur du recalibrage des bots des tournois deja tires (mais pas commences)
     // sur le critere "moyenne des inscrits reels du tournoi" au lieu de la moyenne
     // du circuit (2026-09-10). Voir le bloc garde dans server.js (au demarrage).
-    "ALTER TABLE jeu_etat ADD COLUMN patch_bots_reels_inscrits_20260910 INTEGER DEFAULT 0"
+    "ALTER TABLE jeu_etat ADD COLUMN patch_bots_reels_inscrits_20260910 INTEGER DEFAULT 0",
+    // Marqueur du recalcul retroactif des pronostics apres le bump du bareme SIMPLE
+    // (2026-09-10 : 250 -> 12, 500 -> 25, Masters de fin de saison -> 40 ; etait
+    // 3/3/5). Relance recalculerTousLesPronostics au demarrage (server.js).
+    "ALTER TABLE jeu_etat ADD COLUMN patch_bareme_simple_20260910 INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {

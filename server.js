@@ -3343,10 +3343,13 @@ function typePronostic(tournoi) {
     return (tournoi.categorie === '1000' || tournoi.categorie === 'slam') ? 'cascade' : 'simple';
 }
 
-// Points pour un pari "vainqueur seul" correct : 5 pour les Masters de fin de
-// saison (rarete/prestige, seuls 8 entrants), 3 pour un tournoi simple normal.
+// Points pour un pari "vainqueur seul" correct (2026-09-10, demande explicite de
+// l'utilisateur) : 250 -> 12, 500 -> 25, Masters de fin de saison -> 40
+// (rarete/prestige, seuls 8 entrants). Etait 3 / 3 / 5.
 function pointsVainqueurSimple(tournoi) {
-    return tournoi.categorie === 'finals' ? 5 : 3;
+    if (tournoi.categorie === 'finals') return 40;
+    if (tournoi.categorie === '500') return 25;
+    return 12;
 }
 
 // Seuls les vrais joueurs sont proposables au pronostic (rivaux/lambdas exclus,
@@ -10125,6 +10128,17 @@ try {
     }
 } catch (err) {
     console.error('[bareme_pronos_20260907] echec du recalcul :', err.message);
+}
+
+// Re-recalage apres le bump du bareme SIMPLE (2026-09-10 : 250->12, 500->25,
+// Masters de fin de saison->40). Garde par jeu_etat.patch_bareme_simple_20260910.
+try {
+    if (db.prepare('SELECT patch_bareme_simple_20260910 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+        recalculerTousLesPronostics();
+        db.prepare('UPDATE jeu_etat SET patch_bareme_simple_20260910 = 1 WHERE id = 1').run();
+    }
+} catch (err) {
+    console.error('[bareme_simple_20260910] echec du recalcul :', err.message);
 }
 
 // Recalibrage unique des bots des tournois deja tires mais PAS commences, sur le
