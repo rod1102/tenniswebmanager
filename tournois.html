@@ -400,13 +400,17 @@
 
                     const peutEncoreInscrire = t.ouvert && !t.inscriptionFermee;
 
+                    const indicateurInscrit = t.inscritConfirme
+                        ? ` <span title="${formaterNom(player.prenom, player.nom)} est inscrit(e) à ce tournoi — inscription validée.">🎾</span>`
+                        : '';
+
                     let actionHtml;
                     if (t.categorie === 'finals') {
                         actionHtml = `<div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Qualification automatique — Top 8 Race</div>`;
                     } else if (t.inscriptionFermee) {
                         // Le tableau est tire : plus de desinscription possible, meme pour
                         // un joueur deja inscrit (priorite sur t.inscrit ci-dessous).
-                        actionHtml = `<div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Tableau déjà tiré</div>`;
+                        actionHtml = `<div class="match-hint" style="padding:8px 0; font-size:0.7rem;">Tableau déjà tiré${indicateurInscrit}</div>`;
                     } else if (t.inscrit) {
                         actionHtml = `<button class="cta cta-secondary tournoi-desinscription-btn" style="padding:8px 14px; font-size:0.75rem;">Se désinscrire</button>`;
                     } else if (peutEncoreInscrire && player.points_energie < 1) {
@@ -426,12 +430,8 @@
                         ? ` <span title="Tournoi obligatoire pour ton classement Top 30 : si tu n'y participes pas, il comptera quand même dans ton classement Live/Race avec 0 point.">⚠️</span>`
                         : '';
 
-                    const indicateurInscrit = t.inscritConfirme
-                        ? ` <span title="${formaterNom(player.prenom, player.nom)} est inscrit(e) à ce tournoi — inscription validée.">🎾</span>`
-                        : '';
-
                     carte.innerHTML = `
-                        <a class="tournoi-card-name ${nomClasse}" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>${indicateurInscrit}${avertissementObligatoire}
+                        <a class="tournoi-card-name ${nomClasse}" href="${lienFiche(t.id, t.semaine, player.id)}">${t.nom}</a>${avertissementObligatoire}
                         <div class="tournoi-card-meta">${labelCategorie(t.circuit, t.categorie)} · ${labelSurface(t)} · ${t.nbInscrits}/${t.taille_tableau} inscrits · ${nombreTours(t)} tours</div>
                         ${actionHtml}
                     `;
