@@ -790,7 +790,11 @@ const migrations = [
     "ALTER TABLE jeu_etat ADD COLUMN patch_bareme_simple_20260910 INTEGER DEFAULT 0",
     // 2e ajustement du bareme simple le meme jour : 250 -> 25, 500 -> 50, Masters
     // de fin de saison -> 80. Nouveau recalcul retroactif.
-    "ALTER TABLE jeu_etat ADD COLUMN patch_bareme_simple_v2_20260910 INTEGER DEFAULT 0"
+    "ALTER TABLE jeu_etat ADD COLUMN patch_bareme_simple_v2_20260910 INTEGER DEFAULT 0",
+    // Signature du bareme des pronostics : des qu'elle change, l'historique est
+    // re-note au demarrage (server.js). Remplace les 3 flags patch_bareme_* ci-
+    // dessus - plus besoin d'une migration par ajustement de valeur.
+    "ALTER TABLE jeu_etat ADD COLUMN bareme_pronos_signature TEXT"
 ];
 
 migrations.forEach(function (sql) {

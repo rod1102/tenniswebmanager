@@ -3344,10 +3344,11 @@ function typePronostic(tournoi) {
 }
 
 // Points pour un pari "vainqueur seul" correct (2026-09-10, demande explicite de
-// l'utilisateur) : 250 -> 25, 500 -> 50, Masters de fin de saison -> 80
-// (rarete/prestige, seuls 8 entrants). Historique : 3/3/5 -> 12/25/40 -> 25/50/80.
+// l'utilisateur) : 250 -> 25, 500 -> 50, Masters de fin de saison -> 100
+// (rarete/prestige, seuls 8 entrants). Historique : 3/3/5 -> 12/25/40 -> 25/50/80
+// -> 25/50/100.
 function pointsVainqueurSimple(tournoi) {
-    if (tournoi.categorie === 'finals') return 80;
+    if (tournoi.categorie === 'finals') return 100;
     if (tournoi.categorie === '500') return 50;
     return 25;
 }
@@ -3518,7 +3519,7 @@ function recalculerTousLesPronostics() {
             });
         });
     })();
-    console.log('[bareme_pronos_20260907] ' + nbPronos + ' pronostic(s) re-notes sur ' + tournois.length + ' tournoi(s)');
+    console.log('[bareme_pronos] ' + nbPronos + ' pronostic(s) re-notes sur ' + tournois.length + ' tournoi(s)');
 }
 
 function melanger(liste) {
@@ -10119,28 +10120,30 @@ app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
 });
 
-// Recalage unique de l'historique des pronostics sur le nouveau bareme cascade
-// (2026-09-07). Garde par jeu_etat.patch_bareme_pronos_20260907.
+// Recalcul de l'historique des pronostics des qu'une valeur du bareme change.
+// Signature auto (BAREME_CASCADE + bonus vainqueur + valeurs du pari simple)
+// stockee dans jeu_etat.bareme_pronos_signature : si elle differe, on re-note
+// tout l'historique une fois, puis on memorise la nouvelle signature. Remplace
+// les anciens flags patch_bareme_pronos_20260907 / patch_bareme_simple_*
+// (laisses en place, sans effet) - plus besoin d'une migration par ajustement.
 try {
-    if (db.prepare('SELECT patch_bareme_pronos_20260907 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const sigActuelle = JSON.stringify({
+        cascade: BAREME_CASCADE.map(function (e) { return [e.cle, e.parJoueur, e.parAffiche, e.bonusTour]; }),
+        bonusVainqueur: BONUS_VAINQUEUR_CASCADE,
+        simple: {
+            '250': pointsVainqueurSimple({ categorie: '250' }),
+            '500': pointsVainqueurSimple({ categorie: '500' }),
+            finals: pointsVainqueurSimple({ categorie: 'finals' })
+        }
+    });
+    const stockee = db.prepare('SELECT bareme_pronos_signature AS s FROM jeu_etat WHERE id = 1').get().s || '';
+    if (stockee !== sigActuelle) {
         recalculerTousLesPronostics();
-        db.prepare('UPDATE jeu_etat SET patch_bareme_pronos_20260907 = 1 WHERE id = 1').run();
+        db.prepare('UPDATE jeu_etat SET bareme_pronos_signature = ? WHERE id = 1').run(sigActuelle);
+        console.log('[bareme_pronos] bareme modifie -> historique re-note');
     }
 } catch (err) {
-    console.error('[bareme_pronos_20260907] echec du recalcul :', err.message);
-}
-
-// Re-recalage apres les bumps du bareme SIMPLE (2026-09-10). Garde par
-// jeu_etat.patch_bareme_simple_v2_20260910 (valeurs finales 250->25, 500->50,
-// Masters de fin de saison->80). Le flag v1 est laisse tel quel, ce bloc le
-// remplace.
-try {
-    if (db.prepare('SELECT patch_bareme_simple_v2_20260910 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
-        recalculerTousLesPronostics();
-        db.prepare('UPDATE jeu_etat SET patch_bareme_simple_20260910 = 1, patch_bareme_simple_v2_20260910 = 1 WHERE id = 1').run();
-    }
-} catch (err) {
-    console.error('[bareme_simple_v2_20260910] echec du recalcul :', err.message);
+    console.error('[bareme_pronos] echec du recalcul :', err.message);
 }
 
 // Recalibrage unique des bots des tournois deja tires mais PAS commences, sur le
