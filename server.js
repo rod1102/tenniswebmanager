@@ -1851,6 +1851,13 @@ function executerAvancementSemaine() {
             : [];
 
         const rivauxUtilisesSemaine = new Set();
+        const repartitionSemaine = repartirRivauxSemaine(
+            entreesSemaine.filter(function (e) {
+                return !db.prepare('SELECT 1 FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(e.id, semaine)
+                    && !tournoiDejaCreeCetteSaison(e.id, semaine);
+            }),
+            semaine, rivauxUtilisesSemaine
+        );
 
         entreesSemaine.forEach(function (entree) {
             let tournoiRow = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaine);
@@ -1860,7 +1867,7 @@ function executerAvancementSemaine() {
                 // Filet de securite : normalement le pool est cree a S-5 (inscriptions
                 // ouvertes) et tire au sort a S-1. Si ce n'est jamais arrive (partie
                 // commencee en cours de cycle, etc.), on rattrape les deux etapes ici.
-                const nouveauId = creerTournoi(entree, semaine, rivauxUtilisesSemaine);
+                const nouveauId = creerTournoi(entree, semaine, rivauxUtilisesSemaine, repartitionSemaine.get(entree.id));
                 tirerAuSort(nouveauId, entree);
             } else if (tournoiRow.statut === 'inscriptions') {
                 tirerAuSort(tournoiRow.id, entree);
@@ -2256,39 +2263,48 @@ function executerAvancementSemaine() {
         // d'une semaine dans calendrier-tournois.js pour degager le delai necessaire).
         const rivauxUtilisesOuverture = new Set();
         if (phaseOuvertureEntrants.type === 'tournoi') {
-            CALENDRIER_TOURNOIS
+            const entreesOuverture = CALENDRIER_TOURNOIS
                 .filter(function (t) { return t.semaine_debut === phaseOuvertureEntrants.positionSemaine && t.categorie !== 'finals'; })
                 .sort(function (a, b) { return b.taille_tableau - a.taille_tableau; })
-                .forEach(function (entree) {
-                    const existe = db.prepare('SELECT id FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaineOuvertureEntrants);
-                    if (!existe && !tournoiDejaCreeCetteSaison(entree.id, semaineOuvertureEntrants)) {
-                        creerTournoi(entree, semaineOuvertureEntrants, rivauxUtilisesOuverture);
-                    }
+                .filter(function (entree) {
+                    return !db.prepare('SELECT id FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaineOuvertureEntrants)
+                        && !tournoiDejaCreeCetteSaison(entree.id, semaineOuvertureEntrants);
                 });
+            const repartitionOuverture = repartirRivauxSemaine(entreesOuverture, semaineOuvertureEntrants, rivauxUtilisesOuverture);
+            entreesOuverture.forEach(function (entree) {
+                creerTournoi(entree, semaineOuvertureEntrants, rivauxUtilisesOuverture, repartitionOuverture.get(entree.id));
+            });
         }
 
         // Tirage au sort (S-1) : le pool est fige, seede et place dans le tableau.
         const rivauxUtilisesTirage = new Set();
         if (phaseTirage.type === 'tournoi') {
-            CALENDRIER_TOURNOIS
+            const entreesTirage = CALENDRIER_TOURNOIS
                 .filter(function (t) { return t.semaine_debut === phaseTirage.positionSemaine; })
-                .sort(function (a, b) { return b.taille_tableau - a.taille_tableau; })
-                .forEach(function (entree) {
-                    let tournoiRow = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaineTirage);
-                    if (!tournoiRow) {
-                        if (tournoiDejaCreeCetteSaison(entree.id, semaineTirage)) return; // deja joue cette saison a une autre position (decalage de calendrier)
-                        const nouveauId = creerTournoi(entree, semaineTirage, rivauxUtilisesTirage);
-                        tournoiRow = { id: nouveauId, statut: 'inscriptions' };
-                    }
-                    if (tournoiRow.statut === 'inscriptions') {
-                        // Plus d'inscription forcee des joueurs du Top 30 fixe aux tournois
-                        // obligatoires (revient sur le choix du 2026-08-23, demande explicite
-                        // de l'utilisateur, 2026-08-24) : le respect de l'obligation se
-                        // verifie desormais au calcul des points (pointsRetenusParEntiteCircuit),
-                        // pas ici a l'inscription.
-                        tirerAuSort(tournoiRow.id, entree);
-                    }
-                });
+                .sort(function (a, b) { return b.taille_tableau - a.taille_tableau; });
+            const repartitionTirage = repartirRivauxSemaine(
+                entreesTirage.filter(function (e) {
+                    return !db.prepare('SELECT 1 FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(e.id, semaineTirage)
+                        && !tournoiDejaCreeCetteSaison(e.id, semaineTirage);
+                }),
+                semaineTirage, rivauxUtilisesTirage
+            );
+            entreesTirage.forEach(function (entree) {
+                let tournoiRow = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(entree.id, semaineTirage);
+                if (!tournoiRow) {
+                    if (tournoiDejaCreeCetteSaison(entree.id, semaineTirage)) return; // deja joue cette saison a une autre position (decalage de calendrier)
+                    const nouveauId = creerTournoi(entree, semaineTirage, rivauxUtilisesTirage, repartitionTirage.get(entree.id));
+                    tournoiRow = { id: nouveauId, statut: 'inscriptions' };
+                }
+                if (tournoiRow.statut === 'inscriptions') {
+                    // Plus d'inscription forcee des joueurs du Top 30 fixe aux tournois
+                    // obligatoires (revient sur le choix du 2026-08-23, demande explicite
+                    // de l'utilisateur, 2026-08-24) : le respect de l'obligation se
+                    // verifie desormais au calcul des points (pointsRetenusParEntiteCircuit),
+                    // pas ici a l'inscription.
+                    tirerAuSort(tournoiRow.id, entree);
+                }
+            });
         }
 
         // Auto-inscription des favoris : intrinsequement une action par coach/joueur,
@@ -3849,7 +3865,59 @@ function classementALaSemaine(circuit, cle, semaine) {
 // n'importe quel tableau. Les rivaux retenus sont les mieux classes au Live (pas
 // juste le meilleur niveau brut) - coherent avec le tri des tetes de serie dans
 // tirerAuSort, qui utilise le meme classement.
-function genererEntrants(entreeCalendrier, semaine, rivauxUtilises) {
+// Repartition des rivaux entre les tournois d'une meme semaine (par circuit) :
+// draft "en serpentin" plutot que "le plus gros tournoi rafle les mieux classes".
+// Le rival le mieux classe Live va au 1er tournoi, le 2e au 2e tournoi... et on
+// reboucle sur le 1er quand on a fait le tour (en sautant les tournois pleins) -
+// chaque tournoi de la semaine recoit ainsi un echantillon reparti sur toute la
+// hierarchie du roster, pas une tranche contigue. `entrees` doit deja etre triee
+// par taille_tableau decroissante (le tournoi le plus prestigieux = "tournoi 1",
+// recoit le mieux classe). Demande explicite de l'utilisateur, 2026-09-10.
+// Retourne Map<entree.id, classement_joueurs[]>.
+function repartirRivauxSemaine(entrees, semaine, utilises) {
+    const parEntree = new Map();
+    const parCircuit = new Map();
+    entrees.forEach(function (e) {
+        if (e.categorie === 'finals') return; // qualification auto, pas de draft de rivaux
+        if (!parCircuit.has(e.circuit)) parCircuit.set(e.circuit, []);
+        parCircuit.get(e.circuit).push(e);
+    });
+
+    parCircuit.forEach(function (entreesCircuit, circuit) {
+        // Rivaux deja engages cette semaine-la dans un autre tournoi du meme circuit
+        // (source de verite = base, meme filet que genererEntrants).
+        db.prepare(`
+            SELECT DISTINCT tj.rival_id FROM tournoi_joueurs tj
+            JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE t.semaine = ? AND t.circuit = ? AND tj.rival_id IS NOT NULL
+        `).all(semaine, circuit).forEach(function (r) { utilises.add(r.rival_id); });
+
+        assurerRoster(circuit);
+        const rangs = calculerRangsLiveGlobal(circuit);
+        const classes = db.prepare('SELECT * FROM classement_joueurs WHERE circuit = ?').all(circuit)
+            .filter(function (r) { return !utilises.has(r.id); })
+            .sort(function (a, b) { return (rangs.get('rival:' + a.id) || Infinity) - (rangs.get('rival:' + b.id) || Infinity); });
+
+        const n = entreesCircuit.length;
+        const besoins = entreesCircuit.map(function (e) { return e.taille_tableau; });
+        const listes = entreesCircuit.map(function () { return []; });
+        let ti = 0;
+        for (let i = 0; i < classes.length; i++) {
+            if (besoins.every(function (b) { return b === 0; })) break;
+            let garde = 0;
+            while (besoins[ti] === 0 && garde < n) { ti = (ti + 1) % n; garde += 1; }
+            if (besoins[ti] === 0) break;
+            listes[ti].push(classes[i]);
+            besoins[ti] -= 1;
+            ti = (ti + 1) % n;
+        }
+        entreesCircuit.forEach(function (e, idx) { parEntree.set(e.id, listes[idx]); });
+    });
+
+    return parEntree;
+}
+
+function genererEntrants(entreeCalendrier, semaine, rivauxUtilises, rivauxAssignes) {
     const tailleReelle = entreeCalendrier.taille_tableau;
     const utilises = rivauxUtilises || new Set();
 
@@ -3871,12 +3939,20 @@ function genererEntrants(entreeCalendrier, semaine, rivauxUtilises) {
     const entrants = [];
 
     assurerRoster(entreeCalendrier.circuit);
-    const rangs = calculerRangsLiveGlobal(entreeCalendrier.circuit);
-    const roster = db.prepare('SELECT * FROM classement_joueurs WHERE circuit = ?').all(entreeCalendrier.circuit);
-    const disponibles = roster
-        .filter(function (r) { return !utilises.has(r.id); })
-        .sort(function (a, b) { return (rangs.get('rival:' + a.id) || Infinity) - (rangs.get('rival:' + b.id) || Infinity); })
-        .slice(0, tailleReelle);
+
+    let disponibles;
+    if (Array.isArray(rivauxAssignes)) {
+        // Draft pre-calcule par repartirRivauxSemaine : on respecte l'affectation,
+        // en re-filtrant juste les rivaux engages ailleurs entre-temps (securite).
+        disponibles = rivauxAssignes.filter(function (r) { return !utilises.has(r.id); }).slice(0, tailleReelle);
+    } else {
+        const rangs = calculerRangsLiveGlobal(entreeCalendrier.circuit);
+        const roster = db.prepare('SELECT * FROM classement_joueurs WHERE circuit = ?').all(entreeCalendrier.circuit);
+        disponibles = roster
+            .filter(function (r) { return !utilises.has(r.id); })
+            .sort(function (a, b) { return (rangs.get('rival:' + a.id) || Infinity) - (rangs.get('rival:' + b.id) || Infinity); })
+            .slice(0, tailleReelle);
+    }
 
     disponibles.forEach(function (r) {
         utilises.add(r.id);
@@ -5241,7 +5317,7 @@ function tournoiDejaCreeCetteSaison(calendrierId, semaineReference) {
 // Cree un tournoi au stade "inscriptions" : le pool d'entrants existe (visible dans
 // l'onglet Inscrits) mais le tableau n'est pas encore tire au sort (ca arrive a S-1,
 // voir tirerAuSort). position_tableau = -1 est le marqueur "pas encore tire".
-function creerTournoi(entree, semaine, rivauxUtilises) {
+function creerTournoi(entree, semaine, rivauxUtilises, rivauxAssignes) {
     const insertionTournoi = db.prepare(`
         INSERT INTO tournois (calendrier_id, nom, circuit, categorie, surface, taille_tableau, semaine, bareme, format, statut)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'inscriptions')
@@ -5253,7 +5329,7 @@ function creerTournoi(entree, semaine, rivauxUtilises) {
     const tournoiId = insertionTournoi.lastInsertRowid;
     const entrants = entree.categorie === 'finals'
         ? genererEntrantsFinals(entree, semaine)
-        : genererEntrants(entree, semaine, rivauxUtilises);
+        : genererEntrants(entree, semaine, rivauxUtilises, rivauxAssignes);
 
     const insertJoueur = db.prepare(`
         INSERT INTO tournoi_joueurs (tournoi_id, nom, nationalite, niveau, est_reel, player_id, rival_id, position_tableau, tete_de_serie)
