@@ -4148,23 +4148,26 @@ function melanger(liste) {
 }
 
 // --- Niveau des bots cale sur celui des joueurs reels (demande explicite de
-// l'utilisateur, 2026-08-31 ; ajuste le 2026-09-09 et le 2026-09-10) ---
+// l'utilisateur, 2026-08-31 ; ajuste le 2026-09-09, 2026-09-10 et 2026-09-11) ---
 // Le niveau de jeu d'un bot (rival persistant OU lambda jetable) n'est plus une
 // valeur fixe : a chaque tirage de tournoi (et a chaque rencontre de Coupe Davis/
-// BJK Cup), il est tire dans une bande de 50 a 70 % d'une MOYENNE de reference du
-// niveau de jeu des joueurs reels SUR LA SURFACE concernee - avec un plancher a 270.
+// BJK Cup), il est tire dans une bande de **60 a 85 %** d'une MOYENNE de reference
+// du niveau de jeu des joueurs reels SUR LA SURFACE concernee. **Plus aucun
+// plancher** (2026-09-11, demande explicite - avant : 270 minimum, quel que soit
+// le niveau reel des joueurs reels de reference).
 //   - Tournoi : moyenne des joueurs reels REELLEMENT INSCRITS dans son tableau
 //     (moyenneNiveauReelsTournoi), avec repli sur la moyenne du circuit si aucun
 //     inscrit reel (2026-09-10 : avant c'etait toujours la moyenne circuit).
-//   - Coupe Davis / repli : moyenne des joueurs reels valides du circuit
-//     (moyenneNiveauJeuReels), plancher 270 si < 4 reels ou moyenne basse.
+//   - Coupe Davis / BJK Cup : moyenne des joueurs reels SELECTIONNES DANS LES
+//     COMPOSITIONS DES DEUX NATIONS de CETTE rencontre precise
+//     (moyenneNiveauReelsCoupe, 2026-09-11 - avant : toujours la moyenne du
+//     circuit entier, sans lien avec qui joue vraiment cette rencontre), repli sur
+//     la moyenne du circuit si aucun reel n'est selectionne des deux cotes.
 // Reference "niveau de jeu" = niveauNormal(joueur, surface) (forme/energie/
 // automatismes du moment inclus), pas la moyenne des 3 surfaces. Les niveaux d'un
 // meme tournoi sont rendus distincts tant que la largeur de bande le permet.
-const NIVEAU_BOT_PLANCHER = 270;
-const NIVEAU_BOT_MIN_REELS = 4;
-const NIVEAU_BOT_BANDE_BAS = 0.50;
-const NIVEAU_BOT_BANDE_HAUT = 0.70;
+const NIVEAU_BOT_BANDE_BAS = 0.60;
+const NIVEAU_BOT_BANDE_HAUT = 0.85;
 
 function moyenneNiveau(reels, surface) {
     if (reels.length === 0) return null;
@@ -4172,13 +4175,18 @@ function moyenneNiveau(reels, surface) {
 }
 
 // Moyenne du niveau de jeu (sur `surface`) des joueurs reels VALIDES du circuit -
-// repli quand on n'a pas de champ precis (Coupe Davis, ou tournoi sans aucun
-// inscrit reel). Plancher NIVEAU_BOT_PLANCHER si trop peu de reels / moyenne basse.
+// repli ultime quand aucune reference plus precise n'existe (Coupe Davis sans
+// composition soumise, ou tournoi sans aucun inscrit reel). Plus aucun plancher ni
+// minimum de joueurs reels (2026-09-11, demande explicite de l'utilisateur) : la
+// moyenne colle strictement au niveau reel du circuit, meme avec un seul joueur
+// reel valide. Le repli a 200 ci-dessous n'est PAS un plancher de calibration,
+// juste un garde-fou anti-NaN pour un cas qui ne peut pas arriver en pratique (un
+// circuit existe toujours avec au moins le joueur/la joueuse du coach fondateur).
 function moyenneNiveauJeuReels(circuit, surface) {
     const type = circuit === 'ATP' ? 'joueur' : 'joueuse';
     const reels = db.prepare("SELECT * FROM players WHERE type = ? AND statut = 'valide'").all(type);
-    if (reels.length < NIVEAU_BOT_MIN_REELS) return NIVEAU_BOT_PLANCHER;
-    return Math.max(NIVEAU_BOT_PLANCHER, moyenneNiveau(reels, surface));
+    const moy = moyenneNiveau(reels, surface);
+    return moy === null ? 200 : moy;
 }
 
 // Moyenne de reference pour les bots d'UN tournoi precis : les joueurs reels
@@ -4193,13 +4201,37 @@ function moyenneNiveauReelsTournoi(tournoiId, circuit, surface) {
         WHERE tj.tournoi_id = ? AND tj.est_reel = 1
     `).all(tournoiId);
     const moy = moyenneNiveau(reels, surface);
-    if (moy === null) return moyenneNiveauJeuReels(circuit, surface);
-    return Math.max(NIVEAU_BOT_PLANCHER, moy);
+    return moy === null ? moyenneNiveauJeuReels(circuit, surface) : moy;
 }
 
-// Un seul niveau de bot dans la bande (Coupe Davis : 1-2 rivaux par cote).
-function niveauBotUnique(circuit, surface) {
-    return Math.round(moyenneNiveauJeuReels(circuit, surface) * (NIVEAU_BOT_BANDE_BAS + Math.random() * (NIVEAU_BOT_BANDE_HAUT - NIVEAU_BOT_BANDE_BAS)));
+// Moyenne de reference pour les bots d'UNE rencontre de Coupe Davis/BJK Cup
+// precise : tous les joueurs REELS selectionnes dans les compositions des DEUX
+// nations pour cette rencontre (coupe_composition, joueur_a/b/c/d + double_j1/j2,
+// est_reel = 1), sur la surface de la rencontre - demande explicite de
+// l'utilisateur, 2026-09-11. Repli sur la moyenne du circuit si aucun reel n'est
+// selectionne des deux cotes (compositions pas encore soumises, ou 100 % rivaux).
+function moyenneNiveauReelsCoupe(tieId, circuit, surface) {
+    const compositions = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ?').all(tieId);
+    const idsReels = new Set();
+    compositions.forEach(function (c) {
+        ['a', 'b', 'c', 'd'].forEach(function (lettre) {
+            if (c['joueur_' + lettre + '_est_reel'] && c['joueur_' + lettre + '_id']) idsReels.add(c['joueur_' + lettre + '_id']);
+        });
+        [1, 2].forEach(function (n) {
+            if (c['double_j' + n + '_est_reel'] && c['double_j' + n + '_id']) idsReels.add(c['double_j' + n + '_id']);
+        });
+    });
+    if (idsReels.size === 0) return moyenneNiveauJeuReels(circuit, surface);
+    const reels = Array.from(idsReels).map(function (id) { return db.prepare('SELECT * FROM players WHERE id = ?').get(id); }).filter(Boolean);
+    const moy = moyenneNiveau(reels, surface);
+    return moy === null ? moyenneNiveauJeuReels(circuit, surface) : moy;
+}
+
+// Un seul niveau de bot dans la bande, calibre sur les joueurs reels SELECTIONNES
+// DANS CETTE RENCONTRE precise (Coupe Davis/BJK Cup : 1-2 rivaux par cote).
+function niveauBotUnique(tie, surface) {
+    const M = moyenneNiveauReelsCoupe(tie.id, tie.circuit, surface);
+    return Math.round(M * (NIVEAU_BOT_BANDE_BAS + Math.random() * (NIVEAU_BOT_BANDE_HAUT - NIVEAU_BOT_BANDE_BAS)));
 }
 
 // Redistribue le niveau de TOUS les bots d'un tournoi dans la bande, en les
@@ -10409,9 +10441,9 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
             const mental = normal - player.forme + player.mental_courant;
             return { normal, mental, mentalCourant: player.mental_courant, joueur: player };
         }
-        // Niveau du rival recale sur la moyenne des joueurs reels du circuit sur
-        // cette surface (bande 50-70 %), comme pour un tournoi - cf. niveauBotUnique.
-        const niv = niveauBotUnique(tie.circuit, surface);
+        // Niveau du rival recale sur la moyenne des joueurs reels SELECTIONNES DANS
+        // CETTE RENCONTRE (bande 60-85 %) - cf. niveauBotUnique/moyenneNiveauReelsCoupe.
+        const niv = niveauBotUnique(tie, surface);
         return { normal: niv, mental: niv + 100, mentalCourant: 100, joueur: null };
     }
 
@@ -10708,7 +10740,7 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
             const mental = normal - player.forme + player.mental_courant;
             return Object.assign({ joueur: player, style: null }, ajusterNiveauxStyle(normal, mental, null, player.mental_courant, 1));
         }
-        const niv = niveauBotUnique(tie.circuit, surface);
+        const niv = niveauBotUnique(tie, surface);
         return { normal: niv, mental: niv + 100 };
     }
 
