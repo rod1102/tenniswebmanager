@@ -431,17 +431,18 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_classement_historique_cle ON classement_
 // Index de performance (2026-09-04) : les fiches joueur/coach et les records de
 // badges enchainent beaucoup de COUNT/GROUP BY sur ces colonnes. Additifs, sans
 // risque - SQLite les cree une fois puis les maintient.
+// (Le reste de ce bloc d'index a ete deplace apres les migrations ALTER TABLE plus
+// bas - certains portent sur des colonnes qui n'existent pas encore a ce stade sur
+// une base VIERGE, cf. bug corrige le 2026-09-11.)
 db.exec(`CREATE INDEX IF NOT EXISTS idx_classement_historique_cle_sem ON classement_historique(cle, circuit, semaine)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_classement_historique_circuit_rang ON classement_historique(circuit, rang)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tj_player ON tournoi_joueurs(player_id, est_reel)`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_tj_rival ON tournoi_joueurs(rival_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tj_tournoi ON tournoi_joueurs(tournoi_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tm_tournoi ON tournoi_matchs(tournoi_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tm_j1 ON tournoi_matchs(joueur1_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tm_j2 ON tournoi_matchs(joueur2_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tm_vainqueur ON tournoi_matchs(vainqueur_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_tm_matchid ON tournoi_matchs(match_id)`);
-db.exec(`CREATE INDEX IF NOT EXISTS idx_tm_matchidj2 ON tournoi_matchs(match_id_j2)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_matchs_player ON matchs(player_id)`);
 db.exec(`CREATE INDEX IF NOT EXISTS idx_classement_joueurs_circuit ON classement_joueurs(circuit)`);
 
@@ -804,6 +805,17 @@ migrations.forEach(function (sql) {
         // Colonne deja existante : rien a faire
     }
 });
+
+// Ces 2 index portent sur des colonnes ajoutees par les migrations ci-dessus
+// (rival_id, match_id_j2) - sur une base VIERGE (jamais migree depuis l'ancien
+// modele), ces colonnes n'existent pas encore au moment ou le bloc d'index
+// "de base" plus haut s'execute, donc `CREATE INDEX ... ON tournoi_joueurs
+// (rival_id)` y plantait au tout premier demarrage ("no such column: rival_id" -
+// jamais repere avant car toute base de dev/prod existante avait deja ces
+// colonnes depuis longtemps). Places ici, apres les migrations, ils sont surs
+// dans tous les cas.
+db.exec(`CREATE INDEX IF NOT EXISTS idx_tj_rival ON tournoi_joueurs(rival_id)`);
+db.exec(`CREATE INDEX IF NOT EXISTS idx_tm_matchidj2 ON tournoi_matchs(match_id_j2)`);
 
 // Placee ici (apres les migrations) pour etre sure que coupe_styles.numero existe
 // deja, que la base soit neuve (colonne native dans le CREATE TABLE) ou existante
