@@ -175,6 +175,24 @@
             `;
         }
 
+        function blocProchainsTournois(prochainsTournois) {
+            if (!prochainsTournois || prochainsTournois.length === 0) {
+                return `
+                    <h2 class="dashboard-title" style="font-size:1.3rem; margin-top:28px;">Prochains tournois</h2>
+                    <div class="match-hint">Aucune inscription validée dans les 5 prochaines semaines.</div>
+                `;
+            }
+            return `
+                <h2 class="dashboard-title" style="font-size:1.3rem; margin-top:28px;">Prochains tournois</h2>
+                <div class="tournoi-list">
+                    ${prochainsTournois.map(function (t) {
+                        return `<div class="tournoi-card"><div class="tournoi-card-name">${t.nom}</div>
+                            <div class="tournoi-card-meta">Semaine ${t.positionSemaine} · ${t.categorie} · ${LABELS_SURFACE[t.surface] || t.surface}</div></div>`;
+                    }).join('')}
+                </div>
+            `;
+        }
+
         function afficherInfos(data) {
             const panneau = document.getElementById('tab-infos');
             const info = data.infos;
@@ -190,6 +208,7 @@
                     <div class="stat-row"><span class="stat-label">Circuit</span><span class="stat-value">${info.circuit}</span></div>
                     <div class="stat-row"><span class="stat-label">Coach</span><span class="stat-value"><a class="lien-adversaire" href="coach.html?id=${info.coachUserId}">${info.coachNom}</a></span></div>
                     ${ligneClassement(info)}
+                    ${blocProchainsTournois(data.prochainsTournois)}
                 `;
             } else {
                 panneau.innerHTML = `

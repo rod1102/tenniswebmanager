@@ -7742,7 +7742,22 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
 
         const badges = calculerBadges(circuitAdversaire, cleAdversaire, 'player_id', playerId);
 
-        res.json({ success: true, infos, palmares, derniersMatchs, stats, faceAFace, badges, saisonAffichee, saisonsDisponibles });
+        // Prochains tournois (2026-09-11, demande explicite) : les 5 semaines a venir,
+        // meme fenetre que /api/tournois/calendrier - uniquement les inscriptions
+        // VALIDEES (tournoi_joueurs.est_reel = 1, un slot reellement occupe), pas les
+        // simples voeux en liste d'attente.
+        const debutFenetreTournois = etatSemaine.semaine_actuelle + 1;
+        const finFenetreTournois = debutFenetreTournois + 4;
+        const prochainsTournois = db.prepare(`
+            SELECT t.nom, t.calendrier_id, t.semaine, t.categorie, t.surface
+            FROM tournoi_joueurs tj
+            JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE tj.est_reel = 1 AND tj.player_id = ? AND t.semaine BETWEEN ? AND ?
+            ORDER BY t.semaine
+        `).all(playerId, debutFenetreTournois, finFenetreTournois);
+        prochainsTournois.forEach(function (t) { t.positionSemaine = positionSemaineAffichee(t.semaine); });
+
+        res.json({ success: true, infos, palmares, derniersMatchs, stats, faceAFace, badges, saisonAffichee, saisonsDisponibles, prochainsTournois });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
