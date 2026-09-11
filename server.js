@@ -83,6 +83,68 @@ const PORT = process.env.PORT || 3000;
 // doublon "1 compte par IP" a l'inscription).
 app.set('trust proxy', 1);
 
+// --- Copie de test privee (2026-09-11, demande explicite de l'utilisateur) ---
+// Cette meme base de code (server.js) tourne aussi sur une 2e instance Railway,
+// une copie figee de la prod pour faire des essais/simulations sans jamais
+// toucher au vrai jeu. Toute la difference de comportement passe par des
+// variables d'environnement (jamais un fichier separe) :
+//   - STAGING=1 : cette instance EST la copie de test - force l'avancement
+//     automatique a l'arret a chaque demarrage (voir plus bas, apres que `db`
+//     soit disponible) et active l'endpoint de synchronisation entrante.
+//   - BASIC_AUTH_USER / BASIC_AUTH_PASS : quand les deux sont definies, TOUT le
+//     site (avant meme la page de connexion) exige une authentification HTTP
+//     Basic - pensee pour la copie de test, jamais definie sur la prod.
+//   - STAGING_SYNC_SECRET : jeton partage entre les 2 instances, verifie sur
+//     les 2 bouts de la synchronisation (jamais logge, jamais renvoye au client).
+//   - SOURCE_SNAPSHOT_URL (sur la copie) : URL interne (reseau prive Railway) de
+//     l'instance prod pour recuperer un instantane de sa base.
+//   - STAGING_SYNC_URL (sur la prod) : URL interne de la copie a prevenir des
+//     qu'une semaine vient de s'ecouler (executerAvancementSemaine).
+const MODE_STAGING = process.env.STAGING === '1';
+const STAGING_SYNC_SECRET = process.env.STAGING_SYNC_SECRET || '';
+
+// Prevenu la copie de test qu'une semaine vient de s'ecouler (fire-and-forget,
+// jamais attendu par l'appelant - la prod ne doit jamais ralentir pour ca). Ne
+// fait rien si STAGING_SYNC_URL n'est pas configuree (cas normal sur la prod tant
+// que la copie de test n'existe pas encore, ou sur la copie elle-meme).
+function notifierCopieDeTest() {
+    const url = process.env.STAGING_SYNC_URL;
+    if (!url) return;
+    fetch(url, { method: 'POST', headers: { 'X-Sync-Secret': STAGING_SYNC_SECRET } })
+        .catch(function (err) { console.error('[staging] echec notification :', err.message); });
+}
+
+function secretSyncValide(req) {
+    if (!STAGING_SYNC_SECRET) return false;
+    const fourni = String(req.headers['x-sync-secret'] || '');
+    const a = Buffer.from(fourni);
+    const b = Buffer.from(STAGING_SYNC_SECRET);
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+}
+
+const BASIC_AUTH_USER = process.env.BASIC_AUTH_USER || '';
+const BASIC_AUTH_PASS = process.env.BASIC_AUTH_PASS || '';
+if (BASIC_AUTH_USER && BASIC_AUTH_PASS) {
+    app.use(function (req, res, next) {
+        const entete = String(req.headers.authorization || '');
+        const [schema, encode] = entete.split(' ');
+        if (schema === 'Basic' && encode) {
+            const decode = Buffer.from(encode, 'base64').toString('utf8');
+            const sep = decode.indexOf(':');
+            const utilisateur = Buffer.from(sep === -1 ? decode : decode.slice(0, sep));
+            const motDePasse = Buffer.from(sep === -1 ? '' : decode.slice(sep + 1));
+            const attenduU = Buffer.from(BASIC_AUTH_USER);
+            const attenduP = Buffer.from(BASIC_AUTH_PASS);
+            const okU = utilisateur.length === attenduU.length && crypto.timingSafeEqual(utilisateur, attenduU);
+            const okP = motDePasse.length === attenduP.length && crypto.timingSafeEqual(motDePasse, attenduP);
+            if (okU && okP) return next();
+        }
+        res.set('WWW-Authenticate', 'Basic realm="Espace de test prive"');
+        return res.status(401).send('Authentification requise.');
+    });
+}
+
 app.use(cookieParser());
 
 // Mode maintenance (2026-09-11, urgence pendant la reparation des tournois
@@ -110,6 +172,11 @@ app.use(function (req, res, next) {
     }
 
     if (req.path === '/api/connexion' && req.method === 'POST') return next();
+    // Synchronisation prod -> copie de test : doit fonctionner meme si la prod est
+    // en maintenance (protegee par son propre secret, secretSyncValide, pas par la
+    // session) - sinon la copie de test resterait bloquee sur une vieille version
+    // tant que la maintenance n'est pas desactivee.
+    if (req.path === '/api/interne/snapshot-db') return next();
     if (CHEMINS_MAINTENANCE_AUTORISES.includes(req.path)) return next();
 
     if (req.path.startsWith('/api/')) {
@@ -150,13 +217,14 @@ function poserCookieSession(req, res, token) {
 // utilisees par index.html/statistiques.html/presse.html avant/sans connexion).
 function estRoutePublique(req) {
     if (req.method === 'POST') {
-        return ['/api/inscription', '/api/connexion', '/api/deconnexion', '/api/mot-de-passe-oublie', '/api/reinitialiser-mot-de-passe'].includes(req.path);
+        return ['/api/inscription', '/api/connexion', '/api/deconnexion', '/api/mot-de-passe-oublie', '/api/reinitialiser-mot-de-passe',
+            '/api/interne/synchroniser'].includes(req.path);
     }
     if (req.method === 'GET') {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
             '/api/statistiques/almanach', '/api/statistiques/records', '/api/statistiques/pantheon',
-            '/api/annonce'].includes(req.path)) {
+            '/api/annonce', '/api/interne/snapshot-db'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;
@@ -865,6 +933,74 @@ app.post('/api/admin/maintenance', (req, res) => {
     if (!estAdmin(req.userId)) return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
     db.prepare('UPDATE jeu_etat SET maintenance = ? WHERE id = 1').run(req.body.activer ? 1 : 0);
     res.json({ success: true, active: !!req.body.activer });
+});
+
+// --- Synchronisation prod -> copie de test (2026-09-11) ---
+// Ces 2 routes ne passent JAMAIS par l'authentification de session normale
+// (req.userId) - elles sont pensees pour un appel machine-a-machine entre les 2
+// instances Railway, protegees uniquement par STAGING_SYNC_SECRET (verification
+// a temps constant, cf. secretSyncValide). Volontairement disponibles meme sans
+// STAGING_SYNC_SECRET configuree (secretSyncValide renvoie alors toujours false),
+// pour ne jamais planter une instance ou ces variables ne sont pas definies.
+
+// Instantane coherent de la base courante (better-sqlite3 Database#backup, API de
+// sauvegarde SQLite native - ne bloque jamais les ecritures en cours, contrairement
+// a une simple copie du fichier qui risquerait de capturer un etat incoherent en
+// plein milieu d'une transaction). Toujours exposee (prod ET copie de test) : la
+// copie de test elle-meme pourrait un jour servir de source a une 3e instance.
+app.get('/api/interne/snapshot-db', async (req, res) => {
+    if (!secretSyncValide(req)) return res.status(403).end();
+    const cheminTemp = path.join(DOSSIER_DONNEES, 'snapshot-temp-' + Date.now() + '-' + crypto.randomBytes(4).toString('hex') + '.db');
+    try {
+        await db.backup(cheminTemp);
+        res.download(cheminTemp, 'tennis-manager.db', function () {
+            fs.unlink(cheminTemp, function () {});
+        });
+    } catch (err) {
+        fs.unlink(cheminTemp, function () {});
+        console.error('[snapshot-db] echec :', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Recoit le signal "une semaine vient de s'ecouler sur la prod" : va chercher un
+// instantane frais via SOURCE_SNAPSHOT_URL (reseau prive Railway), remplace le
+// fichier local, puis redemarre le processus (process.exit) - Railway relance
+// automatiquement le service, qui rouvre alors la base fraichement copiee et
+// reapplique aussitot le gel de l'avancement automatique (bloc MODE_STAGING plus
+// bas). Repond immediatement (avant meme d'avoir fini) : la prod ne doit jamais
+// attendre la fin de la synchronisation pour continuer son propre traitement.
+app.post('/api/interne/synchroniser', (req, res) => {
+    if (!MODE_STAGING) return res.status(404).end();
+    if (!secretSyncValide(req)) return res.status(403).end();
+
+    const sourceUrl = process.env.SOURCE_SNAPSHOT_URL;
+    if (!sourceUrl) {
+        return res.status(500).json({ error: 'SOURCE_SNAPSHOT_URL non configuree sur cette instance.' });
+    }
+    res.json({ success: true, statut: 'synchronisation lancee en arriere-plan' });
+
+    (async function () {
+        try {
+            const reponse = await fetch(sourceUrl, { headers: { 'X-Sync-Secret': STAGING_SYNC_SECRET } });
+            if (!reponse.ok) throw new Error('reponse ' + reponse.status + ' de la source');
+            const octets = Buffer.from(await reponse.arrayBuffer());
+            const cheminDb = path.join(DOSSIER_DONNEES, 'tennis-manager.db');
+            const cheminTemp = cheminDb + '.nouveau';
+            fs.writeFileSync(cheminTemp, octets);
+            // Ferme la connexion AVANT de remplacer le fichier : sur certains systemes
+            // de fichiers (Windows notamment), renommer par-dessus un fichier encore
+            // ouvert par ce meme processus echoue (EPERM) - fermer d'abord rend
+            // l'operation sure partout, la connexion n'ayant plus d'utilite de toute
+            // facon puisque le processus va se terminer juste apres.
+            db.close();
+            fs.renameSync(cheminTemp, cheminDb);
+            console.log('[staging] synchronisation reussie (' + octets.length + ' octets) - redemarrage du processus.');
+            arreterProprement(0);
+        } catch (err) {
+            console.error('[staging] echec de la synchronisation :', err.message);
+        }
+    })();
 });
 
 // Recherche d'un joueur reel (admin) - utilitaire de diagnostic pour les
@@ -2885,6 +3021,7 @@ function executerAvancementSemaine() {
             }
         });
 
+        notifierCopieDeTest();
         return nouvelleSemaine;
 }
 
@@ -10822,7 +10959,7 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
     return { nationVainqueur, domicileGagne };
 }
 
-app.listen(PORT, () => {
+const serveurHttp = app.listen(PORT, () => {
     console.log('Serveur lance sur http://localhost:' + PORT);
 });
 
@@ -10884,11 +11021,42 @@ try {
     console.error('[bande_60_85] echec :', err.message);
 }
 
+// Copie de test (MODE_STAGING) : force l'avancement automatique a l'arret a
+// CHAQUE demarrage (pas un one-shot - doit toujours regagner sur ce que la
+// synchronisation vient de copier depuis la prod, qui elle a saison_lancee=1).
+// Garantit que la copie reste figee entre 2 synchronisations : seuls les
+// boutons manuels d'Administration peuvent y faire avancer quoi que ce soit.
+if (MODE_STAGING) {
+    // saison_lancee=0 gele l'avancement auto ; maintenance=0 evite d'heriter d'un
+    // etat de maintenance qui aurait ete actif sur la prod au moment de l'instantane
+    // (la copie de test est deja protegee par ailleurs : Basic Auth + connexion).
+    db.prepare('UPDATE jeu_etat SET saison_lancee = 0, maintenance = 0 WHERE id = 1').run();
+    console.log('[staging] copie de test : avancement automatique force a l\'arret, maintenance desactivee.');
+}
+
 verifierAvancementAuto();
-setInterval(verifierAvancementAuto, 15 * 60 * 1000);
+const intervalleSemaine = setInterval(verifierAvancementAuto, 15 * 60 * 1000);
 
 verifierAvancementTourAuto();
-setInterval(verifierAvancementTourAuto, 15 * 60 * 1000);
+const intervalleTour = setInterval(verifierAvancementTourAuto, 15 * 60 * 1000);
 
 verifierAvancementTourCoupeAuto();
-setInterval(verifierAvancementTourCoupeAuto, 15 * 60 * 1000);
+const intervalleTourCoupe = setInterval(verifierAvancementTourCoupeAuto, 15 * 60 * 1000);
+
+// Arret propre du processus (2026-09-11, pour la synchronisation prod -> copie de
+// test, apres un fetch()). Cause isolee et reproduite hors de ce fichier : sur
+// Windows, un process.exit() appele immediatement apres un fetch() (undici) plante
+// sur une assertion libuv ("!(handle->flags & UV_HANDLE_CLOSING)") - le nettoyage
+// interne du client HTTP d'undici n'a pas fini de fermer ses handles. Un court
+// delai avant de sortir suffit a laisser ce nettoyage se terminer (verifie : sans
+// delai -> crash systematique ; avec 50ms -> sortie propre, code 0). Coupe aussi
+// les 3 minuteries + le serveur HTTP au passage, par hygiene (n'est pas la cause du
+// crash, mais evite de laisser tourner des planificateurs inutiles pendant le
+// court delai avant la sortie).
+function arreterProprement(codeSortie) {
+    clearInterval(intervalleSemaine);
+    clearInterval(intervalleTour);
+    clearInterval(intervalleTourCoupe);
+    serveurHttp.close(function () {});
+    setTimeout(function () { process.exit(codeSortie); }, 300).unref();
+}
