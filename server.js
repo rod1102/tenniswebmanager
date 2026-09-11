@@ -1149,6 +1149,58 @@ app.get('/api/admin/tournois-suspects', (req, res) => {
 //     INCHANGE plutot que de l'ecraser par une valeur absente, et est signale en
 //     avertissement.
 // GET = apercu (RIEN ecrit) ; POST = applique reellement, dans une transaction.
+
+// val si non-null/undefined, sinon repli (jamais null -> ne jamais ecraser par du vide).
+function champOuRepli(val, repli) { return (val === null || val === undefined) ? repli : val; }
+
+const CHAMPS_PHYSIQUES = [
+    { cle: 'forme', colApres: 'forme_apres', colPlayer: 'forme' },
+    { cle: 'usure', colApres: 'usure_apres', colPlayer: 'usure' },
+    { cle: 'mentalCourant', colApres: 'mental_apres', colPlayer: 'mental_courant' },
+    { cle: 'mentalMax', colApres: 'mental_max_apres', colPlayer: 'mental_max' },
+    { cle: 'condition', colApres: 'condition_apres', colPlayer: 'condition' },
+    { cle: 'automatismesDur', colApres: 'automatismes_dur_apres', colPlayer: 'surface_dur_automatismes' },
+    { cle: 'automatismesTerre', colApres: 'automatismes_terre_apres', colPlayer: 'surface_terre_automatismes' },
+    { cle: 'automatismesHerbe', colApres: 'automatismes_herbe_apres', colPlayer: 'surface_herbe_automatismes' },
+    { cle: 'service', colApres: 'service_apres', colPlayer: 'service' },
+    { cle: 'retour', colApres: 'retour_apres', colPlayer: 'retour' },
+    { cle: 'coupDroitRevers', colApres: 'coup_droit_revers_apres', colPlayer: 'coup_droit_revers' },
+    { cle: 'effet', colApres: 'effet_apres', colPlayer: 'effet' },
+    { cle: 'volee', colApres: 'volee_apres', colPlayer: 'volee' },
+    { cle: 'deplacement', colApres: 'deplacement_apres', colPlayer: 'deplacement' },
+    { cle: 'puissance', colApres: 'puissance_apres', colPlayer: 'puissance' },
+    { cle: 'resistance', colApres: 'resistance_apres', colPlayer: 'resistance' }
+];
+
+// Le journal de la semaine EXACTE demandee peut ne pas exister si le tournoi a
+// ete simule alors que la partie n'avait pas encore atteint cette semaine
+// (exactement le bug reparé ici : la ligne journal est ecrite au moment ou l'on
+// ENTRE dans une semaine, pas au tirage du tournoi). Dans ce cas, la derniere
+// ligne de journal connue AVANT cette semaine reste le bon etat de reference :
+// rien d'autre n'a pu legitimement modifier forme/usure/mental entre-temps
+// puisque la partie etait encore bloquee sur une semaine anterieure.
+function dernierJournalAvant(playerId, semaine) {
+    return db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? AND semaine <= ? ORDER BY semaine DESC LIMIT 1').get(playerId, semaine);
+}
+
+// Calcule, champ par champ, l'etat physique restaure d'un joueur a partir d'une
+// ligne de journal (ou null) - CHAMP PAR CHAMP car une ligne de journal ancienne
+// (creee avant l'ajout de l'historique physique complet, 2026-08-25) peut n'avoir
+// que forme_avant/apres renseignes et tout le reste NULL (colonnes ajoutees apres
+// coup, jamais retro-remplies) : un champ NULL dans le journal laisse le champ du
+// joueur INCHANGE plutot que de l'ecraser par une valeur absente.
+function planPhysiqueDepuisJournal(player, journal) {
+    const champs = {};
+    const champsNonRestaures = [];
+    CHAMPS_PHYSIQUES.forEach(function (c) {
+        const valJournal = journal ? journal[c.colApres] : null;
+        const apres = champOuRepli(valJournal, player[c.colPlayer]);
+        if (valJournal === null || valJournal === undefined) champsNonRestaures.push(c.cle);
+        champs[c.cle] = { avant: player[c.colPlayer], apres: apres };
+    });
+    return { champs, champsNonRestaures };
+}
+
 function planifierAnnulationTournoi(tournoiId) {
     const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
     if (!tournoi) return null;
@@ -1158,28 +1210,6 @@ function planifierAnnulationTournoi(tournoiId) {
     const entrants = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ?').all(tournoiId);
     const nbMatchsTableau = db.prepare('SELECT COUNT(*) AS n FROM tournoi_matchs WHERE tournoi_id = ?').get(tournoiId).n;
     const nbPronosAEffacer = db.prepare('SELECT COUNT(*) AS n FROM pronostics WHERE tournoi_id = ? AND points_gagnes IS NOT NULL').get(tournoiId).n;
-
-    // val si non-null/undefined, sinon repli (jamais None -> ne jamais ecraser par du vide).
-    function champOuRepli(val, repli) { return (val === null || val === undefined) ? repli : val; }
-
-    const CHAMPS_PHYSIQUES = [
-        { cle: 'forme', colAvant: 'forme_avant', colApres: 'forme_apres', colPlayer: 'forme' },
-        { cle: 'usure', colAvant: 'usure_avant', colApres: 'usure_apres', colPlayer: 'usure' },
-        { cle: 'mentalCourant', colAvant: 'mental_avant', colApres: 'mental_apres', colPlayer: 'mental_courant' },
-        { cle: 'mentalMax', colAvant: 'mental_max_avant', colApres: 'mental_max_apres', colPlayer: 'mental_max' },
-        { cle: 'condition', colAvant: 'condition_avant', colApres: 'condition_apres', colPlayer: 'condition' },
-        { cle: 'automatismesDur', colAvant: 'automatismes_dur_avant', colApres: 'automatismes_dur_apres', colPlayer: 'surface_dur_automatismes' },
-        { cle: 'automatismesTerre', colAvant: 'automatismes_terre_avant', colApres: 'automatismes_terre_apres', colPlayer: 'surface_terre_automatismes' },
-        { cle: 'automatismesHerbe', colAvant: 'automatismes_herbe_avant', colApres: 'automatismes_herbe_apres', colPlayer: 'surface_herbe_automatismes' },
-        { cle: 'service', colAvant: 'service_avant', colApres: 'service_apres', colPlayer: 'service' },
-        { cle: 'retour', colAvant: 'retour_avant', colApres: 'retour_apres', colPlayer: 'retour' },
-        { cle: 'coupDroitRevers', colAvant: 'coup_droit_revers_avant', colApres: 'coup_droit_revers_apres', colPlayer: 'coup_droit_revers' },
-        { cle: 'effet', colAvant: 'effet_avant', colApres: 'effet_apres', colPlayer: 'effet' },
-        { cle: 'volee', colAvant: 'volee_avant', colApres: 'volee_apres', colPlayer: 'volee' },
-        { cle: 'deplacement', colAvant: 'deplacement_avant', colApres: 'deplacement_apres', colPlayer: 'deplacement' },
-        { cle: 'puissance', colAvant: 'puissance_avant', colApres: 'puissance_apres', colPlayer: 'puissance' },
-        { cle: 'resistance', colAvant: 'resistance_avant', colApres: 'resistance_apres', colPlayer: 'resistance' }
-    ];
 
     const joueurs = [];
     const avertissements = [];
@@ -1194,17 +1224,10 @@ function planifierAnnulationTournoi(tournoiId) {
         const xpARetirer = bareme && idxTour >= 0 ? (bareme[idxTour] || 0) : 0;
         const energieARecrediter = 1 + (e.energie_misee || 0);
 
-        const journal = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? AND semaine = ?').get(e.player_id, tournoi.semaine);
+        const journal = dernierJournalAvant(e.player_id, tournoi.semaine);
         const nbAlertesKine = db.prepare('SELECT COUNT(*) AS n FROM matchs WHERE tournoi_id = ? AND player_id = ? AND kine_intervenu = 1').get(tournoiId, e.player_id).n;
 
-        const champs = {};
-        const champsNonRestaures = [];
-        CHAMPS_PHYSIQUES.forEach(function (c) {
-            const valJournal = journal ? journal[c.colApres] : null;
-            const apres = champOuRepli(valJournal, player[c.colPlayer]);
-            if (valJournal === null || valJournal === undefined) champsNonRestaures.push(c.cle);
-            champs[c.cle] = { avant: player[c.colPlayer], apres: apres };
-        });
+        const { champs, champsNonRestaures } = planPhysiqueDepuisJournal(player, journal);
 
         if (!journal) {
             avertissements.push('Aucun journal_semaine_joueur pour ' + player.prenom + ' ' + player.nom + ' (semaine ' + tournoi.semaine + ') - forme/usure/mental/condition/automatismes/competences NE SERONT PAS restaures pour ce joueur (seuls XP et energie, deterministes, le seront).');
@@ -1226,6 +1249,87 @@ function planifierAnnulationTournoi(tournoiId) {
 
     return { tournoi, nbTours, nbEntrants: entrants.length, nbMatchsTableauASupprimer: nbMatchsTableau, nbPronosAReinitialiser: nbPronosAEffacer, joueurs, avertissements };
 }
+
+// Reparation ciblee d'UN joueur, independante d'un tournoi (2026-09-11) : utile
+// quand /api/admin/annuler-tournoi a deja ete applique sur le tournoi fautif AVANT
+// que le present correctif n'existe - le premier passage a deja remis
+// tour_elimine a NULL sur tournoi_joueurs, donc planifierAnnulationTournoi ne
+// retrouve plus qui etait concerne ni jusqu'ou. Ici on part directement du dernier
+// journal_semaine_joueur connu (jusqu'a la semaine actuelle par defaut, ou une
+// semaine limite explicite en query ?semaine=) et on restaure forme/usure/
+// mental/condition/automatismes/competences champ par champ (meme logique que
+// planPhysiqueDepuisJournal). Ne touche JAMAIS XP/energie (aucun moyen de savoir
+// quel tournoi/combien en retirer une fois tournoi_joueurs deja reinitialise).
+// GET = apercu (rien ecrit) ; POST = applique.
+function planifierRestaurationJoueur(playerId, semaineLimite) {
+    const player = db.prepare('SELECT * FROM players WHERE id = ?').get(playerId);
+    if (!player) return null;
+    const journal = dernierJournalAvant(playerId, semaineLimite);
+    const { champs, champsNonRestaures } = planPhysiqueDepuisJournal(player, journal);
+    const avertissements = [];
+    if (!journal) {
+        avertissements.push('Aucun journal_semaine_joueur trouve pour ' + player.prenom + ' ' + player.nom + ' avant (ou a) la semaine ' + semaineLimite + ' - rien a restaurer.');
+    } else if (champsNonRestaures.length) {
+        avertissements.push(player.prenom + ' ' + player.nom + ' : journal incomplet (ligne du ' + journal.horodatage + ', semaine ' + journal.semaine + ') - champs NON restaures (laisses tels quels) : ' + champsNonRestaures.join(', ') + '.');
+    }
+    return {
+        player: { id: player.id, nom: player.prenom + ' ' + player.nom, type: player.type },
+        journalSemaine: journal ? journal.semaine : null,
+        journalTrouve: !!journal,
+        champs,
+        champsNonRestaures,
+        avertissements
+    };
+}
+
+app.get('/api/admin/restaurer-physique-joueur/:playerId', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineLimite = req.query.semaine ? Number(req.query.semaine) : etat.semaine_actuelle;
+        const plan = planifierRestaurationJoueur(Number(req.params.playerId), semaineLimite);
+        if (!plan) return res.status(404).json({ error: 'Joueur introuvable.' });
+        res.json({ success: true, apercu: true, appliqueRien: true, semaineLimite, plan });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/admin/restaurer-physique-joueur/:playerId', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineLimite = req.body.semaine ? Number(req.body.semaine) : etat.semaine_actuelle;
+        const plan = planifierRestaurationJoueur(Number(req.params.playerId), semaineLimite);
+        if (!plan) return res.status(404).json({ error: 'Joueur introuvable.' });
+
+        db.prepare(`
+            UPDATE players SET
+                forme = ?, usure = ?, mental_courant = ?, mental_max = ?, condition = ?,
+                surface_dur_automatismes = ?, surface_terre_automatismes = ?, surface_herbe_automatismes = ?,
+                service = ?, retour = ?, coup_droit_revers = ?, effet = ?,
+                volee = ?, deplacement = ?, puissance = ?, resistance = ?
+            WHERE id = ?
+        `).run(
+            plan.champs.forme.apres, plan.champs.usure.apres, plan.champs.mentalCourant.apres, plan.champs.mentalMax.apres, plan.champs.condition.apres,
+            plan.champs.automatismesDur.apres, plan.champs.automatismesTerre.apres, plan.champs.automatismesHerbe.apres,
+            plan.champs.service.apres, plan.champs.retour.apres, plan.champs.coupDroitRevers.apres, plan.champs.effet.apres,
+            plan.champs.volee.apres, plan.champs.deplacement.apres, plan.champs.puissance.apres, plan.champs.resistance.apres,
+            plan.player.id
+        );
+
+        invaliderCachesLourds();
+        res.json({ success: true, applique: true, semaineLimite, plan });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
 
 app.get('/api/admin/annuler-tournoi/:calendrierId/:semaine', (req, res) => {
     try {
