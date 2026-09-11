@@ -47,14 +47,6 @@
                 <button id="maintenance-activer-btn" class="cta cta-secondary">Mettre en maintenance</button>
             </div>
 
-            <div style="margin-bottom:32px; padding:16px; border-radius:10px; background:#161C26; border:1px solid #2A3441;">
-                <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
-                    <strong>Vérification avant réouverture</strong>
-                    <button id="verifier-avancement-btn" class="cta cta-secondary" style="padding:8px 16px; font-size:0.75rem;">Vérifier l'état des tournois</button>
-                </div>
-                <p class="match-hint" style="margin:8px 0 0;">Rejoue la même logique de verrouillage que le jeu, sans rien simuler ni écrire — dit exactement, pour chaque tournoi en attente, s'il attend bien sa semaine ou s'il est prêt à jouer un tour au prochain passage automatique.</p>
-                <div id="verifier-avancement-resultat" style="margin-top:12px; font-size:0.85rem;"></div>
-            </div>
 
             <div style="text-align:center; margin-bottom:32px;">
                 <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
@@ -332,39 +324,6 @@
             if (!calendrierId || !semaine) { alert('Renseignez l\'identifiant de calendrier et la semaine.'); return; }
             document.getElementById('suspects-vide').style.display = 'none';
             afficherTournoiSuspect({ calendrier_id: calendrierId, semaine: Number(semaine), nom: calendrierId });
-        });
-
-        const LIBELLES_ETAT_AVANCEMENT = {
-            bloque_semaine_pas_arrivee: { texte: 'Bloqué : sa semaine n\'est pas encore arrivée dans la partie.', couleur: '#7ED957' },
-            bloque_aucune_ancre: { texte: 'Bloqué : sa semaine n\'a pas encore commencé (aucune ancre).', couleur: '#7ED957' },
-            bloque_pas_de_creneau: { texte: 'Bloqué : plus aucun créneau défini pour ce tour.', couleur: '#7ED957' },
-            attend_son_creneau: { texte: 'En attente de son créneau horaire (pas encore dû).', couleur: '#7ED957' },
-            termine_en_attente_statut: { texte: 'Tous les tours joués, en attente de passage au statut "terminé".', couleur: '#8B98A5' },
-            PRET_A_JOUER_AU_PROCHAIN_PASSAGE: { texte: '⚠️ VA JOUER UN TOUR AU PROCHAIN PASSAGE AUTOMATIQUE (sous 15 min).', couleur: '#FF6B6B' }
-        };
-
-        document.getElementById('verifier-avancement-btn').addEventListener('click', async function () {
-            const zone = document.getElementById('verifier-avancement-resultat');
-            zone.innerHTML = 'Chargement...';
-            const response = await fetch('/api/admin/verifier-avancement?adminId=' + adminId);
-            const data = await response.json();
-            if (!response.ok) { zone.innerHTML = data.error || 'Erreur.'; return; }
-
-            if (data.diagnostics.length === 0) {
-                zone.innerHTML = 'Aucun tournoi en attente actuellement (semaine actuelle de la partie : ' + data.semaineActuelleJeu + ').';
-                return;
-            }
-
-            let html = '<div style="margin-bottom:8px;">Semaine actuelle de la partie : <strong>' + data.semaineActuelleJeu + '</strong></div>';
-            data.diagnostics.forEach(function (d) {
-                const libelle = LIBELLES_ETAT_AVANCEMENT[d.etat] || { texte: d.etat, couleur: '#8B98A5' };
-                html += '<div style="padding:8px 0; border-top:1px solid #2A3441;">';
-                html += '<strong>' + d.nom + '</strong> (semaine ' + d.semaine + ', tour ' + d.tourActuel + '/' + d.nbTours + ')<br>';
-                html += '<span style="color:' + libelle.couleur + ';">' + libelle.texte + '</span>';
-                if (d.creneauDu) html += '<br><span style="color:#8B98A5;">Créneau dû à partir de : ' + new Date(d.creneauDu).toLocaleString('fr-FR') + '</span>';
-                html += '</div>';
-            });
-            zone.innerHTML = html;
         });
 
         async function chargerMaintenance() {
