@@ -39,6 +39,11 @@
 
             <h1 class="dashboard-title">Administration</h1>
 
+            <div id="maintenance-badge" style="display:none; text-align:center; margin-bottom:20px; padding:14px; border-radius:10px; background:rgba(212,64,64,0.15); border:1px solid #D44040;">
+                <div style="color:#FF6B6B; font-weight:600;">Site en maintenance — seul votre compte y a accès.</div>
+                <button id="maintenance-toggle-btn" class="cta cta-secondary" style="margin-top:10px;">Désactiver la maintenance</button>
+            </div>
+
             <div style="text-align:center; margin-bottom:32px;">
                 <span class="week-badge" id="semaine-badge">Semaine actuelle : ...</span>
                 <div class="planning-alerte-texte" id="prochain-auto-badge" style="margin-top:8px;"></div>
@@ -234,6 +239,26 @@
             });
         }
 
+        async function chargerMaintenance() {
+            const response = await fetch('/api/admin/maintenance?adminId=' + adminId);
+            const data = await response.json();
+            if (!response.ok) return;
+            document.getElementById('maintenance-badge').style.display = data.active ? 'block' : 'none';
+        }
+
+        document.getElementById('maintenance-toggle-btn').addEventListener('click', async function () {
+            const confirmation = confirm('Désactiver la maintenance va rendre le site accessible à nouveau à tous les coachs. Continuer ?');
+            if (!confirmation) return;
+            const response = await fetch('/api/admin/maintenance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId, activer: false })
+            });
+            const data = await response.json();
+            if (!response.ok) { alert(data.error || 'Erreur.'); return; }
+            chargerMaintenance();
+        });
+
         async function chargerSuspects() {
             const response = await fetch('/api/admin/tournois-suspects?adminId=' + adminId);
             const data = await response.json();
@@ -411,6 +436,7 @@
                 chargerEnAttente();
                 chargerRedacteurs();
                 chargerSuspects();
+                chargerMaintenance();
             }
         })();
     </script>

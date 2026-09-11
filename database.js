@@ -795,7 +795,12 @@ const migrations = [
     // Signature du bareme des pronostics : des qu'elle change, l'historique est
     // re-note au demarrage (server.js). Remplace les 3 flags patch_bareme_* ci-
     // dessus - plus besoin d'une migration par ajustement de valeur.
-    "ALTER TABLE jeu_etat ADD COLUMN bareme_pronos_signature TEXT"
+    "ALTER TABLE jeu_etat ADD COLUMN bareme_pronos_signature TEXT",
+    // Mode maintenance (2026-09-11, urgence) : quand actif, seul le compte admin
+    // "Rowdy" garde acces au site (middleware dans server.js) - tout le reste voit
+    // une page/reponse de maintenance. Toggle via POST /api/admin/maintenance.
+    "ALTER TABLE jeu_etat ADD COLUMN maintenance INTEGER DEFAULT 0",
+    "ALTER TABLE jeu_etat ADD COLUMN patch_maintenance_urgence_20260911 INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {
@@ -805,6 +810,18 @@ migrations.forEach(function (sql) {
         // Colonne deja existante : rien a faire
     }
 });
+
+// One-shot : active le mode maintenance des le premier demarrage apres ce
+// deploiement (demande explicite et urgente de l'utilisateur, 2026-09-11, pendant
+// la reparation des tournois simules trop tot). Guarde par un flag pour ne jamais
+// re-forcer le mode maintenance a chaque redemarrage une fois que l'admin l'aura
+// desactive volontairement.
+(function activerMaintenanceUrgence() {
+    const etat = db.prepare('SELECT patch_maintenance_urgence_20260911 FROM jeu_etat WHERE id = 1').get();
+    if (etat && !etat.patch_maintenance_urgence_20260911) {
+        db.prepare('UPDATE jeu_etat SET maintenance = 1, patch_maintenance_urgence_20260911 = 1 WHERE id = 1').run();
+    }
+})();
 
 // Ces 2 index portent sur des colonnes ajoutees par les migrations ci-dessus
 // (rival_id, match_id_j2) - sur une base VIERGE (jamais migree depuis l'ancien

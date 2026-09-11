@@ -83,10 +83,48 @@ const PORT = process.env.PORT || 3000;
 // doublon "1 compte par IP" a l'inscription).
 app.set('trust proxy', 1);
 
+app.use(cookieParser());
+
+// Mode maintenance (2026-09-11, urgence pendant la reparation des tournois
+// simules trop tot) : quand jeu_etat.maintenance = 1, seul le compte admin dont
+// le pseudo est "Rowdy" garde l'acces - tout le reste (pages HTML statiques
+// comprises, pas seulement l'API) voit une reponse de maintenance. Doit tourner
+// AVANT express.static (sinon les pages/CSS/JS restent servis normalement a tout
+// le monde) et donc juste apres cookieParser (seul prerequis : lire le cookie de
+// session), bien avant le middleware authentifier plus bas qui ne couvre que
+// /api/*.
+const CHEMINS_MAINTENANCE_AUTORISES = ['/connexion.html', '/style.css', '/ball.png', '/court.jpg', '/favicon.ico'];
+app.use(function (req, res, next) {
+    const etat = db.prepare('SELECT maintenance FROM jeu_etat WHERE id = 1').get();
+    if (!etat || !etat.maintenance) return next();
+
+    const token = req.cookies.session_token;
+    let userId = null;
+    if (token) {
+        const session = db.prepare('SELECT user_id, date_expiration FROM sessions WHERE token = ?').get(token);
+        if (session && new Date(session.date_expiration) > new Date()) userId = session.user_id;
+    }
+    if (userId) {
+        const user = db.prepare('SELECT pseudo, role FROM users WHERE id = ?').get(userId);
+        if (user && user.role === 'admin' && user.pseudo && user.pseudo.toLowerCase() === 'rowdy') return next();
+    }
+
+    if (req.path === '/api/connexion' && req.method === 'POST') return next();
+    if (CHEMINS_MAINTENANCE_AUTORISES.includes(req.path)) return next();
+
+    if (req.path.startsWith('/api/')) {
+        return res.status(503).json({ error: 'Le site est actuellement en maintenance. Reessayez un peu plus tard.' });
+    }
+    res.status(503).send(`<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"><title>Maintenance — Tennis Web Manager</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<style>body{font-family:sans-serif;background:#10151c;color:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;text-align:center;padding:24px;}
+div{max-width:480px;}h1{font-size:1.6rem;}p{color:#8B98A5;}</style></head>
+<body><div><h1>Site en maintenance</h1><p>Tennis Web Manager est temporairement indisponible pour une intervention technique. Merci de revenir un peu plus tard.</p></div></body></html>`);
+});
+
 app.use('/uploads', express.static(path.join(DOSSIER_DONNEES, 'uploads')));
 app.use(express.static(__dirname));
 app.use(express.json());
-app.use(cookieParser());
 
 const DUREE_SESSION_MS = 30 * 24 * 60 * 60 * 1000; // 30 jours
 
@@ -816,6 +854,18 @@ function estAdmin(adminId) {
     const user = db.prepare('SELECT role FROM users WHERE id = ?').get(adminId);
     return user && user.role === 'admin';
 }
+
+app.get('/api/admin/maintenance', (req, res) => {
+    if (!estAdmin(req.userId)) return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+    const etat = db.prepare('SELECT maintenance FROM jeu_etat WHERE id = 1').get();
+    res.json({ success: true, active: !!(etat && etat.maintenance) });
+});
+
+app.post('/api/admin/maintenance', (req, res) => {
+    if (!estAdmin(req.userId)) return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+    db.prepare('UPDATE jeu_etat SET maintenance = ? WHERE id = 1').run(req.body.activer ? 1 : 0);
+    res.json({ success: true, active: !!req.body.activer });
+});
 
 // Recherche d'un joueur reel (admin) - utilitaire de diagnostic pour les
 // corrections ponctuelles de donnees (age, nationalite...). Retourne les valeurs
