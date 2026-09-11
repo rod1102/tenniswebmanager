@@ -807,7 +807,11 @@ const migrations = [
     // reposer pour redemarrer son propre rythme de creneaux sans affecter les
     // AUTRES tournois de la meme semaine. Quand elle est posee, executerAvancementTour
     // l'utilise a la place de l'ancre de semaine pour CE tournoi uniquement.
-    "ALTER TABLE tournois ADD COLUMN ancre_reset TEXT"
+    "ALTER TABLE tournois ADD COLUMN ancre_reset TEXT",
+    // Marqueur du recalibrage des bots des tournois deja tires (mais pas commences)
+    // sur la nouvelle bande 60-85 % sans plancher (2026-09-11, demande explicite).
+    // Voir le bloc garde dans server.js (au demarrage).
+    "ALTER TABLE jeu_etat ADD COLUMN patch_bande_60_85_20260911 INTEGER DEFAULT 0"
 ];
 
 migrations.forEach(function (sql) {

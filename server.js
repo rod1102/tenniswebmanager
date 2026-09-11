@@ -10867,6 +10867,23 @@ try {
     console.error('[bots_reels_inscrits] echec :', err.message);
 }
 
+// Meme principe que le recalibrage ci-dessus, pour le passage a la bande 60-85 %
+// sans plancher (2026-09-11, demande explicite de l'utilisateur) : les tournois
+// deja tires mais pas encore commences reprennent immediatement le nouveau reglage
+// au lieu d'attendre leur prochain tirage (qui n'arrivera jamais, un tournoi n'etant
+// jamais re-tire). Les tournois en cours (tour_actuel > 0) sont laisses tels quels -
+// leurs bots deja engages gardent le niveau qu'ils avaient au tirage.
+try {
+    if (db.prepare('SELECT patch_bande_60_85_20260911 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+        const aRecaler = db.prepare("SELECT id, circuit FROM tournois WHERE statut = 'a_venir' AND tour_actuel = 0").all();
+        aRecaler.forEach(function (t) { recalerNiveauxBotsTournoi(t.id, t.circuit); });
+        db.prepare('UPDATE jeu_etat SET patch_bande_60_85_20260911 = 1 WHERE id = 1').run();
+        console.log('[bande_60_85] ' + aRecaler.length + ' tournoi(s) a_venir recalibre(s)');
+    }
+} catch (err) {
+    console.error('[bande_60_85] echec :', err.message);
+}
+
 verifierAvancementAuto();
 setInterval(verifierAvancementAuto, 15 * 60 * 1000);
 
