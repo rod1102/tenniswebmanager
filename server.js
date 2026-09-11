@@ -2659,6 +2659,26 @@ function executerAvancementTour(force) {
     const etatCourant = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
     db.prepare('INSERT OR IGNORE INTO semaines_reelles (semaine, debut_reel) VALUES (?, ?)').run(etatCourant.semaine_actuelle, new Date().toISOString());
 
+    // Filet de securite (2), 2026-09-11 : une semaine PASSEE peut elle aussi n'avoir
+    // jamais recu d'ancre (bug constate : semaine_actuelle a la semaine 4, mais aucune
+    // ligne semaines_reelles pour la semaine 3 alors que 1, 2 et 4 en ont une - un
+    // tournoi deja tire mais jamais commence restait alors bloque pour toujours, meme
+    // via le bouton force "Avancer un tour", puisque le garde-fou ci-dessus ne comble
+    // que la semaine COURANTE). On comble ici toute semaine encore utile (portee par
+    // un tournoi 'a_venir') mais sans ancre, avec une date tres ancienne (epoque Unix)
+    // plutot que "maintenant" - une semaine deja entamee depuis longtemps doit voir
+    // tous ses creneaux consideres comme deja passes, pas redemarrer un delai de
+    // plusieurs jours reels.
+    const semainesNecessaires = new Set();
+    db.prepare("SELECT semaine, taille_tableau, format FROM tournois WHERE statut = 'a_venir'").all().forEach(function (t) {
+        semainesNecessaires.add(t.semaine);
+        if (calculerLabelsTours(t.taille_tableau, t.format).length === 7) semainesNecessaires.add(t.semaine + 1);
+    });
+    const insererAncreManquante = db.prepare('INSERT OR IGNORE INTO semaines_reelles (semaine, debut_reel) VALUES (?, ?)');
+    semainesNecessaires.forEach(function (s) {
+        if (s !== etatCourant.semaine_actuelle) insererAncreManquante.run(s, new Date(0).toISOString());
+    });
+
     const idsTournoisActifs = db.prepare("SELECT id FROM tournois WHERE statut = 'a_venir'").all().map(function (r) { return r.id; });
 
     idsTournoisActifs.forEach(function (tournoiId) {
