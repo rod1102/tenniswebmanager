@@ -902,6 +902,162 @@ app.get('/api/admin/tournoi-niveaux/:calendrierId/:semaine', (req, res) => {
     }
 });
 
+// Simulation "dry-run" (admin) d'un tableau deja tire : rejoue le tournoi N fois
+// EN MEMOIRE, sans jamais rien ecrire en base (aucun INSERT/UPDATE) - juste pour
+// projeter des resultats plausibles a partir des inscrits/niveaux ACTUELS. Reprend
+// la meme logique de niveau que le vrai moteur (niveauNormal + bonus de
+// dispositions + style + mental sur les points importants pour un joueur reel,
+// niveau stocke tel quel pour un bot), mais SIMPLIFIE la degradation physique
+// d'un tour a l'autre au sein d'une meme simulation : seule la FORME baisse
+// (meme formule que appliquerEtatPostMatch), le mental/l'usure/la condition
+// restent figes a leur valeur actuelle du joueur - et rien de tout ca n'est
+// jamais persiste, chaque simulation repart de l'etat REEL actuel. Les tournois
+// en poules (Masters de fin de saison) ne sont pas geres ici.
+function resoudreMatchDryRun(tournoi, j1, j2, label, tourIndex, meilleurDe5, estIndoor, premiersToursMax, getSnapshotReel) {
+    if (!j1.est_reel && !j2.est_reel) {
+        const r = simulerMatch(j1.niveau, j1.niveau + 100, j2.niveau, j2.niveau + 100, null, undefined, null, undefined, 0, 0, meilleurDe5);
+        return r.vainqueur === 'A' ? j1 : j2;
+    }
+
+    const contexteBase = { estDemiOuFinale: label === '1/2 finale' || label === 'Finale', tourIndex: tourIndex, premiersToursMax: premiersToursMax, estIndoor: estIndoor };
+
+    if (j1.est_reel !== j2.est_reel) {
+        const reel = j1.est_reel ? j1 : j2, bot = j1.est_reel ? j2 : j1;
+        const snap = getSnapshotReel(reel.player_id);
+        const niveauNormalBrut = niveauNormal(snap, tournoi.surface, (reel.energie_misee || 0) * 5);
+        const bonus = calculerBonusDispositions(snap, bot, Object.assign({ esTeteDeSerie: !!reel.tete_de_serie, adversaireEsTeteDeSerie: !!bot.tete_de_serie }, contexteBase));
+        const niveauNormalAvec = niveauNormalBrut + bonus.fixe;
+        const niveauMental = niveauNormalAvec - snap.forme + snap.mental_courant;
+        const style = styleDuTourCourant(tournoi.id, snap, reel);
+        const r = simulerMatch(niveauNormalAvec, niveauMental, bot.niveau, bot.niveau + 100, style, snap.mental_courant, null, undefined, bonus.sangFroid, 0, meilleurDe5,
+            { forme: snap.forme, pointsEnergie: snap.points_energie, condition: snap.condition, type: snap.type });
+        const taux = style === 'prudence' ? 0.08 : (style === 'en_avant' ? 0.12 : 0.10);
+        snap.forme = Math.max(0, snap.forme - r.totalJeux * taux);
+        return r.vainqueur === 'A' ? reel : bot;
+    }
+
+    // 2 vrais joueurs (2 coachs differents dans le meme tableau).
+    const snap1 = getSnapshotReel(j1.player_id), snap2 = getSnapshotReel(j2.player_id);
+    const bonus1 = calculerBonusDispositions(snap1, j2, Object.assign({ esTeteDeSerie: !!j1.tete_de_serie, adversaireEsTeteDeSerie: !!j2.tete_de_serie }, contexteBase));
+    const bonus2 = calculerBonusDispositions(snap2, j1, Object.assign({ esTeteDeSerie: !!j2.tete_de_serie, adversaireEsTeteDeSerie: !!j1.tete_de_serie }, contexteBase));
+    const niveau1 = niveauNormal(snap1, tournoi.surface, (j1.energie_misee || 0) * 5) + bonus1.fixe;
+    const niveau1Mental = niveau1 - snap1.forme + snap1.mental_courant;
+    const niveau2 = niveauNormal(snap2, tournoi.surface, (j2.energie_misee || 0) * 5) + bonus2.fixe;
+    const niveau2Mental = niveau2 - snap2.forme + snap2.mental_courant;
+    const style1 = styleDuTourCourant(tournoi.id, snap1, j1), style2 = styleDuTourCourant(tournoi.id, snap2, j2);
+    const r = simulerMatch(niveau1, niveau1Mental, niveau2, niveau2Mental, style1, snap1.mental_courant, style2, snap2.mental_courant, bonus1.sangFroid, bonus2.sangFroid, meilleurDe5,
+        { forme: snap1.forme, pointsEnergie: snap1.points_energie, condition: snap1.condition, type: snap1.type },
+        { forme: snap2.forme, pointsEnergie: snap2.points_energie, condition: snap2.condition, type: snap2.type });
+    const taux1 = style1 === 'prudence' ? 0.08 : (style1 === 'en_avant' ? 0.12 : 0.10);
+    const taux2 = style2 === 'prudence' ? 0.08 : (style2 === 'en_avant' ? 0.12 : 0.10);
+    snap1.forme = Math.max(0, snap1.forme - r.totalJeux * taux1);
+    snap2.forme = Math.max(0, snap2.forme - r.totalJeux * taux2);
+    return r.vainqueur === 'A' ? j1 : j2;
+}
+
+// Une simulation complete du tableau (entrants fixes, position_tableau deja fige
+// par le vrai tirage) -> Map entrant.id -> tour ou il est sorti ('Vainqueur' pour
+// le champion). Les BYE sont sautes (jamais un vrai perdant).
+function simulerBracketDryRun(tournoi, entrants, labelsTours, meilleurDe5, estIndoor, premiersToursMax) {
+    const snapshots = new Map();
+    function getSnapshotReel(playerId) {
+        if (!snapshots.has(playerId)) snapshots.set(playerId, db.prepare('SELECT * FROM players WHERE id = ?').get(playerId));
+        return snapshots.get(playerId);
+    }
+
+    let vivants = entrants.slice();
+    const parcours = new Map();
+    for (let tourIndex = 0; vivants.length > 1; tourIndex++) {
+        const label = labelsTours[tourIndex];
+        const suivants = [];
+        for (let i = 0; i < vivants.length; i += 2) {
+            const j1 = vivants[i], j2 = vivants[i + 1];
+            let vainqueur;
+            if (j1.nom === 'BYE') vainqueur = j2;
+            else if (j2.nom === 'BYE') vainqueur = j1;
+            else vainqueur = resoudreMatchDryRun(tournoi, j1, j2, label, tourIndex, meilleurDe5, estIndoor, premiersToursMax, getSnapshotReel);
+            const perdant = vainqueur === j1 ? j2 : j1;
+            if (perdant.nom !== 'BYE') parcours.set(perdant.id, label);
+            suivants.push(vainqueur);
+        }
+        vivants = suivants;
+    }
+    if (vivants[0]) parcours.set(vivants[0].id, 'Vainqueur');
+    return parcours;
+}
+
+app.get('/api/admin/simuler-bracket/:calendrierId/:semaine', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(req.params.calendrierId, Number(req.params.semaine));
+        if (!tournoi) {
+            return res.status(404).json({ error: 'Tournoi introuvable pour ce calendrier_id / cette semaine.' });
+        }
+        if (tournoi.format === 'poules') {
+            return res.status(400).json({ error: 'Simulation dry-run non disponible pour un format poules (Masters de fin de saison).' });
+        }
+
+        const n = Math.min(50, Math.max(1, parseInt(req.query.n, 10) || 20));
+        const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === tournoi.calendrier_id; });
+        const labelsTours = calculerLabelsTours(tournoi.taille_tableau, tournoi.format);
+        const nbTours = labelsTours.length;
+        const meilleurDe5 = tournoi.circuit === 'ATP' && tournoi.categorie === 'slam';
+        const estIndoor = !!(entree && entree.indoor);
+        const premiersToursMax = nbTours === 7 ? 2 : 1;
+
+        const entrants = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? ORDER BY position_tableau').all(tournoi.id);
+        if (entrants.length < 2) {
+            return res.status(400).json({ error: 'Ce tournoi n a pas encore de tableau (pas tire).' });
+        }
+
+        // Pour un joueur reel, tournoi_joueurs.niveau est fige a l'inscription (jamais
+        // resynchronise) - on affiche plutot son niveauNormal ACTUEL sur la surface du
+        // tournoi (celui reellement utilise par la simulation), pas cette valeur perimee.
+        const infoEntrant = function (e) {
+            if (!e) return null;
+            let niveauAffiche = e.niveau;
+            if (e.est_reel && e.player_id) {
+                const p = db.prepare('SELECT * FROM players WHERE id = ?').get(e.player_id);
+                if (p) niveauAffiche = Math.round(niveauNormal(p, tournoi.surface, (e.energie_misee || 0) * 5));
+            }
+            return { nom: e.nom, estReel: !!e.est_reel, niveau: niveauAffiche, nationalite: e.nationalite, teteDeSerie: e.tete_de_serie || null };
+        };
+
+        const resultats = [];
+        for (let run = 0; run < n; run++) {
+            const parcours = simulerBracketDryRun(tournoi, entrants, labelsTours, meilleurDe5, estIndoor, premiersToursMax);
+
+            let vainqueur = null;
+            let meilleurBot = null, meilleurBotIdx = -1, meilleurBotLabel = null;
+            entrants.forEach(function (e) {
+                const label = parcours.get(e.id);
+                if (label === 'Vainqueur') vainqueur = e;
+                if (e.est_reel || e.nom === 'BYE' || !label) return;
+                const idx = label === 'Vainqueur' ? labelsTours.length : labelsTours.indexOf(label);
+                if (idx > meilleurBotIdx) { meilleurBotIdx = idx; meilleurBot = e; meilleurBotLabel = label; }
+            });
+
+            resultats.push({
+                vainqueur: infoEntrant(vainqueur),
+                meilleurBot: meilleurBot ? Object.assign(infoEntrant(meilleurBot), { tourAtteint: meilleurBotLabel }) : null
+            });
+        }
+
+        res.json({
+            success: true,
+            tournoi: { id: tournoi.id, nom: tournoi.nom, circuit: tournoi.circuit, categorie: tournoi.categorie, surface: tournoi.surface, taille_tableau: tournoi.taille_tableau, statut: tournoi.statut },
+            n,
+            resultats,
+            avertissement: "Simulation en memoire uniquement : n'ecrit rien en base (jamais joue pour de vrai). Approximation : seule la forme d'un joueur reel baisse d'un tour a l'autre AU SEIN d'une simulation (meme formule que le vrai moteur) ; mental/usure/condition restent figes a leur valeur actuelle. Chaque simulation repart de l'etat reel actuel des joueurs."
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/admin/en-attente', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
