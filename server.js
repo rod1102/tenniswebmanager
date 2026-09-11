@@ -3262,6 +3262,66 @@ function executerAvancementTour(force) {
     return quelqueChoseSimule;
 }
 
+// Diagnostic LECTURE SEULE (2026-09-11) : rejoue EXACTEMENT la meme logique de
+// verrouillage qu'executerAvancementTour (verrou semaine_actuelle, ancre, creneau)
+// pour chaque tournoi 'a_venir', sans jamais rien simuler ni ecrire en base -
+// permet de VERIFIER avant de rouvrir le site qu'aucun tournoi ne va jouer un tour
+// tant que sa semaine n'est pas reellement arrivee, plutot que de devoir le croire
+// sur parole.
+function diagnostiquerAvancementTournois() {
+    const etatCourant = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const tournois = db.prepare("SELECT * FROM tournois WHERE statut = 'a_venir' ORDER BY semaine, circuit, nom").all();
+
+    const diagnostics = tournois.map(function (tournoi) {
+        const nbTours = calculerLabelsTours(tournoi.taille_tableau, tournoi.format).length;
+        const tourIndex = tournoi.tour_actuel;
+        const base = { id: tournoi.id, calendrierId: tournoi.calendrier_id, nom: tournoi.nom, semaine: tournoi.semaine, tourActuel: tourIndex, nbTours };
+
+        if (tourIndex >= nbTours) return Object.assign(base, { etat: 'termine_en_attente_statut' });
+
+        const semaineTour = (nbTours === 7 && tourIndex >= 3) ? tournoi.semaine + 1 : tournoi.semaine;
+        if (semaineTour > etatCourant.semaine_actuelle) {
+            return Object.assign(base, { etat: 'bloque_semaine_pas_arrivee', semaineTour, semaineActuelleJeu: etatCourant.semaine_actuelle });
+        }
+
+        const ancre = db.prepare('SELECT debut_reel FROM semaines_reelles WHERE semaine = ?').get(semaineTour);
+        if (!ancre) return Object.assign(base, { etat: 'bloque_aucune_ancre', semaineTour });
+
+        const creneaux = nbTours === 7
+            ? (tourIndex < 3 ? CRENEAUX_TOUR_2_SEMAINES_S1 : CRENEAUX_TOUR_2_SEMAINES_S2)
+            : CRENEAUX_TOUR_1_SEMAINE;
+        const indexCreneau = (nbTours === 7 && tourIndex >= 3) ? tourIndex - 3 : tourIndex;
+        const offsetHeures = creneaux[indexCreneau];
+        if (offsetHeures === undefined) return Object.assign(base, { etat: 'bloque_pas_de_creneau' });
+
+        const referenceReelle = tournoi.ancre_reset || ancre.debut_reel;
+        const horaire = new Date(referenceReelle).getTime() + offsetHeures * 60 * 60 * 1000;
+        const pret = Date.now() >= horaire;
+        return Object.assign(base, {
+            etat: pret ? 'PRET_A_JOUER_AU_PROCHAIN_PASSAGE' : 'attend_son_creneau',
+            semaineTour,
+            referenceUtilisee: tournoi.ancre_reset ? 'ancre_reset (tournoi)' : 'ancre de semaine (partagee)',
+            referenceHoraire: referenceReelle,
+            offsetHeures,
+            creneauDu: new Date(horaire).toISOString()
+        });
+    });
+
+    return { semaineActuelleJeu: etatCourant.semaine_actuelle, diagnostics };
+}
+
+app.get('/api/admin/verifier-avancement', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        res.json({ success: true, lectureSeuleRienEcrit: true, ...diagnostiquerAvancementTournois() });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 let avancementTourEnCours = false;
 
 function verifierAvancementTourAuto() {
