@@ -1364,7 +1364,11 @@ app.post('/api/admin/annuler-tournoi/:calendrierId/:semaine', (req, res) => {
             db.prepare('DELETE FROM tournoi_matchs WHERE tournoi_id = ?').run(tournoi.id);
             db.prepare('DELETE FROM matchs WHERE tournoi_id = ?').run(tournoi.id);
             db.prepare('UPDATE pronostics SET points_gagnes = NULL WHERE tournoi_id = ?').run(tournoi.id);
-            db.prepare("UPDATE tournois SET statut = 'a_venir', tour_actuel = 0 WHERE id = ?").run(tournoi.id);
+            // ancre_reset = maintenant : evite que ce tournoi ne reutilise l'ancre
+            // (potentiellement vieille de plusieurs jours) de la semaine ingame partagee
+            // avec d'autres tournois, ce qui rendrait tous ses creneaux instantanement
+            // "dus" et le ferait se re-simuler d'un coup au prochain passage automatique.
+            db.prepare("UPDATE tournois SET statut = 'a_venir', tour_actuel = 0, ancre_reset = ? WHERE id = ?").run(new Date().toISOString(), tournoi.id);
 
             // plan.joueurs porte deja des valeurs "apres" surs pour chaque champ (XP et
             // energie toujours deterministes ; les champs physiques retombent sur la
@@ -3217,7 +3221,13 @@ function executerAvancementTour(force) {
                 const indexCreneau = (nbTours === 7 && tourIndex >= 3) ? tourIndex - 3 : tourIndex;
                 const offsetHeures = creneaux[indexCreneau];
                 if (offsetHeures === undefined) break;
-                const horaire = new Date(ancre.debut_reel).getTime() + offsetHeures * 60 * 60 * 1000;
+                // tournoi.ancre_reset (posee par /api/admin/annuler-tournoi) prend le pas
+                // sur l'ancre partagee de la semaine : sans ca, un tournoi remis a l'etat
+                // "tire" reutiliserait l'ancre de semaine originale (potentiellement vieille
+                // de plusieurs jours), rendant tous ses creneaux instantanement "dus" et le
+                // faisant se re-simuler d'un coup des le prochain passage automatique.
+                const referenceReelle = tournoi.ancre_reset || ancre.debut_reel;
+                const horaire = new Date(referenceReelle).getTime() + offsetHeures * 60 * 60 * 1000;
                 pret = Date.now() >= horaire;
             }
 

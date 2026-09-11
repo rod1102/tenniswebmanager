@@ -78,6 +78,17 @@
                 </table>
             </div>
 
+            <h1 class="dashboard-title" style="font-size:1.8rem; margin-top:40px;">Tournois à remettre en état de tirage</h1>
+            <p class="match-hint">« Aperçu » ne modifie rien ; « Annuler ce tournoi » ramène le tournoi à son état juste tiré (aucun tour joué) et tente de restaurer forme/énergie/XP des vrais joueurs concernés.</p>
+            <p class="match-hint">Détectés automatiquement ci-dessous (terminés avant que leur semaine ne soit vraiment arrivée). Si un tournoi n'y apparaît pas (sa semaine a déjà été rattrapée depuis), indiquez son identifiant de calendrier et sa semaine à la main.</p>
+            <div id="suspects-vide" style="text-align:center; color:#8B98A5; display:none;">Aucun tournoi suspect détecté automatiquement.</div>
+            <div id="suspects-liste"></div>
+            <div style="display:flex; gap:10px; margin:14px 0; flex-wrap:wrap; align-items:center;">
+                <input type="text" id="manuel-calendrier-input" placeholder="Identifiant calendrier (ex. atp-brisbane)" style="flex:1; min-width:200px; padding:10px 14px; border-radius:8px; border:1px solid #2A3441; background:#161C26; color:#fff;">
+                <input type="number" id="manuel-semaine-input" placeholder="Semaine" style="width:110px; padding:10px 14px; border-radius:8px; border:1px solid #2A3441; background:#161C26; color:#fff;">
+                <button id="manuel-ajouter-btn" class="cta cta-secondary" style="padding:10px 20px; font-size:0.8rem;">Charger ce tournoi</button>
+            </div>
+
         </div>
     </div>
 
@@ -238,6 +249,82 @@
             });
         }
 
+        function afficherTournoiSuspect(t) {
+            const liste = document.getElementById('suspects-liste');
+            const existant = liste.querySelector('[data-bloc-calendrier="' + t.calendrier_id + '"][data-bloc-semaine="' + t.semaine + '"]');
+            if (existant) return;
+
+            const bloc = document.createElement('div');
+            bloc.className = 'player-summary';
+            bloc.style.marginBottom = '14px';
+            bloc.setAttribute('data-bloc-calendrier', t.calendrier_id);
+            bloc.setAttribute('data-bloc-semaine', t.semaine);
+            bloc.innerHTML = `
+                <div class="player-summary-name">${t.nom || t.calendrier_id} — semaine ${t.semaine}</div>
+                <div class="apercu-annulation" style="margin:10px 0; font-size:0.85rem; color:#8B98A5;"></div>
+                <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                    <button class="cta cta-secondary btn-apercu" style="padding:8px 14px; font-size:0.75rem;" data-calendrier="${t.calendrier_id}" data-semaine="${t.semaine}">Aperçu</button>
+                    <button class="cta cta-primary btn-annuler" style="padding:8px 14px; font-size:0.75rem;" data-calendrier="${t.calendrier_id}" data-semaine="${t.semaine}">Annuler ce tournoi</button>
+                </div>
+            `;
+            liste.appendChild(bloc);
+
+            bloc.querySelector('.btn-apercu').addEventListener('click', async function () {
+                const zone = bloc.querySelector('.apercu-annulation');
+                zone.textContent = 'Chargement...';
+                const response = await fetch('/api/admin/annuler-tournoi/' + t.calendrier_id + '/' + t.semaine + '?adminId=' + adminId);
+                const data = await response.json();
+                if (!response.ok) { zone.textContent = data.error || 'Erreur.'; return; }
+                const plan = data.plan;
+                let html = '<strong>Statut actuel : ' + plan.tournoi.statut + ', ' + plan.nbEntrants + ' entrants, ' + plan.nbMatchsTableauASupprimer + ' matchs à supprimer.</strong><br>';
+                plan.joueurs.forEach(function (j) {
+                    html += '<br>' + j.nom + ' (éliminé : ' + j.tourAtteint + ') — XP ' + j.xp.avant + ' → ' + j.xp.apres + ', énergie ' + j.energie.avant + ' → ' + j.energie.apres + ', forme ' + j.forme.avant + ' → ' + j.forme.apres;
+                    if (j.champsNonRestaures.length) html += ' <em>(non restauré : ' + j.champsNonRestaures.join(', ') + ')</em>';
+                });
+                if (plan.avertissements.length) html += '<br><br><strong>Avertissements :</strong><br>' + plan.avertissements.join('<br>');
+                zone.innerHTML = html;
+            });
+
+            bloc.querySelector('.btn-annuler').addEventListener('click', async function () {
+                const confirmation = confirm('Annuler ce tournoi va supprimer tous ses matchs joués, réinitialiser les pronostics notés, et tenter de restaurer forme/énergie/XP des vrais joueurs impliqués. Irréversible. Continuer ?');
+                if (!confirmation) return;
+                const response = await fetch('/api/admin/annuler-tournoi/' + t.calendrier_id + '/' + t.semaine, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ adminId })
+                });
+                const data = await response.json();
+                if (!response.ok) { alert(data.error || 'Erreur.'); return; }
+                alert('Tournoi annulé et remis à l\'état "tiré".');
+                chargerSuspects();
+            });
+        }
+
+        async function chargerSuspects() {
+            const response = await fetch('/api/admin/tournois-suspects?adminId=' + adminId);
+            const data = await response.json();
+            if (!response.ok) return;
+
+            const liste = document.getElementById('suspects-liste');
+            const vide = document.getElementById('suspects-vide');
+            liste.innerHTML = '';
+
+            if (data.suspects.length === 0) {
+                vide.style.display = 'block';
+                return;
+            }
+            vide.style.display = 'none';
+            data.suspects.forEach(afficherTournoiSuspect);
+        }
+
+        document.getElementById('manuel-ajouter-btn').addEventListener('click', function () {
+            const calendrierId = document.getElementById('manuel-calendrier-input').value.trim();
+            const semaine = document.getElementById('manuel-semaine-input').value;
+            if (!calendrierId || !semaine) { alert('Renseignez l\'identifiant de calendrier et la semaine.'); return; }
+            document.getElementById('suspects-vide').style.display = 'none';
+            afficherTournoiSuspect({ calendrier_id: calendrierId, semaine: Number(semaine), nom: calendrierId });
+        });
+
         async function chargerMaintenance() {
             const response = await fetch('/api/admin/maintenance?adminId=' + adminId);
             const data = await response.json();
@@ -382,6 +469,7 @@
                 chargerSemaine();
                 chargerEnAttente();
                 chargerRedacteurs();
+                chargerSuspects();
                 chargerMaintenance();
             }
         })();

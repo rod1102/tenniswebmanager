@@ -800,7 +800,14 @@ const migrations = [
     // "Rowdy" garde acces au site (middleware dans server.js) - tout le reste voit
     // une page/reponse de maintenance. Toggle via POST /api/admin/maintenance.
     "ALTER TABLE jeu_etat ADD COLUMN maintenance INTEGER DEFAULT 0",
-    "ALTER TABLE jeu_etat ADD COLUMN patch_maintenance_urgence_20260911 INTEGER DEFAULT 0"
+    "ALTER TABLE jeu_etat ADD COLUMN patch_maintenance_urgence_20260911 INTEGER DEFAULT 0",
+    // Ancre temps reel PROPRE a un tournoi (2026-09-11) : semaines_reelles.debut_reel
+    // est partagee par TOUS les tournois d'une meme semaine ingame - un tournoi
+    // remis a l'etat "tire" par /api/admin/annuler-tournoi ne peut donc pas s'y
+    // reposer pour redemarrer son propre rythme de creneaux sans affecter les
+    // AUTRES tournois de la meme semaine. Quand elle est posee, executerAvancementTour
+    // l'utilise a la place de l'ancre de semaine pour CE tournoi uniquement.
+    "ALTER TABLE tournois ADD COLUMN ancre_reset TEXT"
 ];
 
 migrations.forEach(function (sql) {
