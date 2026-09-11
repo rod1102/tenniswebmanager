@@ -3210,6 +3210,19 @@ function executerAvancementTour(force) {
             // Tournoi 7 tours (2 semaines) : les tours 0-2 se jouent la semaine de
             // depart, les tours 3-6 (huitieme->finale) la semaine ingame suivante.
             const semaineTour = (nbTours === 7 && tourIndex >= 3) ? tournoi.semaine + 1 : tournoi.semaine;
+
+            // Verrou explicite sur l'etat REEL de la partie (2026-09-11) : la seule
+            // presence d'une ligne semaines_reelles pour semaineTour ne suffit pas a
+            // garantir que cette semaine est vraiment arrivee - une ligne perimee (posee
+            // par le bug d'ancre du 2026-09-11, avant sa correction) peut rester en base
+            // indefiniment pour une semaine jamais vraiment atteinte, et fausserait alors
+            // le test `if (!ancre) break` ci-dessous en le laissant toujours passer. On
+            // verifie donc ICI, independamment de l'ancre, que la partie a bien atteint
+            // semaineTour - sans ca, un tournoi de semaine future pouvait rejouer son
+            // 1er tour des sa reinitialisation (ancre_reset) meme si la partie en est
+            // encore a une semaine anterieure.
+            if (semaineTour > etatCourant.semaine_actuelle) break;
+
             const ancre = db.prepare('SELECT debut_reel FROM semaines_reelles WHERE semaine = ?').get(semaineTour);
             if (!ancre) break; // la semaine ingame concernee n'a pas encore commence (verrou naturel)
 
