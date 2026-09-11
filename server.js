@@ -7794,16 +7794,28 @@ app.get('/api/adversaire/rival/:rivalId', (req, res) => {
         `).all(rivalId);
         palmares.forEach(function (p) { p.positionSemaine = positionSemaineAffichee(p.semaine); });
 
+        // UNION de 2 requetes indexees plutot qu'un WHERE j1... OR j2... (2026-09-11,
+        // perf - meme raisonnement que matchsOrientes) : evite un scan complet de
+        // tournoi_matchs, qui ne fait que grossir semaine apres semaine.
         const matchsBruts = db.prepare(`
-            SELECT t.id AS tournoi_id, t.nom AS tournoi_nom, t.calendrier_id AS tournoi_calendrier_id, t.semaine, t.surface, tm.numero_tour, tm.score, tm.vainqueur_id,
+            SELECT t.id AS tournoi_id, t.nom AS tournoi_nom, t.calendrier_id AS tournoi_calendrier_id, t.semaine, t.surface, tm.numero_tour, tm.score, tm.vainqueur_id, tm.id AS match_id,
                    j1.id AS j1_id, j1.rival_id AS j1_rival_id, j1.player_id AS j1_player_id, j1.nom AS j1_nom,
                    j2.id AS j2_id, j2.rival_id AS j2_rival_id, j2.player_id AS j2_player_id, j2.nom AS j2_nom
-            FROM tournoi_matchs tm
-            JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
+            FROM tournoi_joueurs j1
+            JOIN tournoi_matchs tm ON tm.joueur1_id = j1.id
             JOIN tournoi_joueurs j2 ON j2.id = tm.joueur2_id
             JOIN tournois t ON t.id = tm.tournoi_id
-            WHERE j1.rival_id = ? OR j2.rival_id = ?
-            ORDER BY t.semaine DESC, tm.id DESC
+            WHERE j1.rival_id = ?
+            UNION
+            SELECT t.id AS tournoi_id, t.nom AS tournoi_nom, t.calendrier_id AS tournoi_calendrier_id, t.semaine, t.surface, tm.numero_tour, tm.score, tm.vainqueur_id, tm.id AS match_id,
+                   j1.id AS j1_id, j1.rival_id AS j1_rival_id, j1.player_id AS j1_player_id, j1.nom AS j1_nom,
+                   j2.id AS j2_id, j2.rival_id AS j2_rival_id, j2.player_id AS j2_player_id, j2.nom AS j2_nom
+            FROM tournoi_joueurs j2
+            JOIN tournoi_matchs tm ON tm.joueur2_id = j2.id
+            JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
+            JOIN tournois t ON t.id = tm.tournoi_id
+            WHERE j2.rival_id = ?
+            ORDER BY semaine DESC, match_id DESC
         `).all(rivalId, rivalId);
 
         const matchsForme = matchsBruts.filter(function (m) { return m.score; }).map(function (m) {
@@ -8057,15 +8069,33 @@ function estIntouchable(score) {
 function matchsOrientes(filtreColonne, id) {
     const filtreJ1 = filtreColonne === 'player_id' ? 'j1.player_id = ? AND j1.est_reel = 1' : 'j1.rival_id = ?';
     const filtreJ2 = filtreColonne === 'player_id' ? 'j2.player_id = ? AND j2.est_reel = 1' : 'j2.rival_id = ?';
+    // Reecrit en UNION de 2 requetes indexees plutot qu'un WHERE (...) OR (...) a
+    // travers j1 ET j2 (2026-09-11, perf) : un OR qui porte sur deux ALIAS DIFFERENTS
+    // d'une meme table jointe empeche SQLite d'utiliser les index de tournoi_matchs
+    // (idx_tm_j1/idx_tm_j2) - confirme par EXPLAIN QUERY PLAN, qui montrait un SCAN
+    // complet de tournoi_matchs. Chaque branche du UNION, elle, part de
+    // tournoi_joueurs (filtre indexe par player_id/rival_id) puis rejoint
+    // tournoi_matchs par son propre index - plus aucun scan, une simple recherche.
+    // Cette fonction tourne a CHAQUE ouverture de fiche joueur/rival (calculerBadges),
+    // et tournoi_matchs ne fait que grossir avec le temps - d'ou le ralentissement
+    // progressif observe par l'utilisateur sur les fiches adversaire.
     const rows = db.prepare(`
-        SELECT tm.id, tm.score, tm.vainqueur_id,
+        SELECT tm.id AS match_id, tm.score, tm.vainqueur_id,
                j1.id AS j1_id, j1.player_id AS j1_player_id, j1.rival_id AS j1_rival_id,
                j2.id AS j2_id, j2.player_id AS j2_player_id, j2.rival_id AS j2_rival_id
-        FROM tournoi_matchs tm
-        JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
+        FROM tournoi_joueurs j1
+        JOIN tournoi_matchs tm ON tm.joueur1_id = j1.id
         JOIN tournoi_joueurs j2 ON j2.id = tm.joueur2_id
-        WHERE (${filtreJ1}) OR (${filtreJ2})
-        ORDER BY tm.id ASC
+        WHERE ${filtreJ1}
+        UNION
+        SELECT tm.id AS match_id, tm.score, tm.vainqueur_id,
+               j1.id AS j1_id, j1.player_id AS j1_player_id, j1.rival_id AS j1_rival_id,
+               j2.id AS j2_id, j2.player_id AS j2_player_id, j2.rival_id AS j2_rival_id
+        FROM tournoi_joueurs j2
+        JOIN tournoi_matchs tm ON tm.joueur2_id = j2.id
+        JOIN tournoi_joueurs j1 ON j1.id = tm.joueur1_id
+        WHERE ${filtreJ2}
+        ORDER BY match_id ASC
     `).all(id, id);
 
     return rows.filter(function (r) { return r.score; }).map(function (r) {
