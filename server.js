@@ -1058,6 +1058,194 @@ app.get('/api/admin/simuler-bracket/:calendrierId/:semaine', (req, res) => {
     }
 });
 
+// Liste les tournois 'termine' dont la semaine n'est pas encore arrivee dans la
+// partie (tournoi.semaine > jeu_etat.semaine_actuelle) : empreinte exacte de la
+// regression du filet d'ancre (2026-09-11, corrigee en commit 3282473) qui a fait
+// jouer des tournois de semaine future instantanement au lieu d'attendre leur tour.
+// Read-only, aucune ecriture.
+app.get('/api/admin/tournois-suspects', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const suspects = db.prepare(`
+            SELECT id, calendrier_id, nom, circuit, categorie, semaine, statut, tour_actuel
+            FROM tournois
+            WHERE statut = 'termine' AND semaine > ?
+            ORDER BY semaine, circuit, nom
+        `).all(etat.semaine_actuelle);
+        res.json({ success: true, semaineActuelle: etat.semaine_actuelle, suspects });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Reparation d'un tournoi simule trop tot par erreur (regression du filet d'ancre,
+// 2026-09-11) : ramene un tournoi 'termine' a son etat "vient d'etre tire" (comme
+// s'il n'avait jamais ete joue), et tente de restaurer l'etat physique des vrais
+// joueurs impliques.
+//   - XP de tournoi et cout en energie (1 PE fixe + mise) : RETIRES au montant EXACT
+//     et deterministe (bareme XP_TOURNOI pour le tour reellement atteint ; energie_misee
+//     stockee sur l'entrant) - jamais besoin du journal pour ces deux-la.
+//   - forme/usure/mental(_max)/condition/automatismes/competences : restaures depuis
+//     journal_semaine_joueur (ecrit AVANT toute simulation de tour de la semaine,
+//     donc *_apres y represente l'etat juste avant les matchs de CE tournoi) -
+//     CHAMP PAR CHAMP, car une ligne de journal ancienne (creee avant l'ajout de
+//     l'historique physique complet, 2026-08-25) peut n'avoir que forme_avant/apres
+//     renseignes et tout le reste NULL (colonnes ajoutees apres coup, jamais
+//     retro-remplies) : un champ NULL dans le journal laisse le champ du joueur
+//     INCHANGE plutot que de l'ecraser par une valeur absente, et est signale en
+//     avertissement.
+// GET = apercu (RIEN ecrit) ; POST = applique reellement, dans une transaction.
+function planifierAnnulationTournoi(tournoiId) {
+    const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+    if (!tournoi) return null;
+
+    const labelsTours = calculerLabelsTours(tournoi.taille_tableau, tournoi.format);
+    const nbTours = labelsTours.length;
+    const entrants = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ?').all(tournoiId);
+    const nbMatchsTableau = db.prepare('SELECT COUNT(*) AS n FROM tournoi_matchs WHERE tournoi_id = ?').get(tournoiId).n;
+    const nbPronosAEffacer = db.prepare('SELECT COUNT(*) AS n FROM pronostics WHERE tournoi_id = ? AND points_gagnes IS NOT NULL').get(tournoiId).n;
+
+    // val si non-null/undefined, sinon repli (jamais None -> ne jamais ecraser par du vide).
+    function champOuRepli(val, repli) { return (val === null || val === undefined) ? repli : val; }
+
+    const CHAMPS_PHYSIQUES = [
+        { cle: 'forme', colAvant: 'forme_avant', colApres: 'forme_apres', colPlayer: 'forme' },
+        { cle: 'usure', colAvant: 'usure_avant', colApres: 'usure_apres', colPlayer: 'usure' },
+        { cle: 'mentalCourant', colAvant: 'mental_avant', colApres: 'mental_apres', colPlayer: 'mental_courant' },
+        { cle: 'mentalMax', colAvant: 'mental_max_avant', colApres: 'mental_max_apres', colPlayer: 'mental_max' },
+        { cle: 'condition', colAvant: 'condition_avant', colApres: 'condition_apres', colPlayer: 'condition' },
+        { cle: 'automatismesDur', colAvant: 'automatismes_dur_avant', colApres: 'automatismes_dur_apres', colPlayer: 'surface_dur_automatismes' },
+        { cle: 'automatismesTerre', colAvant: 'automatismes_terre_avant', colApres: 'automatismes_terre_apres', colPlayer: 'surface_terre_automatismes' },
+        { cle: 'automatismesHerbe', colAvant: 'automatismes_herbe_avant', colApres: 'automatismes_herbe_apres', colPlayer: 'surface_herbe_automatismes' },
+        { cle: 'service', colAvant: 'service_avant', colApres: 'service_apres', colPlayer: 'service' },
+        { cle: 'retour', colAvant: 'retour_avant', colApres: 'retour_apres', colPlayer: 'retour' },
+        { cle: 'coupDroitRevers', colAvant: 'coup_droit_revers_avant', colApres: 'coup_droit_revers_apres', colPlayer: 'coup_droit_revers' },
+        { cle: 'effet', colAvant: 'effet_avant', colApres: 'effet_apres', colPlayer: 'effet' },
+        { cle: 'volee', colAvant: 'volee_avant', colApres: 'volee_apres', colPlayer: 'volee' },
+        { cle: 'deplacement', colAvant: 'deplacement_avant', colApres: 'deplacement_apres', colPlayer: 'deplacement' },
+        { cle: 'puissance', colAvant: 'puissance_avant', colApres: 'puissance_apres', colPlayer: 'puissance' },
+        { cle: 'resistance', colAvant: 'resistance_avant', colApres: 'resistance_apres', colPlayer: 'resistance' }
+    ];
+
+    const joueurs = [];
+    const avertissements = [];
+
+    entrants.forEach(function (e) {
+        if (!e.est_reel || !e.player_id || !e.tour_elimine) return;
+        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(e.player_id);
+        if (!player) { avertissements.push('tournoi_joueurs id ' + e.id + ' : joueur reel introuvable (player_id ' + e.player_id + ').'); return; }
+
+        const idxTour = e.tour_elimine === 'Vainqueur' ? nbTours - 1 : labelsTours.indexOf(e.tour_elimine);
+        const bareme = XP_TOURNOI[nbTours];
+        const xpARetirer = bareme && idxTour >= 0 ? (bareme[idxTour] || 0) : 0;
+        const energieARecrediter = 1 + (e.energie_misee || 0);
+
+        const journal = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? AND semaine = ?').get(e.player_id, tournoi.semaine);
+        const nbAlertesKine = db.prepare('SELECT COUNT(*) AS n FROM matchs WHERE tournoi_id = ? AND player_id = ? AND kine_intervenu = 1').get(tournoiId, e.player_id).n;
+
+        const champs = {};
+        const champsNonRestaures = [];
+        CHAMPS_PHYSIQUES.forEach(function (c) {
+            const valJournal = journal ? journal[c.colApres] : null;
+            const apres = champOuRepli(valJournal, player[c.colPlayer]);
+            if (valJournal === null || valJournal === undefined) champsNonRestaures.push(c.cle);
+            champs[c.cle] = { avant: player[c.colPlayer], apres: apres };
+        });
+
+        if (!journal) {
+            avertissements.push('Aucun journal_semaine_joueur pour ' + player.prenom + ' ' + player.nom + ' (semaine ' + tournoi.semaine + ') - forme/usure/mental/condition/automatismes/competences NE SERONT PAS restaures pour ce joueur (seuls XP et energie, deterministes, le seront).');
+        } else if (champsNonRestaures.length) {
+            avertissements.push(player.prenom + ' ' + player.nom + ' : journal incomplet (ancienne ligne) - champs NON restaures (laisses tels quels) : ' + champsNonRestaures.join(', ') + '.');
+        }
+        if (nbAlertesKine > 0) avertissements.push(player.prenom + ' ' + player.nom + ' : ' + nbAlertesKine + ' alerte(s) kine dans ce tournoi (1 caracteristique technique perdue au hasard a chaque fois) - restauree seulement si le journal couvre les competences (cf. ci-dessus).');
+
+        joueurs.push(Object.assign({
+            playerId: e.player_id,
+            nom: player.prenom + ' ' + player.nom,
+            tourAtteint: e.tour_elimine,
+            xp: { avant: player.points_experience, retire: xpARetirer, apres: Math.max(0, player.points_experience - xpARetirer) },
+            energie: { avant: player.points_energie, recredite: energieARecrediter, apres: player.points_energie + energieARecrediter },
+            journalTrouve: !!journal,
+            champsNonRestaures: champsNonRestaures
+        }, champs));
+    });
+
+    return { tournoi, nbTours, nbEntrants: entrants.length, nbMatchsTableauASupprimer: nbMatchsTableau, nbPronosAReinitialiser: nbPronosAEffacer, joueurs, avertissements };
+}
+
+app.get('/api/admin/annuler-tournoi/:calendrierId/:semaine', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(req.params.calendrierId, Number(req.params.semaine));
+        if (!tournoi) {
+            return res.status(404).json({ error: 'Tournoi introuvable pour ce calendrier_id / cette semaine.' });
+        }
+        const plan = planifierAnnulationTournoi(tournoi.id);
+        res.json({ success: true, apercu: true, appliqueRien: true, plan: { tournoi: plan.tournoi, nbEntrants: plan.nbEntrants, nbMatchsTableauASupprimer: plan.nbMatchsTableauASupprimer, nbPronosAReinitialiser: plan.nbPronosAReinitialiser, joueurs: plan.joueurs, avertissements: plan.avertissements } });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+app.post('/api/admin/annuler-tournoi/:calendrierId/:semaine', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(req.params.calendrierId, Number(req.params.semaine));
+        if (!tournoi) {
+            return res.status(404).json({ error: 'Tournoi introuvable pour ce calendrier_id / cette semaine.' });
+        }
+        const plan = planifierAnnulationTournoi(tournoi.id);
+
+        db.transaction(function () {
+            db.prepare('UPDATE tournoi_joueurs SET tour_elimine = NULL, points_gagnes = NULL WHERE tournoi_id = ?').run(tournoi.id);
+            db.prepare('DELETE FROM tournoi_matchs WHERE tournoi_id = ?').run(tournoi.id);
+            db.prepare('DELETE FROM matchs WHERE tournoi_id = ?').run(tournoi.id);
+            db.prepare('UPDATE pronostics SET points_gagnes = NULL WHERE tournoi_id = ?').run(tournoi.id);
+            db.prepare("UPDATE tournois SET statut = 'a_venir', tour_actuel = 0 WHERE id = ?").run(tournoi.id);
+
+            // plan.joueurs porte deja des valeurs "apres" surs pour chaque champ (XP et
+            // energie toujours deterministes ; les champs physiques retombent sur la
+            // valeur ACTUELLE du joueur - donc inchangee - la ou le journal manquait ou
+            // avait une colonne NULL, cf. planifierAnnulationTournoi). Une seule UPDATE,
+            // jamais besoin de relire le journal ici.
+            const majJoueur = db.prepare(`
+                UPDATE players SET
+                    points_experience = ?, points_energie = ?, forme = ?, usure = ?,
+                    mental_courant = ?, mental_max = ?, condition = ?,
+                    surface_dur_automatismes = ?, surface_terre_automatismes = ?, surface_herbe_automatismes = ?,
+                    service = ?, retour = ?, coup_droit_revers = ?, effet = ?,
+                    volee = ?, deplacement = ?, puissance = ?, resistance = ?
+                WHERE id = ?
+            `);
+            plan.joueurs.forEach(function (j) {
+                majJoueur.run(
+                    j.xp.apres, j.energie.apres, j.forme.apres, j.usure.apres,
+                    j.mentalCourant.apres, j.mentalMax.apres, j.condition.apres,
+                    j.automatismesDur.apres, j.automatismesTerre.apres, j.automatismesHerbe.apres,
+                    j.service.apres, j.retour.apres, j.coupDroitRevers.apres, j.effet.apres,
+                    j.volee.apres, j.deplacement.apres, j.puissance.apres, j.resistance.apres,
+                    j.playerId
+                );
+            });
+        })();
+
+        invaliderCachesLourds();
+        res.json({ success: true, applique: true, plan: { tournoi: plan.tournoi, nbEntrants: plan.nbEntrants, nbMatchsTableauSupprimes: plan.nbMatchsTableauASupprimer, nbPronosReinitialises: plan.nbPronosAReinitialiser, joueurs: plan.joueurs, avertissements: plan.avertissements } });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/admin/en-attente', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {

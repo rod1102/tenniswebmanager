@@ -69,6 +69,11 @@
                     <tbody id="redacteurs-body"></tbody>
                 </table>
             </div>
+
+            <h1 class="dashboard-title" style="font-size:1.8rem; margin-top:40px;">Tournois joués trop tôt (à réparer)</h1>
+            <p class="match-hint">Tournois marqués « terminé » alors que leur semaine n'est pas encore arrivée dans la partie — signe qu'ils ont été simulés par erreur avant l'heure. « Aperçu » ne modifie rien ; « Annuler ce tournoi » ramène le tournoi à son état juste tiré (aucun tour joué) et tente de restaurer forme/énergie/XP des vrais joueurs concernés.</p>
+            <div id="suspects-vide" style="text-align:center; color:#8B98A5; display:none;">Aucun tournoi suspect pour le moment.</div>
+            <div id="suspects-liste"></div>
         </div>
     </div>
 
@@ -229,6 +234,72 @@
             });
         }
 
+        async function chargerSuspects() {
+            const response = await fetch('/api/admin/tournois-suspects?adminId=' + adminId);
+            const data = await response.json();
+            if (!response.ok) return;
+
+            const liste = document.getElementById('suspects-liste');
+            const vide = document.getElementById('suspects-vide');
+            liste.innerHTML = '';
+
+            if (data.suspects.length === 0) {
+                vide.style.display = 'block';
+                return;
+            }
+            vide.style.display = 'none';
+
+            data.suspects.forEach(function (t) {
+                const bloc = document.createElement('div');
+                bloc.className = 'player-summary';
+                bloc.style.marginBottom = '14px';
+                bloc.innerHTML = `
+                    <div class="player-summary-name">${t.nom} (${t.circuit} ${t.categorie}) — semaine ${t.semaine}</div>
+                    <div class="stat-row"><span class="stat-label">Semaine actuelle de la partie</span><span class="stat-value">${data.semaineActuelle}</span></div>
+                    <div class="apercu-annulation" style="margin:10px 0; font-size:0.85rem; color:#8B98A5;"></div>
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <button class="cta cta-secondary btn-apercu" style="padding:8px 14px; font-size:0.75rem;" data-calendrier="${t.calendrier_id}" data-semaine="${t.semaine}">Aperçu</button>
+                        <button class="cta cta-primary btn-annuler" style="padding:8px 14px; font-size:0.75rem;" data-calendrier="${t.calendrier_id}" data-semaine="${t.semaine}">Annuler ce tournoi</button>
+                    </div>
+                `;
+                liste.appendChild(bloc);
+            });
+
+            liste.querySelectorAll('.btn-apercu').forEach(function (btn) {
+                btn.addEventListener('click', async function () {
+                    const zone = btn.closest('.player-summary').querySelector('.apercu-annulation');
+                    zone.textContent = 'Chargement...';
+                    const response = await fetch('/api/admin/annuler-tournoi/' + btn.getAttribute('data-calendrier') + '/' + btn.getAttribute('data-semaine') + '?adminId=' + adminId);
+                    const data = await response.json();
+                    if (!response.ok) { zone.textContent = data.error || 'Erreur.'; return; }
+                    const plan = data.plan;
+                    let html = '<strong>' + plan.nbEntrants + ' entrants, ' + plan.nbMatchsTableauASupprimer + ' matchs à supprimer.</strong><br>';
+                    plan.joueurs.forEach(function (j) {
+                        html += '<br>' + j.nom + ' (éliminé : ' + j.tourAtteint + ') — XP ' + j.xp.avant + ' → ' + j.xp.apres + ', énergie ' + j.energie.avant + ' → ' + j.energie.apres + ', forme ' + j.forme.avant + ' → ' + j.forme.apres;
+                        if (j.champsNonRestaures.length) html += ' <em>(non restauré : ' + j.champsNonRestaures.join(', ') + ')</em>';
+                    });
+                    if (plan.avertissements.length) html += '<br><br><strong>Avertissements :</strong><br>' + plan.avertissements.join('<br>');
+                    zone.innerHTML = html;
+                });
+            });
+
+            liste.querySelectorAll('.btn-annuler').forEach(function (btn) {
+                btn.addEventListener('click', async function () {
+                    const confirmation = confirm('Annuler ce tournoi va supprimer tous ses matchs joués, réinitialiser les pronostics notés, et tenter de restaurer forme/énergie/XP des vrais joueurs impliqués. Irréversible. Continuer ?');
+                    if (!confirmation) return;
+                    const response = await fetch('/api/admin/annuler-tournoi/' + btn.getAttribute('data-calendrier') + '/' + btn.getAttribute('data-semaine'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ adminId })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) { alert(data.error || 'Erreur.'); return; }
+                    alert('Tournoi annulé et remis à l\'état "tiré".');
+                    chargerSuspects();
+                });
+            });
+        }
+
         document.getElementById('logout-btn').addEventListener('click', function (e) {
             e.preventDefault();
             fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
@@ -339,6 +410,7 @@
                 chargerSemaine();
                 chargerEnAttente();
                 chargerRedacteurs();
+                chargerSuspects();
             }
         })();
     </script>
