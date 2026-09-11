@@ -39,9 +39,12 @@
 
             <h1 class="dashboard-title">Administration</h1>
 
-            <div id="maintenance-badge" style="display:none; text-align:center; margin-bottom:20px; padding:14px; border-radius:10px; background:rgba(212,64,64,0.15); border:1px solid #D44040;">
+            <div id="maintenance-badge-actif" style="display:none; text-align:center; margin-bottom:20px; padding:14px; border-radius:10px; background:rgba(212,64,64,0.15); border:1px solid #D44040;">
                 <div style="color:#FF6B6B; font-weight:600;">Site en maintenance — seul votre compte y a accès.</div>
-                <button id="maintenance-toggle-btn" class="cta cta-secondary" style="margin-top:10px;">Désactiver la maintenance</button>
+                <button id="maintenance-desactiver-btn" class="cta cta-secondary" style="margin-top:10px;">Désactiver la maintenance</button>
+            </div>
+            <div id="maintenance-badge-inactif" style="display:none; text-align:center; margin-bottom:20px;">
+                <button id="maintenance-activer-btn" class="cta cta-secondary">Mettre en maintenance</button>
             </div>
 
             <div style="text-align:center; margin-bottom:32px;">
@@ -75,18 +78,6 @@
                 </table>
             </div>
 
-            <h1 class="dashboard-title" style="font-size:1.8rem; margin-top:40px;">Réparer l'état physique d'un joueur</h1>
-            <p class="match-hint">Pour un joueur dont forme/usure/mental n'a pas été remis à jour par la réparation d'un tournoi (notamment si le tournoi a déjà été annulé avant que cet outil n'existe, auquel cas les informations du tournoi ne sont plus disponibles). Restaure depuis la dernière ligne du journal hebdomadaire connue avant la semaine actuelle. Ne touche jamais l'XP ni l'énergie.</p>
-            <div style="display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap;">
-                <input type="text" id="recherche-joueur-input" placeholder="Nom du joueur ou du coach..." style="flex:1; min-width:200px; padding:10px 14px; border-radius:8px; border:1px solid #2A3441; background:#161C26; color:#fff;">
-                <button id="recherche-joueur-btn" class="cta cta-secondary" style="padding:10px 20px; font-size:0.8rem;">Rechercher</button>
-            </div>
-            <div id="recherche-joueur-liste"></div>
-
-            <h1 class="dashboard-title" style="font-size:1.8rem; margin-top:40px;">Tournois joués trop tôt (à réparer)</h1>
-            <p class="match-hint">Tournois marqués « terminé » alors que leur semaine n'est pas encore arrivée dans la partie — signe qu'ils ont été simulés par erreur avant l'heure. « Aperçu » ne modifie rien ; « Annuler ce tournoi » ramène le tournoi à son état juste tiré (aucun tour joué) et tente de restaurer forme/énergie/XP des vrais joueurs concernés.</p>
-            <div id="suspects-vide" style="text-align:center; color:#8B98A5; display:none;">Aucun tournoi suspect pour le moment.</div>
-            <div id="suspects-liste"></div>
         </div>
     </div>
 
@@ -247,82 +238,15 @@
             });
         }
 
-        async function rechercherJoueur() {
-            const q = document.getElementById('recherche-joueur-input').value.trim();
-            const liste = document.getElementById('recherche-joueur-liste');
-            if (!q) { liste.innerHTML = ''; return; }
-            const response = await fetch('/api/admin/chercher-joueur?adminId=' + adminId + '&q=' + encodeURIComponent(q));
-            const data = await response.json();
-            if (!response.ok) { liste.innerHTML = '<p style="color:#8B98A5;">' + (data.error || 'Erreur.') + '</p>'; return; }
-
-            if (data.joueurs.length === 0) {
-                liste.innerHTML = '<p style="color:#8B98A5;">Aucun joueur trouvé.</p>';
-                return;
-            }
-
-            liste.innerHTML = '';
-            data.joueurs.forEach(function (j) {
-                const bloc = document.createElement('div');
-                bloc.className = 'player-summary';
-                bloc.style.marginBottom = '14px';
-                bloc.innerHTML = `
-                    <div class="player-summary-name">${formaterNom(j.prenom, j.nom)} (${j.type === 'joueur' ? 'ATP' : 'WTA'}) — coach : ${j.coach}</div>
-                    <div class="apercu-restauration" style="margin:10px 0; font-size:0.85rem; color:#8B98A5;"></div>
-                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                        <button class="cta cta-secondary btn-apercu-joueur" style="padding:8px 14px; font-size:0.75rem;" data-id="${j.id}">Aperçu</button>
-                        <button class="cta cta-primary btn-restaurer-joueur" style="padding:8px 14px; font-size:0.75rem;" data-id="${j.id}">Restaurer l'état physique</button>
-                    </div>
-                `;
-                liste.appendChild(bloc);
-            });
-
-            liste.querySelectorAll('.btn-apercu-joueur').forEach(function (btn) {
-                btn.addEventListener('click', async function () {
-                    const zone = btn.closest('.player-summary').querySelector('.apercu-restauration');
-                    zone.textContent = 'Chargement...';
-                    const response = await fetch('/api/admin/restaurer-physique-joueur/' + btn.getAttribute('data-id') + '?adminId=' + adminId);
-                    const data = await response.json();
-                    if (!response.ok) { zone.textContent = data.error || 'Erreur.'; return; }
-                    const p = data.plan;
-                    let html = '<strong>Journal utilisé : semaine ' + (p.journalSemaine ?? '—') + '.</strong><br>';
-                    Object.keys(p.champs).forEach(function (cle) {
-                        html += cle + ' : ' + p.champs[cle].avant + ' → ' + p.champs[cle].apres + '<br>';
-                    });
-                    if (p.avertissements.length) html += '<br><strong>Avertissements :</strong><br>' + p.avertissements.join('<br>');
-                    zone.innerHTML = html;
-                });
-            });
-
-            liste.querySelectorAll('.btn-restaurer-joueur').forEach(function (btn) {
-                btn.addEventListener('click', async function () {
-                    const confirmation = confirm('Restaurer forme/usure/mental/condition/automatismes/compétences de ce joueur depuis le dernier journal connu. XP et énergie ne sont PAS touchés. Continuer ?');
-                    if (!confirmation) return;
-                    const response = await fetch('/api/admin/restaurer-physique-joueur/' + btn.getAttribute('data-id'), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ adminId })
-                    });
-                    const data = await response.json();
-                    if (!response.ok) { alert(data.error || 'Erreur.'); return; }
-                    alert('État physique restauré.');
-                    rechercherJoueur();
-                });
-            });
-        }
-
-        document.getElementById('recherche-joueur-btn').addEventListener('click', rechercherJoueur);
-        document.getElementById('recherche-joueur-input').addEventListener('keydown', function (e) {
-            if (e.key === 'Enter') rechercherJoueur();
-        });
-
         async function chargerMaintenance() {
             const response = await fetch('/api/admin/maintenance?adminId=' + adminId);
             const data = await response.json();
             if (!response.ok) return;
-            document.getElementById('maintenance-badge').style.display = data.active ? 'block' : 'none';
+            document.getElementById('maintenance-badge-actif').style.display = data.active ? 'block' : 'none';
+            document.getElementById('maintenance-badge-inactif').style.display = data.active ? 'none' : 'block';
         }
 
-        document.getElementById('maintenance-toggle-btn').addEventListener('click', async function () {
+        document.getElementById('maintenance-desactiver-btn').addEventListener('click', async function () {
             const confirmation = confirm('Désactiver la maintenance va rendre le site accessible à nouveau à tous les coachs. Continuer ?');
             if (!confirmation) return;
             const response = await fetch('/api/admin/maintenance', {
@@ -335,71 +259,18 @@
             chargerMaintenance();
         });
 
-        async function chargerSuspects() {
-            const response = await fetch('/api/admin/tournois-suspects?adminId=' + adminId);
+        document.getElementById('maintenance-activer-btn').addEventListener('click', async function () {
+            const confirmation = confirm('Mettre le site en maintenance va le rendre inaccessible à tous les coachs sauf vous. Continuer ?');
+            if (!confirmation) return;
+            const response = await fetch('/api/admin/maintenance', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ adminId, activer: true })
+            });
             const data = await response.json();
-            if (!response.ok) return;
-
-            const liste = document.getElementById('suspects-liste');
-            const vide = document.getElementById('suspects-vide');
-            liste.innerHTML = '';
-
-            if (data.suspects.length === 0) {
-                vide.style.display = 'block';
-                return;
-            }
-            vide.style.display = 'none';
-
-            data.suspects.forEach(function (t) {
-                const bloc = document.createElement('div');
-                bloc.className = 'player-summary';
-                bloc.style.marginBottom = '14px';
-                bloc.innerHTML = `
-                    <div class="player-summary-name">${t.nom} (${t.circuit} ${t.categorie}) — semaine ${t.semaine}</div>
-                    <div class="stat-row"><span class="stat-label">Semaine actuelle de la partie</span><span class="stat-value">${data.semaineActuelle}</span></div>
-                    <div class="apercu-annulation" style="margin:10px 0; font-size:0.85rem; color:#8B98A5;"></div>
-                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
-                        <button class="cta cta-secondary btn-apercu" style="padding:8px 14px; font-size:0.75rem;" data-calendrier="${t.calendrier_id}" data-semaine="${t.semaine}">Aperçu</button>
-                        <button class="cta cta-primary btn-annuler" style="padding:8px 14px; font-size:0.75rem;" data-calendrier="${t.calendrier_id}" data-semaine="${t.semaine}">Annuler ce tournoi</button>
-                    </div>
-                `;
-                liste.appendChild(bloc);
-            });
-
-            liste.querySelectorAll('.btn-apercu').forEach(function (btn) {
-                btn.addEventListener('click', async function () {
-                    const zone = btn.closest('.player-summary').querySelector('.apercu-annulation');
-                    zone.textContent = 'Chargement...';
-                    const response = await fetch('/api/admin/annuler-tournoi/' + btn.getAttribute('data-calendrier') + '/' + btn.getAttribute('data-semaine') + '?adminId=' + adminId);
-                    const data = await response.json();
-                    if (!response.ok) { zone.textContent = data.error || 'Erreur.'; return; }
-                    const plan = data.plan;
-                    let html = '<strong>' + plan.nbEntrants + ' entrants, ' + plan.nbMatchsTableauASupprimer + ' matchs à supprimer.</strong><br>';
-                    plan.joueurs.forEach(function (j) {
-                        html += '<br>' + j.nom + ' (éliminé : ' + j.tourAtteint + ') — XP ' + j.xp.avant + ' → ' + j.xp.apres + ', énergie ' + j.energie.avant + ' → ' + j.energie.apres + ', forme ' + j.forme.avant + ' → ' + j.forme.apres;
-                        if (j.champsNonRestaures.length) html += ' <em>(non restauré : ' + j.champsNonRestaures.join(', ') + ')</em>';
-                    });
-                    if (plan.avertissements.length) html += '<br><br><strong>Avertissements :</strong><br>' + plan.avertissements.join('<br>');
-                    zone.innerHTML = html;
-                });
-            });
-
-            liste.querySelectorAll('.btn-annuler').forEach(function (btn) {
-                btn.addEventListener('click', async function () {
-                    const confirmation = confirm('Annuler ce tournoi va supprimer tous ses matchs joués, réinitialiser les pronostics notés, et tenter de restaurer forme/énergie/XP des vrais joueurs impliqués. Irréversible. Continuer ?');
-                    if (!confirmation) return;
-                    const response = await fetch('/api/admin/annuler-tournoi/' + btn.getAttribute('data-calendrier') + '/' + btn.getAttribute('data-semaine'), {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ adminId })
-                    });
-                    const data = await response.json();
-                    if (!response.ok) { alert(data.error || 'Erreur.'); return; }
-                    alert('Tournoi annulé et remis à l\'état "tiré".');
-                    chargerSuspects();
-                });
-            });
-        }
+            if (!response.ok) { alert(data.error || 'Erreur.'); return; }
+            chargerMaintenance();
+        });
 
         document.getElementById('logout-btn').addEventListener('click', function (e) {
             e.preventDefault();
@@ -511,7 +382,6 @@
                 chargerSemaine();
                 chargerEnAttente();
                 chargerRedacteurs();
-                chargerSuspects();
                 chargerMaintenance();
             }
         })();
