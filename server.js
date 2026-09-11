@@ -2815,16 +2815,29 @@ function executerAvancementTour(force) {
     const etatCourant = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
     db.prepare('INSERT OR IGNORE INTO semaines_reelles (semaine, debut_reel) VALUES (?, ?)').run(etatCourant.semaine_actuelle, new Date().toISOString());
 
-    // Filet de securite (2), 2026-09-11 : une semaine PASSEE peut elle aussi n'avoir
-    // jamais recu d'ancre (bug constate : semaine_actuelle a la semaine 4, mais aucune
-    // ligne semaines_reelles pour la semaine 3 alors que 1, 2 et 4 en ont une - un
-    // tournoi deja tire mais jamais commence restait alors bloque pour toujours, meme
-    // via le bouton force "Avancer un tour", puisque le garde-fou ci-dessus ne comble
-    // que la semaine COURANTE). On comble ici toute semaine encore utile (portee par
-    // un tournoi 'a_venir') mais sans ancre, avec une date tres ancienne (epoque Unix)
+    // Filet de securite (2), 2026-09-11, CORRIGE le 2026-09-11 (meme jour, regression
+    // constatee en prod - voir plus bas) : une semaine PASSEE (deja atteinte ou
+    // depassee par semaine_actuelle) peut elle aussi n'avoir jamais recu d'ancre (bug
+    // constate : semaine_actuelle a la semaine 4, mais aucune ligne semaines_reelles
+    // pour la semaine 3 alors que 1, 2 et 4 en ont une - un tournoi deja tire mais
+    // jamais commence restait alors bloque pour toujours, meme via le bouton force
+    // "Avancer un tour", puisque le garde-fou ci-dessus ne comble que la semaine
+    // COURANTE). On comble ici toute semaine <= semaine_actuelle portee par un
+    // tournoi 'a_venir' mais sans ancre, avec une date tres ancienne (epoque Unix)
     // plutot que "maintenant" - une semaine deja entamee depuis longtemps doit voir
     // tous ses creneaux consideres comme deja passes, pas redemarrer un delai de
     // plusieurs jours reels.
+    // REGRESSION EVITEE : la toute premiere version de ce filet comblait aussi les
+    // semaines FUTURES (ex. les tournois de S1 tires par avance pendant S0, dont le
+    // tirage precede toujours de plusieurs jours reels la semaine ou ils se jouent
+    // reellement - etat NORMAL et volontaire, pas un bug). En les traitant comme
+    // "orphelines", elle leur donnait elle aussi une ancre epoque -> tous leurs
+    // creneaux devenaient instantanement "dus", et le scheduler automatique (boucle
+    // `while(encore)` ci-dessous, jamais interrompue en mode non-force) jouait alors
+    // le tournoi ENTIER d'un coup des le prochain passage, des jours trop tot - les
+    // pronostics (et le choix de styles) n'avaient jamais la moindre fenetre pour
+    // s'ouvrir. D'ou la condition `s <= semaine_actuelle` : seules les semaines deja
+    // atteintes ou depassees sont concernees, jamais une semaine pas encore commencee.
     const semainesNecessaires = new Set();
     db.prepare("SELECT semaine, taille_tableau, format FROM tournois WHERE statut = 'a_venir'").all().forEach(function (t) {
         semainesNecessaires.add(t.semaine);
@@ -2832,7 +2845,7 @@ function executerAvancementTour(force) {
     });
     const insererAncreManquante = db.prepare('INSERT OR IGNORE INTO semaines_reelles (semaine, debut_reel) VALUES (?, ?)');
     semainesNecessaires.forEach(function (s) {
-        if (s !== etatCourant.semaine_actuelle) insererAncreManquante.run(s, new Date(0).toISOString());
+        if (s <= etatCourant.semaine_actuelle) insererAncreManquante.run(s, new Date(0).toISOString());
     });
 
     const idsTournoisActifs = db.prepare("SELECT id FROM tournois WHERE statut = 'a_venir'").all().map(function (r) { return r.id; });
