@@ -7755,7 +7755,11 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
             WHERE tj.est_reel = 1 AND tj.player_id = ? AND t.semaine BETWEEN ? AND ?
             ORDER BY t.semaine
         `).all(playerId, debutFenetreTournois, finFenetreTournois);
-        prochainsTournois.forEach(function (t) { t.positionSemaine = positionSemaineAffichee(t.semaine); });
+        prochainsTournois.forEach(function (t) {
+            t.positionSemaine = positionSemaineAffichee(t.semaine);
+            const entreeCalendrier = CALENDRIER_TOURNOIS.find(function (c) { return c.id === t.calendrier_id; });
+            t.indoor = !!(entreeCalendrier && entreeCalendrier.indoor);
+        });
 
         res.json({ success: true, infos, palmares, derniersMatchs, stats, faceAFace, badges, saisonAffichee, saisonsDisponibles, prochainsTournois });
     } catch (err) {

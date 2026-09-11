@@ -186,7 +186,8 @@
                 <h2 class="dashboard-title" style="font-size:1.3rem; margin-top:28px;">Prochains tournois</h2>
                 <div class="tournoi-list">
                     ${prochainsTournois.map(function (t) {
-                        return `<div class="tournoi-card"><div class="tournoi-card-name">${t.nom}</div>
+                        const classeSurface = t.surface + (t.surface === 'dur' && t.indoor ? '-indoor' : '');
+                        return `<div class="tournoi-card tournoi-card-${classeSurface}"><div class="tournoi-card-name">${t.nom}</div>
                             <div class="tournoi-card-meta">Semaine ${t.positionSemaine} · ${t.categorie} · ${LABELS_SURFACE[t.surface] || t.surface}</div></div>`;
                     }).join('')}
                 </div>
