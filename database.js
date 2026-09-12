@@ -1280,4 +1280,42 @@ if (db.prepare('SELECT patch_noms_locaux_rivaux_v2 AS p FROM jeu_etat WHERE id =
     db.prepare("UPDATE jeu_etat SET patch_noms_locaux_rivaux_v2 = 1 WHERE id = 1").run();
 }
 
+// 2026-09-12, demande explicite de l'utilisateur : renommer LUND (id 254) en
+// JØRGENSEN. La cible peut etre un vrai joueur (players, prenom/nom separes) ou un
+// rival persistant (classement_joueurs, nom complet en une seule colonne) - id 254
+// n'a pas de sens partage entre les deux tables (auto-increment independant
+// chacune), donc on verifie les deux, et on abandonne sur celle qui ne correspond
+// pas plutot que d'ecraser un nom inattendu.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_lund_jorgensen_20260912 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_lund_jorgensen_20260912 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const NOUVEAU_NOM = 'JØRGENSEN';
+
+    const joueurReel = db.prepare('SELECT id, nom FROM players WHERE id = 254').get();
+    if (joueurReel) {
+        if ((joueurReel.nom || '').toUpperCase() === 'LUND') {
+            db.prepare('UPDATE players SET nom = ? WHERE id = 254').run(NOUVEAU_NOM);
+            console.log('[lund_jorgensen] players id 254 : "' + joueurReel.nom + '" -> "' + NOUVEAU_NOM + '"');
+        } else {
+            console.log('[lund_jorgensen] players id 254 existe mais nom inattendu (' + joueurReel.nom + '), rien fait');
+        }
+    }
+
+    const rival = db.prepare('SELECT id, nom FROM classement_joueurs WHERE id = 254').get();
+    if (rival) {
+        if (/\bLUND\b/i.test(rival.nom || '')) {
+            const nomMisAJour = rival.nom.replace(/\bLUND\b/i, NOUVEAU_NOM);
+            db.prepare('UPDATE classement_joueurs SET nom = ? WHERE id = 254').run(nomMisAJour);
+            console.log('[lund_jorgensen] classement_joueurs id 254 : "' + rival.nom + '" -> "' + nomMisAJour + '"');
+        } else {
+            console.log('[lund_jorgensen] classement_joueurs id 254 existe mais nom inattendu (' + rival.nom + '), rien fait');
+        }
+    }
+
+    if (!joueurReel && !rival) {
+        console.log('[lund_jorgensen] aucun joueur ni rival id 254 trouve, rien fait');
+    }
+
+    db.prepare('UPDATE jeu_etat SET patch_lund_jorgensen_20260912 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
