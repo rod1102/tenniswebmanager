@@ -2050,6 +2050,25 @@ app.get('/api/planification-saison/:playerId', (req, res) => {
                     });
             }
         }
+        // Complement indispensable (2026-09-12, bug signale par l'utilisateur) : une
+        // fois un tournoi TIRE, tirerAuSort vide entierement tournoi_liste_attente pour
+        // ce calendrier_id/semaine (les confirmes sont alors des lignes tournoi_joueurs
+        // permanentes, les non-retenus n'auront jamais de slot) - la boucle ci-dessus,
+        // qui ne regarde QUE tournoi_liste_attente, "perd" alors le verrou d'un joueur
+        // pourtant bel et bien inscrit pour de vrai (le dropdown repos/entrainement
+        // redevenait modifiable alors que le tournoi restait affiche en simple
+        // indication). Complete ici via tournoi_joueurs.est_reel, seule source de
+        // verite qui survit au tirage.
+        if (fin >= debut) {
+            db.prepare(`
+                SELECT tournois.semaine, tournois.nom
+                FROM tournois
+                JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
+                WHERE tournois.semaine BETWEEN ? AND ?
+                  AND tournoi_joueurs.est_reel = 1 AND tournoi_joueurs.player_id = ?
+            `).all(debut, fin, playerId).forEach(function (t) { tournoisVerrous[t.semaine] = t.nom; });
+        }
+
         // Une vraie inscription a la priorite sur un simple coeur pour la meme semaine ;
         // un verrou ferme (semaine 1, quelle que soit sa source) prime sur une simple note.
         Object.keys(tournoisVerrous).forEach(function (s) { delete favoris[s]; delete tournoisConditionnels[s]; });
