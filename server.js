@@ -7477,7 +7477,15 @@ app.get('/api/pronostics/tournoi/:tournoiId', (req, res) => {
         }
 
         const entrants = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? ORDER BY position_tableau').all(tournoiId);
-        entrants.forEach(function (e) { e.drapeau = drapeau(e.nationalite); });
+        entrants.forEach(function (e) {
+            e.drapeau = drapeau(e.nationalite);
+            // Pseudo du coach (2026-09-12, demande explicite) : uniquement pour un
+            // vrai joueur - un rival/lambda n'a pas de coach, reste sans parenthese.
+            if (e.est_reel && e.player_id) {
+                const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(e.player_id);
+                if (player) e.coachPseudo = nomCoach(player.user_id);
+            }
+        });
 
         let taillePuissance2 = 1;
         while (taillePuissance2 < tournoi.taille_tableau) taillePuissance2 *= 2;

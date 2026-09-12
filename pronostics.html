@@ -115,7 +115,7 @@
             const existant = data.pronosticActuel && data.pronosticActuel.predictions ? data.pronosticActuel.predictions.vainqueur : null;
 
             const options = data.entrants.map(function (e) {
-                return `<option value="${e.id}" ${existant === e.id ? 'selected' : ''}>${formaterNomComplet(e.nom)}${e.nationalite ? ' (' + e.nationalite + ')' : ''}</option>`;
+                return `<option value="${e.id}" ${existant === e.id ? 'selected' : ''}>${formaterNomComplet(e.nom)}${e.coachPseudo ? ' (' + e.coachPseudo + ')' : ''}</option>`;
             }).join('');
 
             panneau.innerHTML = `
@@ -165,7 +165,7 @@
 
             function carteSelect(titre, round, index, valeurActuelle, candidats) {
                 const options = candidats.map(function (e) {
-                    return `<option value="${e.id}" ${valeurActuelle === e.id ? 'selected' : ''}>${formaterNomComplet(e.nom)}</option>`;
+                    return `<option value="${e.id}" ${valeurActuelle === e.id ? 'selected' : ''}>${formaterNomComplet(e.nom)}${e.coachPseudo ? ' (' + e.coachPseudo + ')' : ''}</option>`;
                 }).join('');
                 return `
                     <div class="style-tour-card">
