@@ -2900,8 +2900,12 @@ function executerAvancementSemaine() {
                      coup_droit_revers_avant, coup_droit_revers_apres, effet_avant, effet_apres,
                      volee_avant, volee_apres, deplacement_avant, deplacement_apres,
                      puissance_avant, puissance_apres, resistance_avant, resistance_apres,
+                     dispo_adversite_avant, dispo_adversite_apres, dispo_coupeur_de_tetes_avant, dispo_coupeur_de_tetes_apres,
+                     dispo_dernier_carre_avant, dispo_dernier_carre_apres, dispo_premiers_tours_avant, dispo_premiers_tours_apres,
+                     dispo_sang_froid_avant, dispo_sang_froid_apres, dispo_indoor_avant, dispo_indoor_apres,
+                     dispo_rivalite_avant, dispo_rivalite_apres,
                      horodatage)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `).run(
                 player.id, nouvelleSemaine,
                 joueurEngageCetteSemaine ? 'tournoi' : (ordre ? ordre.action : (estAfk ? 'afk' : null)),
@@ -2921,6 +2925,13 @@ function executerAvancementSemaine() {
                 competencesAvant.deplacement, competencesErodees.deplacement,
                 competencesAvant.puissance, competencesErodees.puissance,
                 competencesAvant.resistance, competencesErodees.resistance,
+                player.disposition_adversite, dispositionsAppliquees.adversite,
+                player.disposition_coupeur_de_tetes, dispositionsAppliquees.coupeur_de_tetes,
+                player.disposition_dernier_carre, dispositionsAppliquees.dernier_carre,
+                player.disposition_premiers_tours, dispositionsAppliquees.premiers_tours,
+                player.disposition_sang_froid, dispositionsAppliquees.sang_froid,
+                player.disposition_indoor, dispositionsAppliquees.indoor,
+                player.disposition_rivalite, dispositionsAppliquees.rivalite,
                 new Date().toISOString()
             );
 

@@ -819,7 +819,27 @@ const migrations = [
     // dispositions, impossible de revenir dessus). Applique reellement par
     // executerAvancementSemaine, qui vide ensuite ces 2 colonnes.
     "ALTER TABLE players ADD COLUMN dispositions_gain_en_attente TEXT",
-    "ALTER TABLE players ADD COLUMN dispositions_deplacement_en_attente TEXT"
+    "ALTER TABLE players ADD COLUMN dispositions_deplacement_en_attente TEXT",
+    // Historique avant/apres des 7 dispositions, memes principe que les competences/
+    // l'etat physique juste au-dessus (2026-09-14, demande explicite de l'utilisateur
+    // suite a Nikola Stakhan/Eva Novice : impossible de savoir ce qu'ils avaient
+    // avant leur Coaching mental, aucune trace nulle part). Alimente desormais a
+    // chaque avancee de semaine par executerAvancementSemaine, pour que ce cas ne se
+    // reproduise plus jamais.
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_adversite_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_adversite_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_coupeur_de_tetes_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_coupeur_de_tetes_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_dernier_carre_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_dernier_carre_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_premiers_tours_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_premiers_tours_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_sang_froid_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_sang_froid_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_indoor_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_indoor_apres INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_rivalite_avant INTEGER",
+    "ALTER TABLE journal_semaine_joueur ADD COLUMN dispo_rivalite_apres INTEGER"
 ];
 
 migrations.forEach(function (sql) {
