@@ -1085,6 +1085,20 @@ app.get('/api/admin/verifier-calendrier', (req, res) => {
             .filter(function (t) { return t.circuit === circuit && t.semaine_debut === phase.positionSemaine; })
             .map(function (t) {
                 const historique = db.prepare('SELECT id, semaine, statut, tour_actuel FROM tournois WHERE calendrier_id = ? ORDER BY semaine DESC').all(t.id);
+                // Nombre d'inscrits (reels/total) par edition historique - indispensable
+                // pour statuer sur un doublon sans risquer d'effacer une inscription
+                // reelle (2026-09-14, cas Rotterdam : 2 editions 'inscriptions' a la fois).
+                historique.forEach(function (h) {
+                    h.nbInscritsTotal = db.prepare('SELECT COUNT(*) AS n FROM tournoi_joueurs WHERE tournoi_id = ?').get(h.id).n;
+                    h.nbInscritsReels = db.prepare('SELECT COUNT(*) AS n FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 1').get(h.id).n;
+                    h.inscritsReels = db.prepare(`
+                        SELECT tj.nom, u.pseudo AS coach FROM tournoi_joueurs tj
+                        LEFT JOIN players p ON p.id = tj.player_id
+                        LEFT JOIN users u ON u.id = p.user_id
+                        WHERE tj.tournoi_id = ? AND tj.est_reel = 1
+                    `).all(h.id);
+                    h.nbListeAttente = db.prepare('SELECT COUNT(*) AS n FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ?').get(t.id, h.semaine).n;
+                });
                 const surCetteSemaine = historique.find(function (h) { return h.semaine === semaine; });
                 return {
                     calendrierId: t.id,
