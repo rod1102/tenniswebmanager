@@ -11369,7 +11369,17 @@ try {
 
             db.prepare('UPDATE tournois SET semaine = ? WHERE id = ?').run(cible, t.id);
             db.prepare('UPDATE tournoi_liste_attente SET semaine = ? WHERE calendrier_id = ? AND semaine = ?').run(cible, t.calendrier_id, t.semaine);
-            db.prepare('UPDATE tournoi_favoris SET semaine = ? WHERE calendrier_id = ? AND semaine = ?').run(cible, t.calendrier_id, t.semaine);
+            try {
+                // tournoi_favoris a UNIQUE(player_id, semaine) (pas sur calendrier_id) : si
+                // un coach a deja un AUTRE favori sur la semaine cible, ce deplacement-la
+                // entre en collision - on isole cette etape pour ne jamais faire echouer le
+                // recalage du tournoi lui-meme (bien plus important) pour un simple favori
+                // (bug reel constate en prod le 2026-09-14 : plantait toute la boucle avant
+                // meme d'atteindre les tournois suivants).
+                db.prepare('UPDATE tournoi_favoris SET semaine = ? WHERE calendrier_id = ? AND semaine = ?').run(cible, t.calendrier_id, t.semaine);
+            } catch (errFav) {
+                console.log('[recalage_tournois] favori(s) non deplace(s) pour id ' + t.id + ' (' + t.calendrier_id + ') : ' + errFav.message);
+            }
             console.log('[recalage_tournois] id ' + t.id + ' (' + t.calendrier_id + ') recale : semaine ' + t.semaine + ' -> ' + cible);
             nbCorriges++;
         });
