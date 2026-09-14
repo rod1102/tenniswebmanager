@@ -6949,7 +6949,7 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
         // histoire), demande utilisateur 2026-08-21. semaine <= (pas <) pour que
         // l'edition qu'on est justement en train de consulter apparaisse des qu'elle
         // passe a statut='termine', sans attendre la prochaine saison.
-        const palmares = db.prepare(`
+        let palmares = db.prepare(`
             SELECT tournois.id, tournois.semaine, tournois.categorie, tournois.surface,
                    vainqueur_j.nom AS nom_vainqueur, vainqueur_j.nationalite AS vainqueur_nationalite
             FROM tournois
@@ -6968,6 +6968,11 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
             p.tourElimineJoueur = monResultat ? monResultat.tour_elimine : null;
             p.pointsGagnesJoueur = monResultat ? monResultat.points_gagnes : null;
         });
+        // "Saison 0" affichee = la periode simulee par des bots avant le vrai debut
+        // de la partie - une edition jouee (et gagnee par un rival) durant cette
+        // periode n'a aucun sens pour un coach, jamais dans un palmares (2026-09-14,
+        // meme correctif que pour la Fiche Pays).
+        palmares = palmares.filter(function (p) { return p.numeroSaison >= 1; });
 
         res.json({
             success: true,
