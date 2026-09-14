@@ -1326,4 +1326,33 @@ if (db.prepare('SELECT patch_lund_jorgensen_20260912 AS p FROM jeu_etat WHERE id
     db.prepare('UPDATE jeu_etat SET patch_lund_jorgensen_20260912 = 1 WHERE id = 1').run();
 }
 
+// 2026-09-14, demande explicite de l'utilisateur : Nikola Stakhan et Eva Noviče
+// ont valide leur Coaching mental (repartition de points de disposition gagnes +
+// deplacement) AVANT le correctif du meme jour qui a rendu ces 2 actions
+// modifiables jusqu'a l'avancee de semaine (brouillon, plus immediates et
+// definitives) - leurs choix a eux se sont donc appliques tout de suite, sans
+// jamais avoir eu la possibilite de revenir dessus comme n'importe quel coach
+// depuis. On leur "remet le tableau" en leur re-accordant 1 point a gagner et 1
+// deplacement, pour qu'ils puissent choisir a nouveau via le systeme corrige.
+// N'ANNULE PAS le placement deja fait (aucune trace fiable de la categorie
+// choisie pour le reconstruire sans risque) - seulement une nouvelle chance de
+// jouer le systeme corrige, pas une remise a zero de ce qui a deja ete gagne.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_redo_coaching_mental_20260914 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_redo_coaching_mental_20260914 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const CIBLES = [
+        { prenom: 'Nikola', nom: 'Stakhan' },
+        { prenom: 'Eva', nom: 'Noviče' }
+    ];
+    CIBLES.forEach(function (cible) {
+        const joueur = db.prepare('SELECT id, prenom, nom, points_dispositions_a_gagner, points_dispositions_a_deplacer FROM players WHERE prenom = ? COLLATE NOCASE AND nom = ? COLLATE NOCASE').get(cible.prenom, cible.nom);
+        if (!joueur) {
+            console.log('[redo_coaching_mental] "' + cible.prenom + ' ' + cible.nom + '" introuvable, rien fait');
+            return;
+        }
+        db.prepare('UPDATE players SET points_dispositions_a_gagner = 1, points_dispositions_a_deplacer = 1 WHERE id = ?').run(joueur.id);
+        console.log('[redo_coaching_mental] ' + joueur.prenom + ' ' + joueur.nom + ' (id ' + joueur.id + ') : re-accorde 1 point a gagner + 1 deplacement (etait ' + joueur.points_dispositions_a_gagner + '/' + joueur.points_dispositions_a_deplacer + ')');
+    });
+    db.prepare('UPDATE jeu_etat SET patch_redo_coaching_mental_20260914 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
