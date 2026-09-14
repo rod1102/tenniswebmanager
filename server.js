@@ -1006,6 +1006,43 @@ app.post('/api/interne/synchroniser', (req, res) => {
     })();
 });
 
+// Repartition des actions planifiees (repos/entrainement/coaching mental/tournoi)
+// pour une semaine donnee, a partir de journal_semaine_joueur.action_prevue -
+// demande explicite de l'utilisateur, 2026-09-14. Semaine actuelle par defaut,
+// ?semaine=N pour une autre. Lecture seule.
+app.get('/api/admin/stats-actions-semaine', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaine = req.query.semaine ? Number(req.query.semaine) : etat.semaine_actuelle;
+
+        const rows = db.prepare('SELECT action_prevue, COUNT(*) AS n FROM journal_semaine_joueur WHERE semaine = ? GROUP BY action_prevue').all(semaine);
+        const compte = {};
+        rows.forEach(function (r) { compte[r.action_prevue === null ? 'aucune' : r.action_prevue] = r.n; });
+
+        res.json({
+            success: true,
+            semaine,
+            generique: compte.generique || 0,
+            coaching_mental: compte.coaching_mental || 0,
+            tournoi: compte.tournoi || 0,
+            surface_dur: compte.surface_dur || 0,
+            surface_terre: compte.surface_terre || 0,
+            surface_herbe: compte.surface_herbe || 0,
+            surfaceTotal: (compte.surface_dur || 0) + (compte.surface_terre || 0) + (compte.surface_herbe || 0),
+            repos: compte.repos || 0,
+            afk: compte.afk || 0,
+            aucune: compte.aucune || 0,
+            totalJoueurs: rows.reduce(function (s, r) { return s + r.n; }, 0)
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Recherche d'un joueur reel (admin) - utilitaire de diagnostic pour les
 // corrections ponctuelles de donnees (age, nationalite...). Retourne les valeurs
 // exactes stockees (prenom/nom sans reformatage) pour cibler une migration.
