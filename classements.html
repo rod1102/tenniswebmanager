@@ -48,6 +48,7 @@
                 <button class="tab-btn" data-circuit="coach">Coach</button>
             </div>
             <div class="tabs-nav" id="tabs-nav-type"></div>
+            <div id="pronos-bareme-container" style="text-align:right; margin-bottom:8px;"></div>
 
             <div class="tab-panel">
                 <table class="classement-table">
@@ -219,6 +220,14 @@
             const thead = document.getElementById('classement-thead');
             const corps = document.getElementById('classement-body');
 
+            const baremeContainer = document.getElementById('pronos-bareme-container');
+            if (typeCourant === 'pronos') {
+                baremeContainer.innerHTML = '<button class="pts-detail-btn" id="pronos-bareme-btn" title="Barème des points">?</button>';
+                document.getElementById('pronos-bareme-btn').addEventListener('click', ouvrirBaremePronos);
+            } else {
+                baremeContainer.innerHTML = '';
+            }
+
             if (typeCourant === 'nation') {
                 afficherClassementNation();
                 return;
@@ -253,6 +262,59 @@
 
             classementData = data;
             afficherClassement();
+        }
+
+        // Meme contenu que le bouton "Barème des points" de pronostics.html - copie
+        // volontairement (aucun fichier JS partage entre les pages sur ce projet).
+        function ouvrirBaremePronos() {
+            const overlay = document.createElement('div');
+            overlay.className = 'dispo-blocage-overlay';
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box">
+                    <div class="stats-header" style="margin-top:0;">Barème des points</div>
+
+                    <div class="stats-header" style="font-size:0.9rem;">Pronostic simple <span class="match-hint">(ATP/WTA 250, 500, Masters de fin de saison)</span></div>
+                    <p class="match-hint" style="margin-bottom:8px;">On parie uniquement sur le vainqueur du tournoi. Points si tu trouves juste :</p>
+                    <div class="stat-row"><span class="stat-label">Tournoi 250</span><span class="stat-value">25 pts</span></div>
+                    <div class="stat-row"><span class="stat-label">Tournoi 500</span><span class="stat-value">50 pts</span></div>
+                    <div class="stat-row"><span class="stat-label">Masters de fin de saison</span><span class="stat-value">100 pts</span></div>
+
+                    <div class="stats-header" style="font-size:0.9rem; margin-top:18px;">Pronostic en cascade <span class="match-hint">(Masters 1000 et Grands Chelems)</span></div>
+                    <p class="match-hint" style="margin-bottom:8px;">
+                        On pronostique tour par tour, des huitièmes jusqu'au vainqueur. Pour chaque tour :
+                        des points par joueur qui atteint vraiment ce tour, un bonus si toute l'affiche d'un match est juste,
+                        et un bonus si TOUS les joueurs du tour sont bons.
+                    </p>
+                    <div style="overflow-x:auto;">
+                        <table class="classement-table" style="width:100%; margin-top:6px;">
+                            <thead>
+                                <tr>
+                                    <th style="text-align:left;">Tour</th>
+                                    <th style="text-align:center;">Par joueur juste</th>
+                                    <th style="text-align:center;">Affiche complète</th>
+                                    <th style="text-align:center;">Tour parfait</th>
+                                    <th style="text-align:center;">Max du tour</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr><td style="text-align:left; font-weight:600;">8<sup>es</sup></td><td style="text-align:center;">1</td><td style="text-align:center;">+1</td><td style="text-align:center;">+6</td><td style="text-align:center;">30</td></tr>
+                                <tr><td style="text-align:left; font-weight:600;">Quarts</td><td style="text-align:center;">4</td><td style="text-align:center;">+2</td><td style="text-align:center;">+10</td><td style="text-align:center;">50</td></tr>
+                                <tr><td style="text-align:left; font-weight:600;">Demies</td><td style="text-align:center;">10</td><td style="text-align:center;">+5</td><td style="text-align:center;">+20</td><td style="text-align:center;">70</td></tr>
+                                <tr><td style="text-align:left; font-weight:600;">Finale</td><td style="text-align:center;">20</td><td style="text-align:center;">+25</td><td style="text-align:center;">—</td><td style="text-align:center;">100</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="match-hint" style="margin:10px 0 0;">
+                        En finale, <strong>+35 pts</strong> supplémentaires si tu as trouvé le vainqueur du tournoi.
+                        Total récupérable : <strong>250 pts</strong> par Masters 1000, <strong>doublé (500 pts) en Grand Chelem</strong>.
+                    </p>
+
+                    <button class="cta cta-secondary" id="pronos-bareme-fermer" style="margin-top:18px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+            document.getElementById('pronos-bareme-fermer').addEventListener('click', function () { overlay.remove(); });
         }
 
         async function chargerPronos() {
@@ -422,7 +484,7 @@
 
         document.addEventListener('click', function (e) {
             const bouton = e.target.closest('.pts-detail-btn');
-            if (!bouton) return;
+            if (!bouton || bouton.id === 'pronos-bareme-btn') return; // a son propre listener (ouvrirBaremePronos)
             if (bouton.dataset.nation) {
                 ouvrirDetailNation(bouton.dataset.nation, bouton.dataset.circuit);
             } else {
