@@ -7707,6 +7707,53 @@ function nomCoach(userId) {
     return user && user.pseudo ? capitaliserPrenom(user.pseudo) : ('Coach #' + userId);
 }
 
+// Historique complet des pronostics du coach connecte, tous tournois confondus,
+// resolus ou non (2026-09-14, demande explicite : "Mes anciens pronos" sur
+// pronostics.html). Un pronostic n'existe jamais pour une semaine "Saison 0" (la
+// periode simulee par des bots avant le vrai debut de la partie) puisque seuls de
+// vrais coachs en posent, qui n'existaient pas encore a ce moment-la - aucun
+// filtre de saison necessaire ici, contrairement aux palmares qui incluent aussi
+// des victoires de rivaux.
+app.get('/api/pronostics/historique/:userId', (req, res) => {
+    try {
+        const userId = req.userId;
+        const lignes = db.prepare(`
+            SELECT p.tournoi_id, p.predictions, p.points_gagnes,
+                   t.nom AS tournoi_nom, t.circuit, t.categorie, t.semaine, t.statut
+            FROM pronostics p
+            JOIN tournois t ON t.id = p.tournoi_id
+            WHERE p.user_id = ?
+            ORDER BY t.semaine DESC, p.tournoi_id DESC
+        `).all(userId);
+
+        const historique = lignes.map(function (l) {
+            let predictions = null;
+            try { predictions = JSON.parse(l.predictions); } catch (e) { predictions = null; }
+            const vainqueurId = predictions ? predictions.vainqueur : null;
+            const entrant = vainqueurId ? db.prepare('SELECT nom, nationalite FROM tournoi_joueurs WHERE id = ?').get(vainqueurId) : null;
+
+            return {
+                tournoiId: l.tournoi_id,
+                tournoiNom: l.tournoi_nom,
+                circuit: l.circuit,
+                categorie: l.categorie,
+                positionSemaine: positionSemaineAffichee(l.semaine),
+                numeroSaison: phaseAffichee(l.semaine).numeroSaison,
+                type: typePronostic({ categorie: l.categorie }),
+                statutTournoi: l.statut,
+                vainqueurPronostique: entrant ? entrant.nom : null,
+                drapeauVainqueur: entrant ? drapeau(entrant.nationalite) : null,
+                pointsGagnes: l.points_gagnes
+            };
+        });
+
+        res.json({ success: true, historique });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/pronostics/classement/:userId', (req, res) => {
     try {
         const userId = req.userId;

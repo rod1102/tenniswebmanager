@@ -47,8 +47,9 @@
                 Grands Chelems, le pari se joue en cascade : choisis d'abord tes 16 joueurs en huitièmes, puis
                 enchaîne jusqu'au vainqueur.
             </p>
-            <div style="text-align:center; margin-bottom:16px;">
+            <div style="text-align:center; margin-bottom:16px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap;">
                 <button class="cta cta-secondary" id="bareme-btn" style="padding:9px 18px; font-size:0.82rem;">Barème des points</button>
+                <button class="cta cta-secondary" id="historique-btn" style="padding:9px 18px; font-size:0.82rem;">Mes anciens pronos</button>
             </div>
 
             <div class="tabs-nav" id="tabs-nav"></div>
@@ -383,6 +384,50 @@
             document.getElementById('bareme-fermer').addEventListener('click', function () { overlay.remove(); });
         }
         document.getElementById('bareme-btn').addEventListener('click', ouvrirBareme);
+
+        async function ouvrirHistorique() {
+            const overlay = document.createElement('div');
+            overlay.className = 'dispo-blocage-overlay';
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box">
+                    <div class="stats-header" style="margin-top:0;">Mes anciens pronos</div>
+                    <div id="historique-contenu"><p class="match-hint">Chargement...</p></div>
+                    <button class="cta cta-secondary" id="historique-fermer" style="margin-top:18px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+            document.getElementById('historique-fermer').addEventListener('click', function () { overlay.remove(); });
+
+            const response = await fetch('/api/pronostics/historique/' + userId + '?userId=' + userId);
+            const data = await response.json();
+            const contenu = document.getElementById('historique-contenu');
+            if (!response.ok) {
+                contenu.innerHTML = '<p class="match-hint">' + (data.error || 'Impossible de charger l\'historique.') + '</p>';
+                return;
+            }
+            if (data.historique.length === 0) {
+                contenu.innerHTML = '<p class="match-hint">Aucun pronostic posé pour l\'instant.</p>';
+                return;
+            }
+            contenu.innerHTML = data.historique.map(function (h) {
+                const enAttente = h.pointsGagnes === null;
+                const pointsHtml = enAttente
+                    ? '<span class="match-hint">En attente</span>'
+                    : '<strong>' + h.pointsGagnes + ' pt' + (h.pointsGagnes > 1 ? 's' : '') + '</strong>';
+                const vainqueurHtml = h.vainqueurPronostique
+                    ? (h.drapeauVainqueur ? flagImg(h.drapeauVainqueur) + ' ' : '') + formaterNomComplet(h.vainqueurPronostique)
+                    : '<span class="match-hint">—</span>';
+                return `
+                    <div class="tournoi-card" style="margin-bottom:10px;">
+                        <div class="tournoi-card-name">${h.tournoiNom} <span class="match-hint">(${h.circuit} · ${LABELS_CATEGORIE[h.categorie] || h.categorie})</span></div>
+                        <div class="tournoi-card-meta">Semaine ${h.positionSemaine} (Saison ${h.numeroSaison}) · ${h.type === 'cascade' ? 'Pronostic en cascade' : 'Vainqueur pronostiqué'} : ${vainqueurHtml}</div>
+                        <div class="tournoi-card-meta">${pointsHtml}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+        document.getElementById('historique-btn').addEventListener('click', ouvrirHistorique);
 
         document.getElementById('nav-toggle').addEventListener('click', function (e) {
             e.stopPropagation();
