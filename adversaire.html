@@ -58,10 +58,6 @@
             <div class="tab-panel" id="tab-stats" style="display:none;"></div>
             <div class="tab-panel" id="tab-faceaface" style="display:none;"></div>
             <div class="tab-panel" id="tab-badges" style="display:none;"></div>
-
-            <div style="text-align:center; margin-top:24px;">
-                <button class="cta cta-secondary" id="vitesse-teletexte-btn" style="padding:9px 18px; font-size:0.82rem;">Choisir la vitesse du télétexte</button>
-            </div>
         </div>
     </div>
 
@@ -266,34 +262,6 @@
             const v = Number(localStorage.getItem('teletexteVitesseMs'));
             return VITESSES_TELETEXTE.includes(v) ? v : 2000;
         }
-        function ouvrirVitesseTeletexte() {
-            const overlay = document.createElement('div');
-            overlay.className = 'dispo-blocage-overlay';
-            const actuelle = vitesseTeletexte();
-            overlay.innerHTML = `
-                <div class="dispo-blocage-box">
-                    <div class="stats-header" style="margin-top:0;">Choisir sa vitesse</div>
-                    <p class="match-hint" style="margin-bottom:10px;">Délai entre chaque ligne du télétexte.</p>
-                    <div style="display:flex; flex-direction:column; gap:8px;">
-                        ${VITESSES_TELETEXTE.map(function (ms) {
-                            const label = (ms / 1000).toString().replace('.', ',') + ' s';
-                            return `<button class="cta ${ms === actuelle ? 'cta-primary' : 'cta-secondary'} vitesse-option-btn" data-ms="${ms}" style="padding:9px 16px; font-size:0.85rem;">${label}</button>`;
-                        }).join('')}
-                    </div>
-                    <button class="cta cta-secondary" id="vitesse-fermer" style="margin-top:18px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
-                </div>
-            `;
-            document.body.appendChild(overlay);
-            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
-            document.getElementById('vitesse-fermer').addEventListener('click', function () { overlay.remove(); });
-            overlay.querySelectorAll('.vitesse-option-btn').forEach(function (btn) {
-                btn.addEventListener('click', function () {
-                    localStorage.setItem('teletexteVitesseMs', btn.getAttribute('data-ms'));
-                    overlay.remove();
-                });
-            });
-        }
-
         // Le journal d'un match stocke "Toi"/"Adversaire" du point de vue de son
         // proprietaire - ici le spectateur n'est jamais ce proprietaire (on consulte
         // toujours la fiche d'un AUTRE joueur), donc "Toi" serait trompeur sans
@@ -676,8 +644,6 @@
             localStorage.removeItem('currentUserId');
             window.location.href = 'index.html';
         });
-
-        document.getElementById('vitesse-teletexte-btn').addEventListener('click', ouvrirVitesseTeletexte);
 
         document.getElementById('nav-toggle').addEventListener('click', function (e) {
             e.stopPropagation();
