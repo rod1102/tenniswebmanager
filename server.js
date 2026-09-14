@@ -1008,15 +1008,23 @@ app.post('/api/interne/synchroniser', (req, res) => {
 
 // Repartition des actions planifiees (repos/entrainement/coaching mental/tournoi)
 // pour une semaine donnee, a partir de journal_semaine_joueur.action_prevue -
-// demande explicite de l'utilisateur, 2026-09-14. Semaine actuelle par defaut,
-// ?semaine=N pour une autre. Lecture seule.
+// demande explicite de l'utilisateur, 2026-09-14. Semaine actuelle par defaut ;
+// ?semaine=N pour une semaine ABSOLUE precise ; ?position=N (1-49) pour "la Ne
+// semaine de tournoi de la saison EN COURS" sans avoir a calculer le numero
+// absolu correspondant (source de confusion constatee - S1 absolu est tres loin
+// dans le passe, jamais ce que l'utilisateur veut dire par "semaine 1"). Lecture
+// seule.
 app.get('/api/admin/stats-actions-semaine', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
-        const semaine = req.query.semaine ? Number(req.query.semaine) : etat.semaine_actuelle;
+        let semaine = req.query.semaine ? Number(req.query.semaine) : etat.semaine_actuelle;
+        if (req.query.position) {
+            const numeroSaisonBrut = Math.floor((etat.semaine_actuelle - 1) / LONGUEUR_SAISON) + 1;
+            semaine = (numeroSaisonBrut - 1) * LONGUEUR_SAISON + Number(req.query.position) + 2;
+        }
 
         const rows = db.prepare('SELECT action_prevue, COUNT(*) AS n FROM journal_semaine_joueur WHERE semaine = ? GROUP BY action_prevue').all(semaine);
         const compte = {};
@@ -1025,6 +1033,7 @@ app.get('/api/admin/stats-actions-semaine', (req, res) => {
         res.json({
             success: true,
             semaine,
+            phase: phaseAffichee(semaine),
             generique: compte.generique || 0,
             coaching_mental: compte.coaching_mental || 0,
             tournoi: compte.tournoi || 0,
