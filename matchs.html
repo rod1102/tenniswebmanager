@@ -62,6 +62,10 @@
                 </div>
                 <div class="mx-grid" id="multiplex-grid"></div>
             </div>
+
+            <div style="text-align:center; margin-top:24px;">
+                <button class="cta cta-secondary" id="vitesse-teletexte-btn" style="padding:9px 18px; font-size:0.82rem;">Choisir la vitesse du télétexte</button>
+            </div>
         </div>
     </div>
 
@@ -169,6 +173,42 @@
             }
         }
 
+        // Vitesse du Teletexte (delai entre chaque ligne affichee) : preference du
+        // navigateur, partagee entre toutes les pages qui ont un Teletexte (meme cle
+        // localStorage), demande explicite de l'utilisateur, 2026-09-14.
+        const VITESSES_TELETEXTE = [1000, 1500, 2000, 2500, 3000, 3500, 4000];
+        function vitesseTeletexte() {
+            const v = Number(localStorage.getItem('teletexteVitesseMs'));
+            return VITESSES_TELETEXTE.includes(v) ? v : 2000;
+        }
+        function ouvrirVitesseTeletexte() {
+            const overlay = document.createElement('div');
+            overlay.className = 'dispo-blocage-overlay';
+            const actuelle = vitesseTeletexte();
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box">
+                    <div class="stats-header" style="margin-top:0;">Choisir sa vitesse</div>
+                    <p class="match-hint" style="margin-bottom:10px;">Délai entre chaque ligne du télétexte.</p>
+                    <div style="display:flex; flex-direction:column; gap:8px;">
+                        ${VITESSES_TELETEXTE.map(function (ms) {
+                            const label = (ms / 1000).toString().replace('.', ',') + ' s';
+                            return `<button class="cta ${ms === actuelle ? 'cta-primary' : 'cta-secondary'} vitesse-option-btn" data-ms="${ms}" style="padding:9px 16px; font-size:0.85rem;">${label}</button>`;
+                        }).join('')}
+                    </div>
+                    <button class="cta cta-secondary" id="vitesse-fermer" style="margin-top:18px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+            document.getElementById('vitesse-fermer').addEventListener('click', function () { overlay.remove(); });
+            overlay.querySelectorAll('.vitesse-option-btn').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    localStorage.setItem('teletexteVitesseMs', btn.getAttribute('data-ms'));
+                    overlay.remove();
+                });
+            });
+        }
+
         function libelleScore(evt) {
             if (evt.type === 'tie_break_point' || evt.type === 'tie_break_debut') {
                 return 'Set ' + evt.numeroSet + ' : Tie-break ' + (evt.ptsA || 0) + '-' + (evt.ptsB || 0) + '  ·  Sets ' + evt.setsA + '-' + evt.setsB;
@@ -188,11 +228,43 @@
             `;
         }
 
-        function afficherTeletexte(viewer, match) {
-            const lignes = match.evenements.map(function (evt) {
-                return `<div class="teletexte-ligne teletexte-${evt.type}">${evt.texte}</div>`;
-            }).join('');
-            viewer.innerHTML = `<div class="match-journal" style="display:block;">${lignes}</div>`;
+        function afficherTeletexte(viewer, match, cle) {
+            viewer.innerHTML = `
+                <div class="match-journal" style="display:block;"></div>
+                <button class="cta cta-secondary live-skip-btn" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Tout afficher</button>
+            `;
+            const journalDiv = viewer.querySelector('.match-journal');
+            const skipBtn = viewer.querySelector('.live-skip-btn');
+            let index = 0;
+
+            function afficherLigne(evt) {
+                const ligne = document.createElement('div');
+                ligne.className = 'teletexte-ligne teletexte-' + evt.type;
+                ligne.textContent = evt.texte;
+                journalDiv.appendChild(ligne);
+            }
+
+            function avancer() {
+                if (index >= match.evenements.length) {
+                    arreterLive(cle);
+                    skipBtn.style.display = 'none';
+                    return;
+                }
+                afficherLigne(match.evenements[index]);
+                index++;
+            }
+
+            avancer();
+            liveEnCours[cle] = setInterval(avancer, vitesseTeletexte());
+
+            skipBtn.addEventListener('click', function () {
+                arreterLive(cle);
+                while (index < match.evenements.length) {
+                    afficherLigne(match.evenements[index]);
+                    index++;
+                }
+                skipBtn.style.display = 'none';
+            });
         }
 
         function afficherLive(viewer, match, matchId) {
@@ -277,7 +349,7 @@
             try {
                 const match = await obtenirDetail(matchId);
                 if (mode === 'resultat') afficherResultat(viewer, match);
-                else if (mode === 'teletexte') afficherTeletexte(viewer, match);
+                else if (mode === 'teletexte') afficherTeletexte(viewer, match, matchId);
                 else if (mode === 'live') afficherLive(viewer, match, matchId);
             } catch (err) {
                 viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
@@ -307,11 +379,8 @@
             `;
         }
 
-        function afficherTeletexteBot(viewer, match) {
-            const lignes = match.evenements.map(function (evt) {
-                return `<div class="teletexte-ligne teletexte-${evt.type}">${evt.texte}</div>`;
-            }).join('');
-            viewer.innerHTML = `<div class="match-journal" style="display:block;">${lignes}</div>`;
+        function afficherTeletexteBot(viewer, match, cle) {
+            afficherTeletexte(viewer, match, cle);
         }
 
         function afficherLiveBot(viewer, match, tournoiMatchId) {
@@ -390,7 +459,7 @@
             try {
                 const match = await obtenirDetailBot(tournoiMatchId);
                 if (mode === 'resultat') afficherResultatBot(viewer, match);
-                else if (mode === 'teletexte') afficherTeletexteBot(viewer, match);
+                else if (mode === 'teletexte') afficherTeletexteBot(viewer, match, 'bot-' + tournoiMatchId);
                 else if (mode === 'live') afficherLiveBot(viewer, match, tournoiMatchId);
             } catch (err) {
                 viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
@@ -866,6 +935,8 @@
             localStorage.removeItem('currentUserId');
             window.location.href = 'index.html';
         });
+
+        document.getElementById('vitesse-teletexte-btn').addEventListener('click', ouvrirVitesseTeletexte);
 
         document.getElementById('nav-toggle').addEventListener('click', function (e) {
             e.stopPropagation();
