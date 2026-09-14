@@ -7370,7 +7370,12 @@ app.get('/api/pays/:nation', (req, res) => {
                 WHERE tj.tour_elimine = 'Vainqueur' AND t.circuit = ? AND t.statut = 'termine'
                 ORDER BY t.semaine DESC
             `).all(circuit)
-                .filter(function (r) { return normaliserPays(r.nationalite || '') === cibleNorm; })
+                // "Saison 0" affichee = la periode simulee par des bots avant le vrai
+                // debut de la partie (cf. saison_offset/phaseAffichee) - un titre
+                // remporte par un rival durant cette periode n'a aucun sens pour un
+                // coach et ne doit jamais apparaitre dans un palmares (2026-09-14,
+                // signale par l'utilisateur).
+                .filter(function (r) { return normaliserPays(r.nationalite || '') === cibleNorm && phaseAffichee(r.semaine).numeroSaison >= 1; })
                 .map(function (r) {
                     return {
                         saison: phaseAffichee(r.semaine).numeroSaison,
