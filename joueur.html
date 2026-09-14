@@ -75,6 +75,11 @@
         const paramsUrl = new URLSearchParams(window.location.search);
         const typeDemande = paramsUrl.get('type');
         let typeCourant = (typeDemande === 'joueur' || typeDemande === 'joueuse') ? typeDemande : null;
+
+        // Gestion des avatars reservee a l'admin, meme pour son propre joueur
+        // (demande explicite de l'utilisateur, 2026-09-14) - connu avant le premier
+        // rendu de carte pour ne jamais afficher les boutons a tort.
+        let estAdminCourant = false;
         let joueurData = null;
         let joueuseData = null;
 
@@ -222,6 +227,7 @@
             const data = await response.json();
             if (response.ok && data.user.role === 'admin') {
                 document.getElementById('admin-link').style.display = 'inline-block';
+                estAdminCourant = true;
             }
         }
 
@@ -879,15 +885,19 @@
                 ? `<div class="player-avatar-photo avatar-personnalise"><img src="${player.photo_avatar}" alt=""></div>`
                 : `<div class="player-avatar-photo avatar-generique"><img src="${iconeGenerique}" alt=""></div>`;
 
-            const card = document.createElement('div');
-            card.className = 'player-summary';
-            card.innerHTML = `
-                ${avatarHtml}
+            const avatarActionsHtml = estAdminCourant ? `
                 <div class="avatar-actions">
                     <button type="button" class="avatar-changer-btn">Changer la photo</button>
                     ${player.photo_avatar ? '<button type="button" class="avatar-retirer-btn">Retirer</button>' : ''}
                 </div>
                 <input type="file" class="avatar-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;">
+            ` : '';
+
+            const card = document.createElement('div');
+            card.className = 'player-summary';
+            card.innerHTML = `
+                ${avatarHtml}
+                ${avatarActionsHtml}
                 ${badge}
                 <div class="player-summary-type">${player.type === 'joueur' ? 'Ton joueur' : 'Ta joueuse'}</div>
                 <div class="player-summary-name">${formaterNom(player.prenom, player.nom)}</div>
@@ -977,6 +987,7 @@
             container.appendChild(card);
             chargerZoneCapitaine(player);
 
+            if (estAdminCourant) {
             const inputAvatar = card.querySelector('.avatar-input');
             card.querySelector('.avatar-changer-btn').addEventListener('click', function () {
                 inputAvatar.click();
@@ -1007,6 +1018,7 @@
                     player.photo_avatar = null;
                     afficherCarteJoueur(player, rangs);
                 });
+            }
             }
         }
 
@@ -1403,8 +1415,10 @@ async function afficherJoueurCourant() {
         });
 
         chargerSemaine();
-        verifierAdmin();
-        chargerOnglets();
+        (async function () {
+            await verifierAdmin();
+            chargerOnglets();
+        })();
     </script>
     <script src="retour.js?v=20260829"></script>
     <script src="theme-saison.js?v=20260831"></script>

@@ -850,9 +850,12 @@ app.get('/api/joueurs/:userId', (req, res) => {
 // plus le faire sur N'IMPORTE QUEL joueur (seul l'admin doit pouvoir poser une
 // photo sur la fiche d'un joueur qui n'est pas le sien, demande explicite de
 // l'utilisateur 2026-08-22).
+// Reserve a l'admin, meme pour SES PROPRES joueurs (demande explicite de
+// l'utilisateur, 2026-09-14 - avant, un coach pouvait gerer l'avatar de ses
+// propres joueurs sans etre admin).
 function joueurGerableParAvatar(playerId, userId) {
-    if (estAdmin(userId)) return db.prepare('SELECT id, photo_avatar FROM players WHERE id = ?').get(playerId);
-    return db.prepare('SELECT id, photo_avatar FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
+    if (!estAdmin(userId)) return null;
+    return db.prepare('SELECT id, photo_avatar FROM players WHERE id = ?').get(playerId);
 }
 
 app.post('/api/joueur/avatar/:playerId', function (req, res) {
