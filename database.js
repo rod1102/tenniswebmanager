@@ -1375,4 +1375,23 @@ if (db.prepare('SELECT patch_redo_coaching_mental_20260914 AS p FROM jeu_etat WH
     db.prepare('UPDATE jeu_etat SET patch_redo_coaching_mental_20260914 = 1 WHERE id = 1').run();
 }
 
+// 2026-09-14 (2), demande explicite de l'utilisateur : valeurs exactes des
+// dispositions de Nikola Stakhan AVANT le changement errone (Coaching mental
+// applique immediatement, avant le correctif du meme jour) - indoor=5,
+// premiers_tours=5, sang_froid=2. Corrige precisement ce qui avait ete mal
+// applique ; le point deja re-accorde par patch_redo_coaching_mental_20260914
+// (points_dispositions_a_gagner=1) reste disponible pour qu'il le replace pour de
+// bon cette fois, via le systeme desormais corrige.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_stakhan_dispositions_20260914 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_stakhan_dispositions_20260914 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const joueur = db.prepare('SELECT id, prenom, nom, disposition_indoor, disposition_premiers_tours, disposition_sang_froid FROM players WHERE prenom = ? COLLATE NOCASE AND nom = ? COLLATE NOCASE').get('Nikola', 'Stakhan');
+    if (!joueur) {
+        console.log('[stakhan_dispositions] "Nikola Stakhan" introuvable, rien fait');
+    } else {
+        db.prepare('UPDATE players SET disposition_indoor = 5, disposition_premiers_tours = 5, disposition_sang_froid = 2 WHERE id = ?').run(joueur.id);
+        console.log('[stakhan_dispositions] Nikola Stakhan (id ' + joueur.id + ') : indoor ' + joueur.disposition_indoor + '->5, premiers_tours ' + joueur.disposition_premiers_tours + '->5, sang_froid ' + joueur.disposition_sang_froid + '->2');
+    }
+    db.prepare('UPDATE jeu_etat SET patch_stakhan_dispositions_20260914 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
