@@ -1414,4 +1414,36 @@ if (db.prepare('SELECT patch_stakhan_dernier_carre_20260914 AS p FROM jeu_etat W
     db.prepare('UPDATE jeu_etat SET patch_stakhan_dernier_carre_20260914 = 1 WHERE id = 1').run();
 }
 
+// 2026-09-14 (4), demande explicite de l'utilisateur : valeurs completes des 7
+// dispositions d'Eva Novice a la Semaine 0 (avant le Coaching mental applique a
+// tort immediatement, avant le correctif du meme jour) - sang_froid=5,
+// premiers_tours=5, dernier_carre=2, le reste (adversite, coupeur_de_tetes,
+// indoor, rivalite) a 0. Le point deja re-accorde par
+// patch_redo_coaching_mental_20260914 (points_dispositions_a_gagner=1) reste
+// disponible pour qu'elle le replace pour de bon via le systeme corrige.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_eva_dispositions_20260914 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_eva_dispositions_20260914 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const joueur = db.prepare(`
+        SELECT id, prenom, nom, disposition_adversite, disposition_coupeur_de_tetes, disposition_dernier_carre,
+               disposition_premiers_tours, disposition_sang_froid, disposition_indoor, disposition_rivalite
+        FROM players WHERE prenom = ? COLLATE NOCASE AND nom = ? COLLATE NOCASE
+    `).get('Eva', 'Noviče');
+    if (!joueur) {
+        console.log('[eva_dispositions] "Eva Noviče" introuvable, rien fait');
+    } else {
+        db.prepare(`
+            UPDATE players SET
+                disposition_adversite = 0, disposition_coupeur_de_tetes = 0, disposition_dernier_carre = 2,
+                disposition_premiers_tours = 5, disposition_sang_froid = 5, disposition_indoor = 0, disposition_rivalite = 0
+            WHERE id = ?
+        `).run(joueur.id);
+        console.log('[eva_dispositions] Eva Noviče (id ' + joueur.id + ') : etait adversite=' + joueur.disposition_adversite +
+            ', coupeur_de_tetes=' + joueur.disposition_coupeur_de_tetes + ', dernier_carre=' + joueur.disposition_dernier_carre +
+            ', premiers_tours=' + joueur.disposition_premiers_tours + ', sang_froid=' + joueur.disposition_sang_froid +
+            ', indoor=' + joueur.disposition_indoor + ', rivalite=' + joueur.disposition_rivalite +
+            ' -> desormais 0/0/2/5/5/0/0');
+    }
+    db.prepare('UPDATE jeu_etat SET patch_eva_dispositions_20260914 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
