@@ -811,7 +811,15 @@ const migrations = [
     // Marqueur du recalibrage des bots des tournois deja tires (mais pas commences)
     // sur la nouvelle bande 60-85 % sans plancher (2026-09-11, demande explicite).
     // Voir le bloc garde dans server.js (au demarrage).
-    "ALTER TABLE jeu_etat ADD COLUMN patch_bande_60_85_20260911 INTEGER DEFAULT 0"
+    "ALTER TABLE jeu_etat ADD COLUMN patch_bande_60_85_20260911 INTEGER DEFAULT 0",
+    // Brouillon de repartition des points de disposition GAGNES (coaching mental ou
+    // intersaison), et brouillon de DEPLACEMENT d'un point deja acquis - meme
+    // principe que xp_repartition_en_attente (2026-09-14, signale par l'utilisateur :
+    // avant, valider ces 2 actions ecrivait immediatement et definitivement sur les
+    // dispositions, impossible de revenir dessus). Applique reellement par
+    // executerAvancementSemaine, qui vide ensuite ces 2 colonnes.
+    "ALTER TABLE players ADD COLUMN dispositions_gain_en_attente TEXT",
+    "ALTER TABLE players ADD COLUMN dispositions_deplacement_en_attente TEXT"
 ];
 
 migrations.forEach(function (sql) {

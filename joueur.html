@@ -340,42 +340,57 @@
                 `;
             }
 
+            // Brouillon, jamais applique immediatement (2026-09-14) : reste modifiable
+            // (resoumettre remplace le choix precedent) et annulable tant que la semaine
+            // n'a pas avance - pre-rempli ici si deja pose.
+            let brouillonGain = null;
+            try { brouillonGain = player.dispositions_gain_en_attente ? JSON.parse(player.dispositions_gain_en_attente) : null; } catch (e) { brouillonGain = null; }
+
             let dispositionsGainHtml = '';
             if (player.points_dispositions_a_gagner > 0) {
                 let inputsDispoHtml = '';
                 Object.keys(DISPOSITIONS_LABELS).forEach(function (cle) {
                     const margeDispo = Math.max(0, 10 - player['disposition_' + cle]);
+                    const valeurBrouillon = (brouillonGain && brouillonGain[cle]) || 0;
                     inputsDispoHtml += `
                         <div class="form-group">
                             <label>${DISPOSITIONS_LABELS[cle]} ${iconeInfo(DISPOSITIONS_TOOLTIPS[cle])} (actuel : ${player['disposition_' + cle]} / 10)</label>
-                            <input type="number" min="0" max="${margeDispo}" value="0" class="dispo-gain-input" data-cle="${cle}">
+                            <input type="number" min="0" max="${margeDispo}" value="${valeurBrouillon}" class="dispo-gain-input" data-cle="${cle}">
                         </div>
                     `;
                 });
                 dispositionsGainHtml = `
                     <div class="xp-pool-panel">
                         <div class="xp-pool-title">Points de disposition en réserve : <span id="dispo-gain-restant">${player.points_dispositions_a_gagner}</span></div>
-                        <div class="planning-alerte-texte" style="margin-bottom:8px;">À répartir cette semaine (bonus Coaching mental) — non utilisés, ils seront perdus à la prochaine avancée de semaine.</div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">À répartir cette semaine (bonus Coaching mental) — non utilisés, ils seront perdus à la prochaine avancée de semaine. ${brouillonGain ? 'Brouillon enregistré, modifiable ou annulable tant que la semaine n\'a pas avancé.' : 'Rien n\'est définitif tant que la semaine n\'a pas avancé : tu peux revenir sur ton choix autant de fois que tu veux.'}</div>
                         <div class="stats-grid">${inputsDispoHtml}</div>
-                        <button class="cta cta-primary dispo-gain-btn" data-pool="${player.points_dispositions_a_gagner}" style="padding:10px 20px; font-size:0.8rem;">Répartir ces points</button>
+                        <div style="display:flex; gap:10px; margin-top:10px;">
+                            <button class="cta cta-primary dispo-gain-btn" data-pool="${player.points_dispositions_a_gagner}" style="padding:10px 20px; font-size:0.8rem;">${brouillonGain ? 'Mettre à jour' : 'Répartir ces points'}</button>
+                            ${brouillonGain ? '<button class="cta cta-secondary dispo-gain-annuler-btn" style="padding:10px 20px; font-size:0.8rem;">Annuler le brouillon</button>' : ''}
+                        </div>
                     </div>
                 `;
             }
 
+            let brouillonDeplacement = null;
+            try { brouillonDeplacement = player.dispositions_deplacement_en_attente ? JSON.parse(player.dispositions_deplacement_en_attente) : null; } catch (e) { brouillonDeplacement = null; }
+
             let deplacerHtml = '';
             if (player.points_dispositions_a_deplacer > 0) {
-                let optionsDispoHtml = '';
-                Object.keys(DISPOSITIONS_LABELS).forEach(function (cle) {
-                    optionsDispoHtml += `<option value="${cle}">${DISPOSITIONS_LABELS[cle]}</option>`;
-                });
+                function optionsDispo(selectionnee) {
+                    return Object.keys(DISPOSITIONS_LABELS).map(function (cle) {
+                        return `<option value="${cle}" ${selectionnee === cle ? 'selected' : ''}>${DISPOSITIONS_LABELS[cle]}</option>`;
+                    }).join('');
+                }
                 deplacerHtml = `
                     <div class="xp-pool-panel">
                         <div class="xp-pool-title">Déplacement de disposition disponible : <span>${player.points_dispositions_a_deplacer}</span></div>
-                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Déplace 1 point déjà acquis d'une catégorie vers une autre (bonus Coaching mental) — à faire cette semaine, sinon perdu à la prochaine avancée de semaine.</div>
+                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Déplace 1 point déjà acquis d'une catégorie vers une autre (bonus Coaching mental) — à faire cette semaine, sinon perdu à la prochaine avancée de semaine. ${brouillonDeplacement ? 'Brouillon enregistré, modifiable ou annulable tant que la semaine n\'a pas avancé.' : 'Rien n\'est définitif tant que la semaine n\'a pas avancé.'}</div>
                         <div class="training-row">
-                            <select class="dispo-deplacer-depuis">${optionsDispoHtml}</select>
-                            <select class="dispo-deplacer-vers">${optionsDispoHtml}</select>
-                            <button class="cta cta-primary dispo-deplacer-btn" style="padding:10px 16px; font-size:0.8rem;">Déplacer</button>
+                            <select class="dispo-deplacer-depuis">${optionsDispo(brouillonDeplacement ? brouillonDeplacement.depuis : null)}</select>
+                            <select class="dispo-deplacer-vers">${optionsDispo(brouillonDeplacement ? brouillonDeplacement.vers : null)}</select>
+                            <button class="cta cta-primary dispo-deplacer-btn" style="padding:10px 16px; font-size:0.8rem;">${brouillonDeplacement ? 'Mettre à jour' : 'Déplacer'}</button>
+                            ${brouillonDeplacement ? '<button class="cta cta-secondary dispo-deplacer-annuler-btn" style="padding:10px 16px; font-size:0.8rem;">Annuler</button>' : ''}
                         </div>
                     </div>
                 `;
@@ -563,7 +578,24 @@
                         alert(data.error);
                         return;
                     }
-                    alert('Points de disposition répartis avec succès.');
+                    alert('Répartition programmée — elle s\'appliquera au prochain changement de semaine.');
+                    chargerOnglets();
+                });
+            }
+
+            const dispoGainAnnulerBtn = document.querySelector('.dispo-gain-annuler-btn');
+            if (dispoGainAnnulerBtn) {
+                dispoGainAnnulerBtn.addEventListener('click', async function () {
+                    const response = await fetch('/api/repartir-dispositions-gain/annuler', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId, playerId: player.id })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.error);
+                        return;
+                    }
                     chargerOnglets();
                 });
             }
@@ -593,7 +625,24 @@
                         alert(data.error);
                         return;
                     }
-                    alert('Point de disposition déplacé avec succès.');
+                    alert('Déplacement programmé — il s\'appliquera au prochain changement de semaine.');
+                    chargerOnglets();
+                });
+            }
+
+            const dispoDeplacerAnnulerBtn = document.querySelector('.dispo-deplacer-annuler-btn');
+            if (dispoDeplacerAnnulerBtn) {
+                dispoDeplacerAnnulerBtn.addEventListener('click', async function () {
+                    const response = await fetch('/api/deplacer-disposition/annuler', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ userId, playerId: player.id })
+                    });
+                    const data = await response.json();
+                    if (!response.ok) {
+                        alert(data.error);
+                        return;
+                    }
                     chargerOnglets();
                 });
             }

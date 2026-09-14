@@ -1568,6 +1568,11 @@ app.get('/api/admin/en-attente', (req, res) => {
 // par disposition (MAX_PAR_DISPOSITION_ABSOLU) et 30 points max sur la somme des 7
 // (MAX_TOTAL_DISPOSITIONS). Des points de reserve non placables faute de marge
 // sont perdus a la prochaine avancee de semaine, comme les points d'XP non utilises.
+// Brouillon, jamais applique immediatement (2026-09-14, signale par l'utilisateur :
+// avant, valider ici ecrivait tout de suite et definitivement sur les dispositions,
+// impossible de revenir dessus). Meme principe que /api/repartir-xp : stocke la
+// repartition voulue dans dispositions_gain_en_attente, resoumettre REMPLACE le
+// brouillon precedent. Applique reellement par executerAvancementSemaine.
 app.post('/api/repartir-dispositions-gain', (req, res) => {
     try {
         const { playerId, repartition } = req.body;
@@ -1579,6 +1584,7 @@ app.post('/api/repartir-dispositions-gain', (req, res) => {
 
         let total = 0;
         let sommeApres = 0;
+        const valeurs = {};
         for (const cle of DISPOSITIONS) {
             const valeur = Number((repartition && repartition[cle]) || 0);
             if (!Number.isFinite(valeur) || valeur < 0) {
@@ -1590,6 +1596,7 @@ app.post('/api/repartir-dispositions-gain', (req, res) => {
             }
             sommeApres += apres;
             total += valeur;
+            valeurs[cle] = valeur;
         }
         if (total > player.points_dispositions_a_gagner) {
             return res.status(400).json({ error: 'Pas assez de points de disposition disponibles.' });
@@ -1598,25 +1605,25 @@ app.post('/api/repartir-dispositions-gain', (req, res) => {
             return res.status(400).json({ error: 'Le total des 7 dispositions est plafonne a ' + MAX_TOTAL_DISPOSITIONS + ' points (tu arriverais a ' + sommeApres + ').' });
         }
 
-        const maj = db.prepare(`
-            UPDATE players SET
-                disposition_adversite = ?, disposition_coupeur_de_tetes = ?, disposition_dernier_carre = ?,
-                disposition_premiers_tours = ?, disposition_sang_froid = ?, disposition_indoor = ?, disposition_rivalite = ?,
-                points_dispositions_a_gagner = ?
-            WHERE id = ?
-        `);
-        maj.run(
-            player.disposition_adversite + Number((repartition && repartition.adversite) || 0),
-            player.disposition_coupeur_de_tetes + Number((repartition && repartition.coupeur_de_tetes) || 0),
-            player.disposition_dernier_carre + Number((repartition && repartition.dernier_carre) || 0),
-            player.disposition_premiers_tours + Number((repartition && repartition.premiers_tours) || 0),
-            player.disposition_sang_froid + Number((repartition && repartition.sang_froid) || 0),
-            player.disposition_indoor + Number((repartition && repartition.indoor) || 0),
-            player.disposition_rivalite + Number((repartition && repartition.rivalite) || 0),
-            player.points_dispositions_a_gagner - total,
-            playerId
-        );
+        db.prepare('UPDATE players SET dispositions_gain_en_attente = ? WHERE id = ?').run(JSON.stringify(valeurs), playerId);
 
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Retire le brouillon de repartition de points de disposition gagnes, sans rien
+// placer - permet de revenir entierement sur son choix avant l'avancee de semaine.
+app.post('/api/repartir-dispositions-gain/annuler', (req, res) => {
+    try {
+        const { playerId } = req.body;
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        db.prepare('UPDATE players SET dispositions_gain_en_attente = NULL WHERE id = ?').run(playerId);
         res.json({ success: true });
     } catch (err) {
         console.error(err);
@@ -1737,6 +1744,10 @@ app.post('/api/joueurs/repartir-competences-moulinette', (req, res) => {
 
 // Deplacement d'1 point de disposition deja acquis (bonus "Coaching mental") : ne
 // consomme pas le pool de gain, un compteur separe (points_dispositions_a_deplacer).
+// Brouillon, jamais applique immediatement (2026-09-14, meme correctif que
+// /api/repartir-dispositions-gain juste au-dessus). Resoumettre REMPLACE le
+// brouillon precedent (un seul deplacement possible a la fois). Applique
+// reellement par executerAvancementSemaine.
 app.post('/api/deplacer-disposition', (req, res) => {
     try {
         const { playerId, depuis, vers } = req.body;
@@ -1758,14 +1769,24 @@ app.post('/api/deplacer-disposition', (req, res) => {
             return res.status(400).json({ error: 'Chaque disposition est plafonnee a ' + MAX_PAR_DISPOSITION_ABSOLU + ' points, impossible d ajouter un point en ' + vers + '.' });
         }
 
-        db.prepare(`
-            UPDATE players SET
-                disposition_${depuis} = disposition_${depuis} - 1,
-                disposition_${vers} = disposition_${vers} + 1,
-                points_dispositions_a_deplacer = points_dispositions_a_deplacer - 1
-            WHERE id = ?
-        `).run(playerId);
+        db.prepare('UPDATE players SET dispositions_deplacement_en_attente = ? WHERE id = ?').run(JSON.stringify({ depuis, vers }), playerId);
 
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Retire le brouillon de deplacement, sans rien deplacer.
+app.post('/api/deplacer-disposition/annuler', (req, res) => {
+    try {
+        const { playerId } = req.body;
+        const player = db.prepare('SELECT id FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
+        if (!player) {
+            return res.status(404).json({ error: 'Joueur introuvable.' });
+        }
+        db.prepare('UPDATE players SET dispositions_deplacement_en_attente = NULL WHERE id = ?').run(playerId);
         res.json({ success: true });
     } catch (err) {
         console.error(err);
@@ -2797,6 +2818,43 @@ function executerAvancementSemaine() {
                 } catch (e) { /* JSON invalide, ignore */ }
             }
 
+            // Brouillons de dispositions programmes par le coach (via
+            // /api/repartir-dispositions-gain et /api/deplacer-disposition) : appliques
+            // ICI, meme principe que l'XP ci-dessus - jamais ecrits immediatement au
+            // moment ou le coach les soumet (2026-09-14, corrige un cas ou ces 2 actions
+            // etaient jusque-la definitives des la soumission, contrairement a l'XP).
+            const dispositionsAppliquees = {
+                adversite: player.disposition_adversite,
+                coupeur_de_tetes: player.disposition_coupeur_de_tetes,
+                dernier_carre: player.disposition_dernier_carre,
+                premiers_tours: player.disposition_premiers_tours,
+                sang_froid: player.disposition_sang_froid,
+                indoor: player.disposition_indoor,
+                rivalite: player.disposition_rivalite
+            };
+            if (player.dispositions_gain_en_attente) {
+                try {
+                    const gainEnAttente = JSON.parse(player.dispositions_gain_en_attente);
+                    DISPOSITIONS.forEach(function (cle) {
+                        const valeur = Number(gainEnAttente[cle]) || 0;
+                        if (valeur > 0) {
+                            dispositionsAppliquees[cle] = Math.min(MAX_PAR_DISPOSITION_ABSOLU, dispositionsAppliquees[cle] + valeur);
+                        }
+                    });
+                } catch (e) { /* JSON invalide, ignore */ }
+            }
+            if (player.dispositions_deplacement_en_attente) {
+                try {
+                    const deplacementEnAttente = JSON.parse(player.dispositions_deplacement_en_attente);
+                    const depuisCle = deplacementEnAttente.depuis, versCle = deplacementEnAttente.vers;
+                    if (DISPOSITIONS.includes(depuisCle) && DISPOSITIONS.includes(versCle) && depuisCle !== versCle &&
+                        dispositionsAppliquees[depuisCle] > 0 && dispositionsAppliquees[versCle] + 1 <= MAX_PAR_DISPOSITION_ABSOLU) {
+                        dispositionsAppliquees[depuisCle] -= 1;
+                        dispositionsAppliquees[versCle] += 1;
+                    }
+                } catch (e) { /* JSON invalide, ignore */ }
+            }
+
             // Joueur "AFK" cette semaine : aucune planification soumise (ordre est deja
             // null pour un joueur engage en tournoi/Coupe Davis OU hors semaine de
             // tournoi, cf. calcul de `ordre` plus haut - il ne reste donc que le vrai cas
@@ -2814,7 +2872,9 @@ function executerAvancementSemaine() {
                     forme = ?, mental_courant = ?, points_experience = ?, points_energie = ?,
                     surface_dur_automatismes = ?, surface_terre_automatismes = ?, surface_herbe_automatismes = ?,
                     niveau = ?, condition = ?, points_dispositions_a_gagner = ?, points_dispositions_a_deplacer = ?,
-                    xp_repartition_en_attente = NULL
+                    disposition_adversite = ?, disposition_coupeur_de_tetes = ?, disposition_dernier_carre = ?,
+                    disposition_premiers_tours = ?, disposition_sang_froid = ?, disposition_indoor = ?, disposition_rivalite = ?,
+                    xp_repartition_en_attente = NULL, dispositions_gain_en_attente = NULL, dispositions_deplacement_en_attente = NULL
                 WHERE id = ?
             `).run(
                 competencesErodees.service, competencesErodees.retour, competencesErodees.coup_droit_revers, competencesErodees.effet,
@@ -2822,6 +2882,8 @@ function executerAvancementSemaine() {
                 forme, mentalCourant, pointsExperience, pointsEnergie,
                 automatismes.dur, automatismes.terre, automatismes.herbe,
                 Math.round(nouveauNiveau * 10) / 10, condition, pointsDispositionsAGagner, pointsDispositionsADeplacer,
+                dispositionsAppliquees.adversite, dispositionsAppliquees.coupeur_de_tetes, dispositionsAppliquees.dernier_carre,
+                dispositionsAppliquees.premiers_tours, dispositionsAppliquees.sang_froid, dispositionsAppliquees.indoor, dispositionsAppliquees.rivalite,
                 player.id
             );
 
