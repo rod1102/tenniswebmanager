@@ -11334,6 +11334,52 @@ try {
     console.error('[rotterdam_doublon] echec :', err.message);
 }
 
+// 2026-09-14, meme session que le doublon Rotterdam ci-dessus : en verifiant la
+// semaine 7 WTA (signalee absente par l'utilisateur) on trouve un 2e symptome
+// du meme genre de bug, mais different - le Qatar Open (Doha) WTA n'est pas en
+// double, il est juste a la MAUVAISE semaine (une position trop tot par rapport
+// a son calendrier_id : semaine_debut=7 mais cree en position 6). Meme famille
+// de recalage que le patch_tournois_52 du 2026-08-30 (cf. plus haut dans ce
+// fichier) - on rejoue une passe generique de la meme logique, cette fois sur
+// TOUT tournoi encore 'inscriptions'/'a_venir' actuellement mal aligne (pas
+// seulement Doha), au cas ou d'autres stragglers du meme type existeraient sans
+// avoir encore ete signales. Deplace juste la ligne tournois + les lignes liste
+// d'attente/favoris qui la referencent (contrairement a Rotterdam, ici il n'y a
+// pas de doublon donc rien a supprimer/recreer - l'inscrit reel deja present est
+// preserve).
+try {
+    if (db.prepare('SELECT patch_recalage_tournois_20260914 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+        const enCours = db.prepare("SELECT id, calendrier_id, semaine FROM tournois WHERE statut IN ('inscriptions', 'a_venir')").all();
+        let nbCorriges = 0;
+        enCours.forEach(function (t) {
+            const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === t.calendrier_id; });
+            if (!entree) return;
+            const phase = phaseDeSemaine(t.semaine);
+            if (phase.type === 'tournoi' && phase.positionSemaine === entree.semaine_debut) return; // deja bien aligne
+
+            const cycle = Math.floor((t.semaine - 1) / LONGUEUR_SAISON);
+            const cible = cycle * LONGUEUR_SAISON + entree.semaine_debut + 2;
+            if (cible === t.semaine) return;
+
+            const collision = db.prepare('SELECT id FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(t.calendrier_id, cible);
+            if (collision) {
+                console.log('[recalage_tournois] id ' + t.id + ' (' + t.calendrier_id + ', semaine ' + t.semaine + ' -> ' + cible + ') ignore : collision avec le tournoi id ' + collision.id);
+                return;
+            }
+
+            db.prepare('UPDATE tournois SET semaine = ? WHERE id = ?').run(cible, t.id);
+            db.prepare('UPDATE tournoi_liste_attente SET semaine = ? WHERE calendrier_id = ? AND semaine = ?').run(cible, t.calendrier_id, t.semaine);
+            db.prepare('UPDATE tournoi_favoris SET semaine = ? WHERE calendrier_id = ? AND semaine = ?').run(cible, t.calendrier_id, t.semaine);
+            console.log('[recalage_tournois] id ' + t.id + ' (' + t.calendrier_id + ') recale : semaine ' + t.semaine + ' -> ' + cible);
+            nbCorriges++;
+        });
+        console.log('[recalage_tournois] termine - ' + nbCorriges + ' tournoi(s) corrige(s) sur ' + enCours.length + ' verifie(s)');
+        db.prepare('UPDATE jeu_etat SET patch_recalage_tournois_20260914 = 1 WHERE id = 1').run();
+    }
+} catch (err) {
+    console.error('[recalage_tournois] echec :', err.message);
+}
+
 // Copie de test (MODE_STAGING) : force l'avancement automatique a l'arret a
 // CHAQUE demarrage (pas un one-shot - doit toujours regagner sur ce que la
 // synchronisation vient de copier depuis la prod, qui elle a saison_lancee=1).
