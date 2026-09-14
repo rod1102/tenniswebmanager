@@ -1394,4 +1394,24 @@ if (db.prepare('SELECT patch_stakhan_dispositions_20260914 AS p FROM jeu_etat WH
     db.prepare('UPDATE jeu_etat SET patch_stakhan_dispositions_20260914 = 1 WHERE id = 1').run();
 }
 
+// 2026-09-14 (3), demande explicite de l'utilisateur : "dernier carre" a toujours
+// 1 point en trop pour Nikola Stakhan (le correctif precedent ne touchait que
+// indoor/premiers_tours/sang_froid - c'est ici, en realite, que le point du
+// Coaching mental errone avait atterri). Decrement relatif (pas une valeur
+// absolue, jamais communiquee) - jamais sous 0 par securite.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_stakhan_dernier_carre_20260914 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_stakhan_dernier_carre_20260914 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const joueur = db.prepare('SELECT id, prenom, nom, disposition_dernier_carre FROM players WHERE prenom = ? COLLATE NOCASE AND nom = ? COLLATE NOCASE').get('Nikola', 'Stakhan');
+    if (!joueur) {
+        console.log('[stakhan_dernier_carre] "Nikola Stakhan" introuvable, rien fait');
+    } else if (joueur.disposition_dernier_carre <= 0) {
+        console.log('[stakhan_dernier_carre] Nikola Stakhan (id ' + joueur.id + ') : dernier_carre deja a ' + joueur.disposition_dernier_carre + ', rien retire');
+    } else {
+        const nouvelleValeur = joueur.disposition_dernier_carre - 1;
+        db.prepare('UPDATE players SET disposition_dernier_carre = ? WHERE id = ?').run(nouvelleValeur, joueur.id);
+        console.log('[stakhan_dernier_carre] Nikola Stakhan (id ' + joueur.id + ') : dernier_carre ' + joueur.disposition_dernier_carre + ' -> ' + nouvelleValeur);
+    }
+    db.prepare('UPDATE jeu_etat SET patch_stakhan_dernier_carre_20260914 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
