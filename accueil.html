@@ -308,9 +308,11 @@
                 container.innerHTML = '';
                 return;
             }
+            // Couleur rouge par defaut de .planning-alerte-texte - pas besoin de la
+            // repeter ici, elle sert justement a signaler qu'il reste une action a faire.
             container.innerHTML = `
                 <div class="xp-pool-panel">
-                    ${alertes.map(function (a) { return '<div class="planning-alerte-texte" style="color:#D4F000;">' + a + '</div>'; }).join('')}
+                    ${alertes.map(function (a) { return '<div class="planning-alerte-texte">' + a + '</div>'; }).join('')}
                 </div>
             `;
         }
