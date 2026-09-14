@@ -7879,6 +7879,40 @@ app.get('/api/pronostics/historique/:userId', (req, res) => {
     }
 });
 
+// Detail public (n'importe quel coach, pas seulement l'appelant - meme logique que
+// /api/classement/detail) utilise par le bouton "?" du classement Pronos sur
+// classements.html : liste tournoi par tournoi les points marques par ce coach,
+// contrairement a /api/pronostics/historique/:userId qui ne renvoie jamais que
+// l'historique de l'appelant (req.userId), pas d'un coach arbitraire.
+app.get('/api/pronostics/detail/:userId', (req, res) => {
+    try {
+        const userId = req.params.userId;
+        const lignes = db.prepare(`
+            SELECT p.points_gagnes, t.nom AS tournoi_nom, t.circuit, t.categorie, t.semaine
+            FROM pronostics p
+            JOIN tournois t ON t.id = p.tournoi_id
+            WHERE p.user_id = ?
+            ORDER BY t.semaine DESC, p.tournoi_id DESC
+        `).all(userId);
+
+        const detail = lignes.map(function (l) {
+            return {
+                tournoiNom: l.tournoi_nom,
+                circuit: l.circuit,
+                positionSemaine: positionSemaineAffichee(l.semaine),
+                numeroSaison: phaseAffichee(l.semaine).numeroSaison,
+                pointsGagnes: l.points_gagnes
+            };
+        });
+        const total = detail.reduce(function (acc, d) { return acc + (d.pointsGagnes || 0); }, 0);
+
+        res.json({ success: true, detail, total });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/pronostics/classement/:userId', (req, res) => {
     try {
         const userId = req.userId;

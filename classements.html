@@ -48,7 +48,6 @@
                 <button class="tab-btn" data-circuit="coach">Coach</button>
             </div>
             <div class="tabs-nav" id="tabs-nav-type"></div>
-            <div id="pronos-bareme-container" style="text-align:right; margin-bottom:8px;"></div>
 
             <div class="tab-panel">
                 <table class="classement-table">
@@ -177,7 +176,7 @@
                 }
             }
 
-            const peutDetailler = typeCourant === 'live' || typeCourant === 'race';
+            const peutDetailler = typeCourant === 'live' || typeCourant === 'race' || typeCourant === 'pronos';
             const boutonDetail = peutDetailler
                 ? `<button class="pts-detail-btn" data-cle="${j.cle || ''}" data-user-id="${j.userId || ''}" data-type="${typeCourant}" title="Détail des points">?</button>`
                 : '';
@@ -220,14 +219,6 @@
             const thead = document.getElementById('classement-thead');
             const corps = document.getElementById('classement-body');
 
-            const baremeContainer = document.getElementById('pronos-bareme-container');
-            if (typeCourant === 'pronos') {
-                baremeContainer.innerHTML = '<button class="pts-detail-btn" id="pronos-bareme-btn" title="Barème des points">?</button>';
-                document.getElementById('pronos-bareme-btn').addEventListener('click', ouvrirBaremePronos);
-            } else {
-                baremeContainer.innerHTML = '';
-            }
-
             if (typeCourant === 'nation') {
                 afficherClassementNation();
                 return;
@@ -264,57 +255,57 @@
             afficherClassement();
         }
 
-        // Meme contenu que le bouton "Barème des points" de pronostics.html - copie
-        // volontairement (aucun fichier JS partage entre les pages sur ce projet).
-        function ouvrirBaremePronos() {
+        async function ouvrirDetailPronos(userIdCible) {
             const overlay = document.createElement('div');
             overlay.className = 'dispo-blocage-overlay';
             overlay.innerHTML = `
-                <div class="dispo-blocage-box">
-                    <div class="stats-header" style="margin-top:0;">Barème des points</div>
-
-                    <div class="stats-header" style="font-size:0.9rem;">Pronostic simple <span class="match-hint">(ATP/WTA 250, 500, Masters de fin de saison)</span></div>
-                    <p class="match-hint" style="margin-bottom:8px;">On parie uniquement sur le vainqueur du tournoi. Points si tu trouves juste :</p>
-                    <div class="stat-row"><span class="stat-label">Tournoi 250</span><span class="stat-value">25 pts</span></div>
-                    <div class="stat-row"><span class="stat-label">Tournoi 500</span><span class="stat-value">50 pts</span></div>
-                    <div class="stat-row"><span class="stat-label">Masters de fin de saison</span><span class="stat-value">100 pts</span></div>
-
-                    <div class="stats-header" style="font-size:0.9rem; margin-top:18px;">Pronostic en cascade <span class="match-hint">(Masters 1000 et Grands Chelems)</span></div>
-                    <p class="match-hint" style="margin-bottom:8px;">
-                        On pronostique tour par tour, des huitièmes jusqu'au vainqueur. Pour chaque tour :
-                        des points par joueur qui atteint vraiment ce tour, un bonus si toute l'affiche d'un match est juste,
-                        et un bonus si TOUS les joueurs du tour sont bons.
-                    </p>
-                    <div style="overflow-x:auto;">
-                        <table class="classement-table" style="width:100%; margin-top:6px;">
-                            <thead>
-                                <tr>
-                                    <th style="text-align:left;">Tour</th>
-                                    <th style="text-align:center;">Par joueur juste</th>
-                                    <th style="text-align:center;">Affiche complète</th>
-                                    <th style="text-align:center;">Tour parfait</th>
-                                    <th style="text-align:center;">Max du tour</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr><td style="text-align:left; font-weight:600;">8<sup>es</sup></td><td style="text-align:center;">1</td><td style="text-align:center;">+1</td><td style="text-align:center;">+6</td><td style="text-align:center;">30</td></tr>
-                                <tr><td style="text-align:left; font-weight:600;">Quarts</td><td style="text-align:center;">4</td><td style="text-align:center;">+2</td><td style="text-align:center;">+10</td><td style="text-align:center;">50</td></tr>
-                                <tr><td style="text-align:left; font-weight:600;">Demies</td><td style="text-align:center;">10</td><td style="text-align:center;">+5</td><td style="text-align:center;">+20</td><td style="text-align:center;">70</td></tr>
-                                <tr><td style="text-align:left; font-weight:600;">Finale</td><td style="text-align:center;">20</td><td style="text-align:center;">+25</td><td style="text-align:center;">—</td><td style="text-align:center;">100</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    <p class="match-hint" style="margin:10px 0 0;">
-                        En finale, <strong>+35 pts</strong> supplémentaires si tu as trouvé le vainqueur du tournoi.
-                        Total récupérable : <strong>250 pts</strong> par Masters 1000, <strong>doublé (500 pts) en Grand Chelem</strong>.
-                    </p>
-
-                    <button class="cta cta-secondary" id="pronos-bareme-fermer" style="margin-top:18px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
+                <div class="dispo-blocage-box" style="max-width:480px;">
+                    <div class="stats-header" style="margin-top:0;">Détail des points (Pronostics)</div>
+                    <div id="detail-pronos-corps"><div class="match-hint">Chargement...</div></div>
+                    <button class="cta cta-secondary" id="detail-pronos-fermer" style="margin-top:16px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
                 </div>
             `;
             document.body.appendChild(overlay);
             overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
-            document.getElementById('pronos-bareme-fermer').addEventListener('click', function () { overlay.remove(); });
+            document.getElementById('detail-pronos-fermer').addEventListener('click', function () { overlay.remove(); });
+
+            try {
+                const response = await fetch('/api/pronostics/detail/' + userIdCible);
+                const data = await response.json();
+                if (!overlay.isConnected) return;
+                const corps = document.getElementById('detail-pronos-corps');
+
+                if (!response.ok) {
+                    corps.innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger le détail.') + '</div>';
+                    return;
+                }
+                if (!data.detail || data.detail.length === 0) {
+                    corps.innerHTML = '<div class="match-hint">Aucun pronostic pour le moment.</div>';
+                    return;
+                }
+
+                const lignesHtml = data.detail.map(function (d) {
+                    const enAttente = d.pointsGagnes === null;
+                    const pts = enAttente ? 'en attente' : (d.pointsGagnes + ' pts');
+                    return `
+                        <div class="stat-row">
+                            <span class="stat-label">${d.tournoiNom} <span class="match-hint">(S${d.positionSemaine}, Saison ${d.numeroSaison})</span></span>
+                            <span class="stat-value"${enAttente ? ' style="color:#8a8f9b;"' : ''}>${pts}</span>
+                        </div>
+                    `;
+                }).join('');
+
+                corps.innerHTML = lignesHtml + `
+                    <div class="stat-row" style="margin-top:8px; border-top:1px solid rgba(255,255,255,0.15); padding-top:8px;">
+                        <span class="stat-label" style="font-weight:700;">Total</span>
+                        <span class="stat-value" style="font-weight:700;">${data.total}</span>
+                    </div>
+                `;
+            } catch (err) {
+                if (overlay.isConnected) {
+                    document.getElementById('detail-pronos-corps').innerHTML = '<div class="match-hint">Impossible de charger le détail.</div>';
+                }
+            }
         }
 
         async function chargerPronos() {
@@ -484,9 +475,11 @@
 
         document.addEventListener('click', function (e) {
             const bouton = e.target.closest('.pts-detail-btn');
-            if (!bouton || bouton.id === 'pronos-bareme-btn') return; // a son propre listener (ouvrirBaremePronos)
+            if (!bouton) return;
             if (bouton.dataset.nation) {
                 ouvrirDetailNation(bouton.dataset.nation, bouton.dataset.circuit);
+            } else if (bouton.dataset.type === 'pronos') {
+                ouvrirDetailPronos(bouton.dataset.userId);
             } else {
                 ouvrirDetailPoints(bouton.dataset.cle || null, bouton.dataset.userId || null, bouton.dataset.type);
             }
