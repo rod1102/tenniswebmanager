@@ -1014,17 +1014,24 @@ app.post('/api/interne/synchroniser', (req, res) => {
 // absolu correspondant (source de confusion constatee - S1 absolu est tres loin
 // dans le passe, jamais ce que l'utilisateur veut dire par "semaine 1"). Lecture
 // seule.
+// Resout ?semaine=N (absolu) ou ?position=N (1-49, semaine de tournoi de la
+// SAISON EN COURS) en une semaine absolue - factorise pour les 2 outils de
+// diagnostic admin qui en ont besoin (stats-actions-semaine, verifier-calendrier).
+function resoudreSemaineDepuisRequete(req, semaineActuelle) {
+    if (req.query.position) {
+        const numeroSaisonBrut = Math.floor((semaineActuelle - 1) / LONGUEUR_SAISON) + 1;
+        return (numeroSaisonBrut - 1) * LONGUEUR_SAISON + Number(req.query.position) + 2;
+    }
+    return req.query.semaine ? Number(req.query.semaine) : semaineActuelle;
+}
+
 app.get('/api/admin/stats-actions-semaine', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
-        let semaine = req.query.semaine ? Number(req.query.semaine) : etat.semaine_actuelle;
-        if (req.query.position) {
-            const numeroSaisonBrut = Math.floor((etat.semaine_actuelle - 1) / LONGUEUR_SAISON) + 1;
-            semaine = (numeroSaisonBrut - 1) * LONGUEUR_SAISON + Number(req.query.position) + 2;
-        }
+        const semaine = resoudreSemaineDepuisRequete(req, etat.semaine_actuelle);
 
         const rows = db.prepare('SELECT action_prevue, COUNT(*) AS n FROM journal_semaine_joueur WHERE semaine = ? GROUP BY action_prevue').all(semaine);
         const compte = {};
@@ -1046,6 +1053,50 @@ app.get('/api/admin/stats-actions-semaine', (req, res) => {
             aucune: compte.aucune || 0,
             totalJoueurs: rows.reduce(function (s, r) { return s + r.n; }, 0)
         });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Compare ce que le calendrier STATIQUE (CALENDRIER_TOURNOIS) dit devoir exister
+// pour un circuit/une semaine, avec ce qui existe REELLEMENT dans la table
+// tournois - demande explicite de l'utilisateur, 2026-09-14 (tournoi WTA semaine 7
+// et Rotterdam ATP disparus). Pour chaque tournoi attendu, remonte TOUT son
+// historique dans tournois (pas seulement la semaine demandee) : un
+// tournoiDejaCreeCetteSaison qui bloquerait a tort une recreation a cause d'une
+// ligne perimee a une autre semaine devient ainsi visible d'un coup d'oeil.
+// Lecture seule. ?circuit=ATP|WTA (obligatoire) + ?position=N ou ?semaine=N.
+app.get('/api/admin/verifier-calendrier', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const circuit = req.query.circuit === 'WTA' ? 'WTA' : 'ATP';
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaine = resoudreSemaineDepuisRequete(req, etat.semaine_actuelle);
+        const phase = phaseDeSemaine(semaine);
+
+        if (phase.type !== 'tournoi') {
+            return res.json({ success: true, semaine, phase, attendus: [], message: 'Cette semaine n\'est pas une semaine de tournoi (Pre-saison ou Semaine 0).' });
+        }
+
+        const attendus = CALENDRIER_TOURNOIS
+            .filter(function (t) { return t.circuit === circuit && t.semaine_debut === phase.positionSemaine; })
+            .map(function (t) {
+                const historique = db.prepare('SELECT id, semaine, statut, tour_actuel FROM tournois WHERE calendrier_id = ? ORDER BY semaine DESC').all(t.id);
+                const surCetteSemaine = historique.find(function (h) { return h.semaine === semaine; });
+                return {
+                    calendrierId: t.id,
+                    nom: t.nom,
+                    dejaCreeCetteSaison: tournoiDejaCreeCetteSaison(t.id, semaine),
+                    existeSurCetteSemaine: !!surCetteSemaine,
+                    surCetteSemaine: surCetteSemaine || null,
+                    historiqueComplet: historique
+                };
+            });
+
+        res.json({ success: true, semaine, phase, attendus });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
