@@ -11292,6 +11292,48 @@ try {
     console.error('[bande_60_85] echec :', err.message);
 }
 
+// 2026-09-14, demande explicite de l'utilisateur : Rotterdam (ATP) avait ete cree
+// EN DOUBLE cette saison (2 lignes 'inscriptions', une a la bonne semaine, une a
+// la semaine juste avant - origine exacte non identifiee, mais confirme par
+// GET /api/admin/verifier-calendrier). Supprime les 2 editions 'inscriptions' en
+// cours de calendrier_id='atp-rotterdam' (joueurs + liste d'attente + le tournoi
+// lui-meme), puis recree une seule edition propre a la bonne semaine de CETTE
+// saison via creerTournoi/genererEntrants (memes fonctions que le tirage normal -
+// genererEntrants exclut deja tout seul les rivaux engages ailleurs cette semaine-
+// la, donc aucun risque de doublon avec Montpellier/Dallas). N'AGIT QUE s'il
+// trouve exactement 2 editions 'inscriptions' (etat attendu) - abandonne sans rien
+// faire sinon, pour ne jamais agir sur un etat inattendu.
+try {
+    if (db.prepare('SELECT patch_rotterdam_doublon_20260914 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+        const doublons = db.prepare("SELECT id, semaine FROM tournois WHERE calendrier_id = 'atp-rotterdam' AND statut = 'inscriptions'").all();
+        if (doublons.length !== 2) {
+            console.log('[rotterdam_doublon] attendu 2 editions \'inscriptions\', trouve ' + doublons.length + ' - rien fait');
+        } else {
+            doublons.forEach(function (t) {
+                const nbJoueurs = db.prepare('SELECT COUNT(*) AS n FROM tournoi_joueurs WHERE tournoi_id = ?').get(t.id).n;
+                const nbReels = db.prepare('SELECT COUNT(*) AS n FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 1').get(t.id).n;
+                db.prepare('DELETE FROM tournoi_joueurs WHERE tournoi_id = ?').run(t.id);
+                db.prepare('DELETE FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ?').run('atp-rotterdam', t.semaine);
+                db.prepare('DELETE FROM tournois WHERE id = ?').run(t.id);
+                console.log('[rotterdam_doublon] edition id ' + t.id + ' (semaine ' + t.semaine + ') supprimee - ' + nbJoueurs + ' inscrit(s) dont ' + nbReels + ' reel(s)');
+            });
+
+            const entreeRotterdam = CALENDRIER_TOURNOIS.find(function (c) { return c.id === 'atp-rotterdam'; });
+            const etatCourant = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+            const numeroSaisonBrut = Math.floor((etatCourant.semaine_actuelle - 1) / LONGUEUR_SAISON) + 1;
+            // +2 : positionSemaine (semaine_debut) correspond a positionSaison-2 dans
+            // phaseDeSemaine (Pre-saison=1, Semaine 0=2, tournois a partir de 3) - meme
+            // formule que resoudreSemaineDepuisRequete/?position=, verifiee separement.
+            const semaineCorrecte = (numeroSaisonBrut - 1) * LONGUEUR_SAISON + entreeRotterdam.semaine_debut + 2;
+            const nouveauId = creerTournoi(entreeRotterdam, semaineCorrecte);
+            console.log('[rotterdam_doublon] nouvelle edition propre creee : id ' + nouveauId + ', semaine ' + semaineCorrecte);
+        }
+        db.prepare('UPDATE jeu_etat SET patch_rotterdam_doublon_20260914 = 1 WHERE id = 1').run();
+    }
+} catch (err) {
+    console.error('[rotterdam_doublon] echec :', err.message);
+}
+
 // Copie de test (MODE_STAGING) : force l'avancement automatique a l'arret a
 // CHAQUE demarrage (pas un one-shot - doit toujours regagner sur ce que la
 // synchronisation vient de copier depuis la prod, qui elle a saison_lancee=1).

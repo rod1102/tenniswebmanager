@@ -1446,4 +1446,6 @@ if (db.prepare('SELECT patch_eva_dispositions_20260914 AS p FROM jeu_etat WHERE 
     db.prepare('UPDATE jeu_etat SET patch_eva_dispositions_20260914 = 1 WHERE id = 1').run();
 }
 
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_rotterdam_doublon_20260914 INTEGER DEFAULT 0"); } catch (e) {}
+
 module.exports = db;
