@@ -293,9 +293,16 @@
             `;
         }
 
-        function afficherBadgeAttente(players) {
+        function afficherBadgeAttente(players, semaineInfoParType) {
             const alertes = [];
             players.forEach(function (player) {
+                // Une fois les ordres de la semaine prochaine deja valides (plan choisi,
+                // ou tournoi en cours), le rappel n'a plus lieu d'etre - meme s'il reste
+                // des points en attente (demande explicite de l'utilisateur, 2026-09-14).
+                const semaineInfo = semaineInfoParType && semaineInfoParType[player.type];
+                const dejaValide = semaineInfo && semaineInfo.semaineProchaine.libelle !== 'Pas encore défini';
+                if (dejaValide) return;
+
                 const label = player.type === 'joueur' ? 'Ton joueur' : 'Ta joueuse';
                 if (player.points_experience > 0) alertes.push(label + ' a ' + player.points_experience + ' point(s) d\'XP à répartir avant le prochain changement de semaine.');
                 if (player.points_dispositions_a_gagner > 0) alertes.push(label + ' a ' + player.points_dispositions_a_gagner + ' point(s) de disposition à répartir.');
@@ -490,7 +497,7 @@
             document.getElementById('cartes-container').innerHTML =
                 carteJoueur('joueur', joueur, semaineInfoJoueur) + carteJoueur('joueuse', joueuse, semaineInfoJoueuse);
 
-            afficherBadgeAttente(data.players);
+            afficherBadgeAttente(data.players, { joueur: semaineInfoJoueur, joueuse: semaineInfoJoueuse });
             afficherAlerteCapitaine(data.players);
         }
 
