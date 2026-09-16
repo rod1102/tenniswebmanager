@@ -1449,4 +1449,22 @@ if (db.prepare('SELECT patch_eva_dispositions_20260914 AS p FROM jeu_etat WHERE 
 try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_rotterdam_doublon_20260914 INTEGER DEFAULT 0"); } catch (e) {}
 try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_recalage_tournois_20260914 INTEGER DEFAULT 0"); } catch (e) {}
 
+// Suppression de tous les avatars personnalises deja poses par des joueurs avant
+// que la gestion des avatars ne soit reservee a l'admin (2026-09-14) - demande
+// explicite de l'utilisateur, 2026-09-16. Supprime le fichier sur disque puis vide
+// la colonne en base ; la fonctionnalite elle-meme reste utilisable par un admin
+// (aucun changement de route/permission ici, cf. joueurGerableParAvatar dans
+// server.js). Marqueur jeu_etat garantit un passage unique.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_suppression_avatars_20260916 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_suppression_avatars_20260916 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const dossierDonnees = process.env.DATA_DIR || __dirname;
+    const joueursAvecAvatar = db.prepare("SELECT id, photo_avatar FROM players WHERE photo_avatar IS NOT NULL").all();
+    for (const joueur of joueursAvecAvatar) {
+        try { fs.unlinkSync(path.join(dossierDonnees, joueur.photo_avatar)); } catch (e) {}
+    }
+    db.prepare("UPDATE players SET photo_avatar = NULL WHERE photo_avatar IS NOT NULL").run();
+    console.log('[patch_suppression_avatars_20260916] avatars supprimes :', joueursAvecAvatar.length);
+    db.prepare("UPDATE jeu_etat SET patch_suppression_avatars_20260916 = 1 WHERE id = 1").run();
+}
+
 module.exports = db;

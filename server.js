@@ -385,8 +385,10 @@ const LIMITE_COMPTES_PAR_IP = 1;
 //     l'exception s'eteint d'elle-meme si le compte est supprime)
 // 2026-09-09, demande explicite de l'utilisateur : l'IP depuis laquelle "Mirat"
 // (users.id = 46) s'est inscrit a droit a 4 comptes.
+// 2026-09-16, demande explicite de l'utilisateur : autre IP liee a Mirat, meme
+// limite de 4 comptes.
 const IP_LIMITES_EXPLICITES = {
-    // '1.2.3.4': 4,
+    '185.24.186.195': 4,
 };
 const IP_LIMITE_PAR_COMPTE = {
     46: 4,
@@ -6368,6 +6370,15 @@ app.get('/api/tournois/:id', (req, res) => {
         }
 
         const joueurs = db.prepare('SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? ORDER BY position_tableau').all(id);
+        // Drapeau + pseudo coach (2026-09-16, pour l'affichage du tableau sur
+        // pronostics.html) : meme enrichissement que /api/pronostics/tournoi/:id.
+        joueurs.forEach(function (j) {
+            j.drapeau = drapeau(j.nationalite);
+            if (j.est_reel && j.player_id) {
+                const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(j.player_id);
+                if (player) j.coachPseudo = nomCoach(player.user_id);
+            }
+        });
 
         res.json({ success: true, tournoi, joueurs });
     } catch (err) {

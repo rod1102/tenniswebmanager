@@ -65,7 +65,9 @@
         }
 
         const LABELS_CATEGORIE = { '250': '250', '500': '500', '1000': 'Masters 1000', slam: 'Grand Chelem', finals: 'Masters (fin de saison)' };
+        const ROUND_LABELS_PREMIER_TOUR = { 2: 'Finale', 4: '1/2 finale', 8: '1/4 finale', 16: '8e de finale', 32: '16e de finale', 64: '32e de finale', 128: '64e de finale' };
         const detailsCache = {};
+        const tableauCache = {};
 
         function flagImg(code) {
             if (!code) return '';
@@ -111,6 +113,65 @@
             return data;
         }
 
+        function ligneJoueurTableau(j) {
+            if (!j || j.nom === 'BYE') return '<span class="bracket-joueur bracket-bye">BYE</span>';
+            const classe = j.est_reel ? ' bracket-autre-reel' : ' bracket-bot';
+            const nomHtml = (j.drapeau ? flagImg(j.drapeau) + ' ' : '') + formaterNomComplet(j.nom) + (j.coachPseudo ? ' (' + j.coachPseudo + ')' : '');
+            const rangTxt = j.tete_de_serie ? ` <span class="bracket-rang">[${j.tete_de_serie}]</span>` : '';
+            return `<span class="bracket-joueur${classe}">${nomHtml}</span>${rangTxt}`;
+        }
+
+        async function obtenirTableauHtml(tournoiId) {
+            if (tableauCache[tournoiId]) return tableauCache[tournoiId];
+
+            const response = await fetch('/api/tournois/' + tournoiId);
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.error || 'Impossible de charger le tableau.');
+
+            const joueurs = data.joueurs
+                .filter(function (j) { return j.position_tableau !== null && j.position_tableau >= 0; })
+                .sort(function (a, b) { return a.position_tableau - b.position_tableau; });
+
+            let html;
+            if (joueurs.length < 2) {
+                html = '<div class="match-hint">Le tableau n\'a pas encore été tiré au sort.</div>';
+            } else {
+                const titre = ROUND_LABELS_PREMIER_TOUR[joueurs.length] || '1er tour';
+                let matchsHtml = '';
+                for (let i = 0; i < joueurs.length; i += 2) {
+                    matchsHtml += `
+                        <div class="bracket-match-wrap">
+                            <div class="bracket-match">
+                                <div class="bracket-match-row">${ligneJoueurTableau(joueurs[i])}</div>
+                                <div class="bracket-match-row">${ligneJoueurTableau(joueurs[i + 1])}</div>
+                            </div>
+                        </div>
+                    `;
+                }
+                html = `
+                    <div class="bracket">
+                        <div class="bracket-round">
+                            <div class="bracket-round-title">${titre}</div>
+                            ${matchsHtml}
+                        </div>
+                    </div>
+                `;
+            }
+
+            tableauCache[tournoiId] = html;
+            return html;
+        }
+
+        async function afficherTableau(conteneur, tournoiId) {
+            conteneur.innerHTML = '<div class="stats-header" style="margin-top:24px;">Tableau du tournoi</div><div class="match-hint">Chargement du tableau...</div>';
+            try {
+                const html = await obtenirTableauHtml(tournoiId);
+                conteneur.innerHTML = '<div class="stats-header" style="margin-top:24px;">Tableau du tournoi</div>' + html;
+            } catch (err) {
+                conteneur.innerHTML = '<div class="stats-header" style="margin-top:24px;">Tableau du tournoi</div><div class="match-hint">' + err.message + '</div>';
+            }
+        }
+
         function construireSimpleUI(panneau, data, tournoiId) {
             const verrouille = data.verrouille;
             const existant = data.pronosticActuel && data.pronosticActuel.predictions ? data.pronosticActuel.predictions.vainqueur : null;
@@ -130,7 +191,10 @@
                     </div>
                 </div>
                 <button class="cta cta-primary prono-valider-btn" style="margin-top:16px;" ${verrouille ? 'disabled' : ''}>Valider mon pronostic</button>
+                <div class="prono-tableau-zone"></div>
             `;
+
+            afficherTableau(panneau.querySelector('.prono-tableau-zone'), tournoiId);
 
             panneau.querySelector('.prono-valider-btn').addEventListener('click', async function () {
                 const select = panneau.querySelector('.prono-simple-select');
@@ -150,6 +214,10 @@
         function construireCascadeUI(panneau, data, tournoiId) {
             const verrouille = data.verrouille;
             const existant = data.pronosticActuel && data.pronosticActuel.predictions ? data.pronosticActuel.predictions : null;
+
+            panneau.innerHTML = '<div class="prono-cascade-contenu"></div><div class="prono-tableau-zone"></div>';
+            const contenuDiv = panneau.querySelector('.prono-cascade-contenu');
+            afficherTableau(panneau.querySelector('.prono-tableau-zone'), tournoiId);
 
             const entrantParId = {};
             data.tranchesHuitiemes.forEach(function (tranche) {
@@ -228,9 +296,9 @@
                     html += `<button class="cta cta-primary prono-valider-btn" style="margin-top:16px;" ${verrouille ? 'disabled' : ''}>Valider mon pronostic</button>`;
                 }
 
-                panneau.innerHTML = html;
+                contenuDiv.innerHTML = html;
 
-                panneau.querySelectorAll('.prono-select').forEach(function (sel) {
+                contenuDiv.querySelectorAll('.prono-select').forEach(function (sel) {
                     sel.addEventListener('change', function () {
                         const round = sel.dataset.round;
                         const val = sel.value ? parseInt(sel.value, 10) : null;
@@ -248,7 +316,7 @@
                     });
                 });
 
-                const boutonValider = panneau.querySelector('.prono-valider-btn');
+                const boutonValider = contenuDiv.querySelector('.prono-valider-btn');
                 if (boutonValider) {
                     boutonValider.addEventListener('click', async function () {
                         const response = await fetch('/api/pronostics', {
