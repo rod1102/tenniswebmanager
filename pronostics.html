@@ -114,11 +114,124 @@
         }
 
         function ligneJoueurTableau(j) {
-            if (!j || j.nom === 'BYE') return '<span class="bracket-joueur bracket-bye">BYE</span>';
+            if (!j) return '<span class="bracket-joueur bracket-tbd">?</span>';
+            if (j.nom === 'BYE') return '<span class="bracket-joueur bracket-bye">BYE</span>';
             const classe = j.est_reel ? ' bracket-autre-reel' : ' bracket-bot';
             const nomHtml = (j.drapeau ? flagImg(j.drapeau) + ' ' : '') + formaterNomComplet(j.nom) + (j.coachPseudo ? ' (' + j.coachPseudo + ')' : '');
             const rangTxt = j.tete_de_serie ? ` <span class="bracket-rang">[${j.tete_de_serie}]</span>` : '';
             return `<span class="bracket-joueur${classe}">${nomHtml}</span>${rangTxt}`;
+        }
+
+        function carteVide(j1, j2) {
+            return `
+                <div class="bracket-match-wrap">
+                    <div class="bracket-match">
+                        <div class="bracket-match-row">${ligneJoueurTableau(j1)}</div>
+                        <div class="bracket-match-row">${ligneJoueurTableau(j2)}</div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Tableau complet jusqu'a la finale (comme l'onglet "Tableau" de
+        // tournoi-detail.html) : seul le 1er tour est reellement connu au moment ou
+        // les pronostics ouvrent (tableau tire au sort, aucun match encore joue), les
+        // tours suivants sont donc affiches en "?" plutot que d'etre omis.
+        function construireBracketElimination(joueurs) {
+            const labelsRounds = [];
+            let entrants = joueurs.length;
+            while (entrants >= 2) {
+                labelsRounds.push(ROUND_LABELS_PREMIER_TOUR[entrants] || (entrants + 'e de finale'));
+                entrants = entrants / 2;
+            }
+
+            const colonnesHtml = labelsRounds.map(function (label, roundIndex) {
+                let matchsHtml;
+                if (roundIndex === 0) {
+                    matchsHtml = '';
+                    for (let i = 0; i < joueurs.length; i += 2) {
+                        matchsHtml += carteVide(joueurs[i], joueurs[i + 1]);
+                    }
+                } else {
+                    const nbMatchsCeTour = Math.pow(2, labelsRounds.length - 1 - roundIndex);
+                    matchsHtml = new Array(nbMatchsCeTour).fill(carteVide(null, null)).join('');
+                }
+                return `
+                    <div class="bracket-round">
+                        <div class="bracket-round-title">${label}</div>
+                        ${matchsHtml}
+                    </div>
+                `;
+            }).join('');
+
+            return `
+                <div class="bracket">
+                    ${colonnesHtml}
+                    <div class="bracket-round bracket-round-vainqueur">
+                        <div class="bracket-round-title">Vainqueur</div>
+                        <div class="bracket-match-wrap">
+                            <div class="bracket-match bracket-match-final">
+                                <span class="bracket-joueur">?</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Format poules (Masters de fin de saison, 8 entrants) : la repartition en 2
+        // groupes de 4 est connue des le tirage (meme regle que groupesPoules cote
+        // serveur : classement par niveau, A = 1er/4e/5e/8e, B = 2e/3e/6e/7e), mais
+        // rien n'est jouable/joue au moment du pronostic donc demies/finale restent
+        // de simples cases "a determiner".
+        function construireBracketPoules(joueurs) {
+            const tries = joueurs.slice().sort(function (a, b) { return b.niveau - a.niveau; });
+            const groupeA = [tries[0], tries[3], tries[4], tries[7]];
+            const groupeB = [tries[1], tries[2], tries[5], tries[6]];
+
+            function carteGroupe(titre, groupe) {
+                return `
+                    <div class="bracket-match-wrap">
+                        <div class="bracket-match">
+                            ${groupe.map(function (j) { return `<div class="bracket-match-row">${ligneJoueurTableau(j)}</div>`; }).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            function carteTbd(label1, label2) {
+                return `
+                    <div class="bracket-match-wrap">
+                        <div class="bracket-match">
+                            <div class="bracket-match-row bracket-tbd-label">${label1}</div>
+                            <div class="bracket-match-row bracket-tbd-label">${label2}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="bracket">
+                    <div class="bracket-round">
+                        <div class="bracket-round-title">Poules</div>
+                        ${carteGroupe('Groupe A', groupeA)}
+                        ${carteGroupe('Groupe B', groupeB)}
+                    </div>
+                    <div class="bracket-round">
+                        <div class="bracket-round-title">Demi-finale</div>
+                        ${carteTbd('1er Gr. A', '2e Gr. B')}
+                        ${carteTbd('1er Gr. B', '2e Gr. A')}
+                    </div>
+                    <div class="bracket-round bracket-round-vainqueur">
+                        <div class="bracket-round-title">Finale</div>
+                        <div class="bracket-match-wrap">
+                            <div class="bracket-match bracket-match-final">
+                                <span class="bracket-joueur">?</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
         }
 
         async function obtenirTableauHtml(tournoiId) {
@@ -128,34 +241,19 @@
             const data = await response.json();
             if (!response.ok) throw new Error(data.error || 'Impossible de charger le tableau.');
 
-            const joueurs = data.joueurs
-                .filter(function (j) { return j.position_tableau !== null && j.position_tableau >= 0; })
-                .sort(function (a, b) { return a.position_tableau - b.position_tableau; });
-
             let html;
-            if (joueurs.length < 2) {
-                html = '<div class="match-hint">Le tableau n\'a pas encore été tiré au sort.</div>';
+            if (data.tournoi.format === 'poules') {
+                const joueurs = data.joueurs.filter(function (j) { return j.nom !== 'BYE'; });
+                html = joueurs.length < 8
+                    ? '<div class="match-hint">Le tableau n\'a pas encore été tiré au sort.</div>'
+                    : construireBracketPoules(joueurs);
             } else {
-                const titre = ROUND_LABELS_PREMIER_TOUR[joueurs.length] || '1er tour';
-                let matchsHtml = '';
-                for (let i = 0; i < joueurs.length; i += 2) {
-                    matchsHtml += `
-                        <div class="bracket-match-wrap">
-                            <div class="bracket-match">
-                                <div class="bracket-match-row">${ligneJoueurTableau(joueurs[i])}</div>
-                                <div class="bracket-match-row">${ligneJoueurTableau(joueurs[i + 1])}</div>
-                            </div>
-                        </div>
-                    `;
-                }
-                html = `
-                    <div class="bracket">
-                        <div class="bracket-round">
-                            <div class="bracket-round-title">${titre}</div>
-                            ${matchsHtml}
-                        </div>
-                    </div>
-                `;
+                const joueurs = data.joueurs
+                    .filter(function (j) { return j.position_tableau !== null && j.position_tableau >= 0; })
+                    .sort(function (a, b) { return a.position_tableau - b.position_tableau; });
+                html = joueurs.length < 2
+                    ? '<div class="match-hint">Le tableau n\'a pas encore été tiré au sort.</div>'
+                    : construireBracketElimination(joueurs);
             }
 
             tableauCache[tournoiId] = html;
