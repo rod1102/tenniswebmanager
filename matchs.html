@@ -174,8 +174,8 @@
 
             const tabsNav = document.getElementById('tabs-nav');
             tabsNav.innerHTML = `
-                <button class="tab-btn" data-type="joueur">${joueurData ? formaterNom(joueurData.prenom, joueurData.nom) : 'ATP'}</button>
-                <button class="tab-btn" data-type="joueuse">${joueuseData ? formaterNom(joueuseData.prenom, joueuseData.nom) : 'WTA'}</button>
+                <button class="tab-btn" data-type="joueur">ATP</button>
+                <button class="tab-btn" data-type="joueuse">WTA</button>
             `;
             synchroniserOngletActif();
             tabsNav.querySelectorAll('.tab-btn').forEach(function (bouton) {
