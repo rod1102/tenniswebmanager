@@ -74,6 +74,15 @@
             return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
         }
 
+        // Meme regle que tournoi-detail.html : un vrai joueur ou un rival a une fiche
+        // adversaire.html cliquable, un lambda/BYE reste en texte brut (pas d'identite
+        // stable a lier).
+        function lienAdversaire(nomHtml, estReel, pId, rId) {
+            if (estReel && pId) return `<a class="lien-adversaire" href="adversaire.html?type=reel&id=${pId}">${nomHtml}</a>`;
+            if (rId) return `<a class="lien-adversaire" href="adversaire.html?type=rival&id=${rId}">${nomHtml}</a>`;
+            return nomHtml;
+        }
+
         function formaterNomComplet(nomComplet) {
             if (!nomComplet) return nomComplet;
             const i = nomComplet.lastIndexOf(' ');
@@ -117,20 +126,54 @@
             if (!j) return '<span class="bracket-joueur bracket-tbd">?</span>';
             if (j.nom === 'BYE') return '<span class="bracket-joueur bracket-bye">BYE</span>';
             const classe = j.est_reel ? ' bracket-autre-reel' : ' bracket-bot';
-            const nomHtml = (j.drapeau ? flagImg(j.drapeau) + ' ' : '') + formaterNomComplet(j.nom) + (j.coachPseudo ? ' (' + j.coachPseudo + ')' : '');
+            const nomTxt = (j.drapeau ? flagImg(j.drapeau) + ' ' : '') + formaterNomComplet(j.nom) + (j.coachPseudo ? ' (' + j.coachPseudo + ')' : '');
+            const nomHtml = lienAdversaire(nomTxt, j.est_reel, j.player_id, j.rival_id);
             const rangTxt = j.tete_de_serie ? ` <span class="bracket-rang">[${j.tete_de_serie}]</span>` : '';
             return `<span class="bracket-joueur${classe}">${nomHtml}</span>${rangTxt}`;
         }
 
-        function carteVide(j1, j2) {
+        function carteVide(j1, j2, roundIndex, ordre) {
+            const attrs = roundIndex === undefined ? '' : ` data-round-index="${roundIndex}" data-ordre="${ordre}" data-key="${roundIndex}-${ordre}"`;
             return `
-                <div class="bracket-match-wrap">
+                <div class="bracket-match-wrap"${attrs}>
                     <div class="bracket-match">
                         <div class="bracket-match-row">${ligneJoueurTableau(j1)}</div>
                         <div class="bracket-match-row">${ligneJoueurTableau(j2)}</div>
                     </div>
                 </div>
             `;
+        }
+
+        // Copie de calculerAncetres/activerSurbrillanceParcours de tournoi-detail.html :
+        // au survol d'un match, met en surbrillance jaune ce match et tous ceux des
+        // tours precedents qui y menent (meme mecanique de data-key "round-ordre").
+        function calculerAncetres(roundIndex, ordre) {
+            const resultats = [];
+            for (let k = 1; roundIndex - k >= 0; k++) {
+                const largeur = Math.pow(2, k);
+                const debut = ordre * largeur;
+                for (let i = 0; i < largeur; i++) {
+                    resultats.push(roundIndex - k + '-' + (debut + i));
+                }
+            }
+            return resultats;
+        }
+
+        function activerSurbrillanceParcours(conteneur) {
+            conteneur.querySelectorAll('.bracket-match-wrap[data-round-index]').forEach(function (wrap) {
+                wrap.addEventListener('mouseenter', function () {
+                    const roundIndex = parseInt(wrap.dataset.roundIndex, 10);
+                    const ordre = parseInt(wrap.dataset.ordre, 10);
+                    const cles = [roundIndex + '-' + ordre].concat(calculerAncetres(roundIndex, ordre));
+                    cles.forEach(function (cle) {
+                        const cible = conteneur.querySelector('.bracket-match-wrap[data-key="' + cle + '"]');
+                        if (cible) cible.classList.add('bracket-parcours');
+                    });
+                });
+                wrap.addEventListener('mouseleave', function () {
+                    conteneur.querySelectorAll('.bracket-parcours').forEach(function (el) { el.classList.remove('bracket-parcours'); });
+                });
+            });
         }
 
         // Tableau complet jusqu'a la finale (comme l'onglet "Tableau" de
@@ -149,12 +192,16 @@
                 let matchsHtml;
                 if (roundIndex === 0) {
                     matchsHtml = '';
-                    for (let i = 0; i < joueurs.length; i += 2) {
-                        matchsHtml += carteVide(joueurs[i], joueurs[i + 1]);
+                    let ordre = 0;
+                    for (let i = 0; i < joueurs.length; i += 2, ordre++) {
+                        matchsHtml += carteVide(joueurs[i], joueurs[i + 1], roundIndex, ordre);
                     }
                 } else {
                     const nbMatchsCeTour = Math.pow(2, labelsRounds.length - 1 - roundIndex);
-                    matchsHtml = new Array(nbMatchsCeTour).fill(carteVide(null, null)).join('');
+                    matchsHtml = '';
+                    for (let ordre = 0; ordre < nbMatchsCeTour; ordre++) {
+                        matchsHtml += carteVide(null, null, roundIndex, ordre);
+                    }
                 }
                 return `
                     <div class="bracket-round">
@@ -265,6 +312,7 @@
             try {
                 const html = await obtenirTableauHtml(tournoiId);
                 conteneur.innerHTML = '<div class="stats-header" style="margin-top:24px;">Tableau du tournoi</div>' + html;
+                activerSurbrillanceParcours(conteneur);
             } catch (err) {
                 conteneur.innerHTML = '<div class="stats-header" style="margin-top:24px;">Tableau du tournoi</div><div class="match-hint">' + err.message + '</div>';
             }
