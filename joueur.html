@@ -393,7 +393,9 @@
                         <div class="xp-pool-title">Déplacement de disposition disponible : <span>${player.points_dispositions_a_deplacer}</span></div>
                         <div class="planning-alerte-texte" style="margin-bottom:8px;">Déplace 1 point déjà acquis d'une catégorie vers une autre (bonus Coaching mental) — à faire cette semaine, sinon perdu à la prochaine avancée de semaine. ${brouillonDeplacement ? 'Brouillon enregistré, modifiable ou annulable tant que la semaine n\'a pas avancé.' : 'Rien n\'est définitif tant que la semaine n\'a pas avancé.'}</div>
                         <div class="training-row">
+                            <span class="match-hint">De</span>
                             <select class="dispo-deplacer-depuis">${optionsDispo(brouillonDeplacement ? brouillonDeplacement.depuis : null)}</select>
+                            <span class="match-hint">Vers</span>
                             <select class="dispo-deplacer-vers">${optionsDispo(brouillonDeplacement ? brouillonDeplacement.vers : null)}</select>
                             <button class="cta cta-primary dispo-deplacer-btn" style="padding:10px 16px; font-size:0.8rem;">${brouillonDeplacement ? 'Mettre à jour' : 'Déplacer'}</button>
                             ${brouillonDeplacement ? '<button class="cta cta-secondary dispo-deplacer-annuler-btn" style="padding:10px 16px; font-size:0.8rem;">Annuler</button>' : ''}
