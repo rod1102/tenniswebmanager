@@ -1467,4 +1467,30 @@ if (db.prepare('SELECT patch_suppression_avatars_20260916 AS p FROM jeu_etat WHE
     db.prepare("UPDATE jeu_etat SET patch_suppression_avatars_20260916 = 1 WHERE id = 1").run();
 }
 
+// Rattrape les tournois deja tires AVANT le renommage LUND -> JORGENSEN
+// (patch_lund_jorgensen_20260912 ci-dessus) : tournoi_joueurs.nom est une COPIE
+// figee au moment du tirage (genererEntrants), pas une valeur relue en direct
+// depuis players/classement_joueurs - un tableau deja tire avant cette date
+// affichait donc encore "Lund" meme apres le renommage de la source (signale par
+// l'utilisateur, 2026-09-17 : "Tomas Jorgensen" apparaissait comme "Tomas Lund"
+// dans le tableau d'un tournoi). Meme id=254 et meme regle de mot entier (\bLUND\b)
+// que le patch d'origine, pour ne jamais toucher un autre "Lund"/"Lundgren"
+// homonyme legitime (Lund existe aussi comme patronyme distinct dans
+// noms-locaux.js).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_lund_jorgensen_tournois_20260917 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_lund_jorgensen_tournois_20260917 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const NOUVEAU_NOM = 'JØRGENSEN';
+    const lignes = db.prepare("SELECT id, nom FROM tournoi_joueurs WHERE player_id = 254 OR rival_id = 254").all();
+    let compteur = 0;
+    lignes.forEach(function (ligne) {
+        if (/\bLUND\b/i.test(ligne.nom || '')) {
+            const nomMisAJour = ligne.nom.replace(/\bLUND\b/i, NOUVEAU_NOM);
+            db.prepare('UPDATE tournoi_joueurs SET nom = ? WHERE id = ?').run(nomMisAJour, ligne.id);
+            compteur++;
+        }
+    });
+    console.log('[patch_lund_jorgensen_tournois_20260917] lignes tournoi_joueurs corrigees :', compteur);
+    db.prepare('UPDATE jeu_etat SET patch_lund_jorgensen_tournois_20260917 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
