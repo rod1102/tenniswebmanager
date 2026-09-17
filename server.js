@@ -3452,7 +3452,8 @@ let avancementAutoEnCours = false;
 
 // Verifie si une ou plusieurs echeances sont dues et les rattrape dans l'ordre.
 // Appelee au demarrage (rattrapage si le serveur etait eteint) puis toutes les
-// 15 minutes. Pas de verrou complexe necessaire au-dela du booleen ci-dessus :
+// 5 minutes (INTERVALLE_VERIFICATION_MS, plus bas dans ce fichier). Pas de verrou
+// complexe necessaire au-dela du booleen ci-dessus :
 // Node est single-threaded et toutes les operations DB sont synchrones
 // (better-sqlite3), donc aucun risque reel de concurrence avec un clic manuel sur
 // le bouton admin - les deux s'executent simplement l'un apres l'autre.
@@ -11455,14 +11456,22 @@ if (MODE_STAGING) {
     console.log('[staging] copie de test : avancement automatique force a l\'arret, maintenance desactivee.');
 }
 
+// Frequence de verification des creneaux (tour/semaine/coupe) : passee de 15 a 5
+// minutes (2026-09-17, demande explicite de l'utilisateur - les matchs demarraient
+// avec un retard percu d'une vingtaine de minutes par rapport a leur creneau
+// affiche, le pire cas avec un intervalle de 15 min etant deja proche de ce
+// ressenti). Ces verifications sont peu couteuses (sortie immediate si rien n'est
+// du), un intervalle plus court ne pose pas de probleme de charge.
+const INTERVALLE_VERIFICATION_MS = 5 * 60 * 1000;
+
 verifierAvancementAuto();
-const intervalleSemaine = setInterval(verifierAvancementAuto, 15 * 60 * 1000);
+const intervalleSemaine = setInterval(verifierAvancementAuto, INTERVALLE_VERIFICATION_MS);
 
 verifierAvancementTourAuto();
-const intervalleTour = setInterval(verifierAvancementTourAuto, 15 * 60 * 1000);
+const intervalleTour = setInterval(verifierAvancementTourAuto, INTERVALLE_VERIFICATION_MS);
 
 verifierAvancementTourCoupeAuto();
-const intervalleTourCoupe = setInterval(verifierAvancementTourCoupeAuto, 15 * 60 * 1000);
+const intervalleTourCoupe = setInterval(verifierAvancementTourCoupeAuto, INTERVALLE_VERIFICATION_MS);
 
 // Arret propre du processus (2026-09-11, pour la synchronisation prod -> copie de
 // test, apres un fetch()). Cause isolee et reproduite hors de ce fichier : sur
