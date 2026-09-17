@@ -9,7 +9,7 @@
     <title>Mes joueurs — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260906">
+    <link rel="stylesheet" href="style.css?v=20260917">
 </head>
 <body>
     <div class="dashboard-page">
@@ -339,7 +339,7 @@
                 xpHtml = `
                     <div class="xp-pool-panel">
                         <div class="xp-pool-title">Points d'expérience en réserve : <span id="xp-restant">${player.points_experience}</span></div>
-                        <div class="planning-alerte-texte" style="margin-bottom:8px;">À programmer cette semaine — non utilisés, ils seront perdus à la prochaine avancée de semaine. La répartition choisie ne s'applique qu'au changement de semaine, une fois l'érosion passée${yADejaUneRepartitionEnAttente ? ' (une répartition est déjà programmée, modifiable ci-dessous)' : ''}.</div>
+                        <div class="planning-alerte-texte${yADejaUneRepartitionEnAttente ? ' planning-alerte-texte-ok' : ''}" style="margin-bottom:8px;">À programmer cette semaine — non utilisés, ils seront perdus à la prochaine avancée de semaine. La répartition choisie ne s'applique qu'au changement de semaine, une fois l'érosion passée${yADejaUneRepartitionEnAttente ? ' (une répartition est déjà programmée, modifiable ci-dessous)' : ''}.</div>
                         <div class="stats-grid">${inputsHtml}</div>
                         <button class="cta cta-primary repartir-btn" data-pool="${player.points_experience}" style="padding:10px 20px; font-size:0.8rem;">Programmer cette répartition</button>
                     </div>

@@ -818,6 +818,13 @@ h1 {
     color: #E24B4A;
 }
 
+/* Meme message, mais une repartition a deja ete validee au moins une fois cette
+   semaine (modifiable, pas perdue) - moins urgent qu'une reserve pas encore
+   programmee du tout, demande explicite de l'utilisateur 2026-09-17. */
+.planning-alerte-texte-ok {
+    color: #5CC57F;
+}
+
 .planning-tournoi-lock {
     font-size: 0.78rem;
     font-weight: 700;
