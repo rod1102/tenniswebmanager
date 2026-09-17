@@ -3452,7 +3452,7 @@ let avancementAutoEnCours = false;
 
 // Verifie si une ou plusieurs echeances sont dues et les rattrape dans l'ordre.
 // Appelee au demarrage (rattrapage si le serveur etait eteint) puis toutes les
-// 5 minutes (INTERVALLE_VERIFICATION_MS, plus bas dans ce fichier). Pas de verrou
+// minutes (INTERVALLE_VERIFICATION_MS, plus bas dans ce fichier). Pas de verrou
 // complexe necessaire au-dela du booleen ci-dessus :
 // Node est single-threaded et toutes les operations DB sont synchrones
 // (better-sqlite3), donc aucun risque reel de concurrence avec un clic manuel sur
@@ -11456,13 +11456,16 @@ if (MODE_STAGING) {
     console.log('[staging] copie de test : avancement automatique force a l\'arret, maintenance desactivee.');
 }
 
-// Frequence de verification des creneaux (tour/semaine/coupe) : passee de 15 a 5
-// minutes (2026-09-17, demande explicite de l'utilisateur - les matchs demarraient
-// avec un retard percu d'une vingtaine de minutes par rapport a leur creneau
-// affiche, le pire cas avec un intervalle de 15 min etant deja proche de ce
-// ressenti). Ces verifications sont peu couteuses (sortie immediate si rien n'est
-// du), un intervalle plus court ne pose pas de probleme de charge.
-const INTERVALLE_VERIFICATION_MS = 5 * 60 * 1000;
+// Frequence de verification des creneaux (tour/semaine/coupe) : 15 -> 5 minutes
+// une premiere fois, puis 5 -> 1 minute le meme jour (2026-09-17, demande
+// explicite de l'utilisateur : "je veux juste que les matchs se passent bien a
+// l'heure indiquee et pas [quelques] min apres"). Ces verifications sont peu
+// couteuses (sortie immediate si rien n'est du), un intervalle court ne pose pas
+// de probleme de charge - a 1 minute, le retard perçu devient negligeable sans
+// pour autant reecrire le systeme en veritable setTimeout arme sur l'instant
+// exact de chaque creneau (bien plus intrusif pour un gain marginal au-dela de
+// cette frequence).
+const INTERVALLE_VERIFICATION_MS = 60 * 1000;
 
 verifierAvancementAuto();
 const intervalleSemaine = setInterval(verifierAvancementAuto, INTERVALLE_VERIFICATION_MS);
