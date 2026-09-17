@@ -8848,11 +8848,12 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
         // TOUS les tournois de la semaine sur les circuits du coach, inscrit ou non
         // (demande explicite : "je veux voir tous les matchs de la semaine, que mon
         // joueur y participe ou non") - plus seulement ceux ou l'un de mes joueurs a
-        // une inscription reelle. Meme tolerance d'un ecart de 1 semaine que
-        // /api/matchs (cf. bug Live) : un tournoi se joue integralement au moment ou
-        // semaine_actuelle avance dans la meme requete, donc au moment ou le coach
-        // consulte la page, la semaine courante a deja avance d'un cran par rapport a
-        // tournois.semaine.
+        // une inscription reelle. Visible tant que 'a_venir' (quelle que soit
+        // l'anciennete de tournois.semaine - un tournoi lent peut chevaucher un
+        // changement de semaine sans etre termine), OU si le tournoi a demarre CETTE
+        // semaine precisement. Remplace l'ancienne tolerance fixe d'un ecart de 1
+        // semaine (qui gardait un tournoi deja termine visible une semaine de trop) -
+        // demande explicite de l'utilisateur, 2026-09-17.
         const circuits = Object.keys(joueurParCircuit);
         if (circuits.length === 0) {
             return res.json({ success: true, tournois: [] });
@@ -8862,9 +8863,9 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
             SELECT tournois.id, tournois.nom, tournois.circuit, tournois.surface,
                    tournois.calendrier_id, tournois.semaine
             FROM tournois
-            WHERE tournois.semaine >= ? AND tournois.semaine <= ?
+            WHERE (tournois.statut = 'a_venir' OR tournois.semaine = ?)
               AND tournois.circuit IN (${placeholders})
-        `).all(semaineActuelle - 1, semaineActuelle, ...circuits);
+        `).all(semaineActuelle, ...circuits);
 
         const resultat = tournois.map(function (t) {
             t.player_id = joueurParCircuit[t.circuit];
@@ -8928,37 +8929,43 @@ app.get('/api/matchs/:userId', (req, res) => {
         const userId = req.userId;
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
 
-        // Fenetre semaineActuelle-1 a semaineActuelle uniquement (meme tolerance d'un
-        // ecart de 1 qu'ailleurs sur cette page, cf. estSemaineActuelle plus bas) - sans
-        // filtre, cette requete remontait TOUS les matchs jamais joues par le coach
-        // depuis le debut de la partie, accumulant indefiniment et surchargeant la page
-        // (bug signale par l'utilisateur, 2026-08-21). "Historique de mes matchs" sur la
-        // fiche joueur (adversaire.html) reste la vraie page d'archive complete.
+        // Visible tant que le tournoi/la rencontre de Coupe d'origine est encore
+        // 'a_venir' (quelle que soit l'anciennete de matchs.semaine - un tournoi lent
+        // peut chevaucher un changement de semaine sans etre termine), OU si le match a
+        // eu lieu CETTE semaine precisement. Remplace l'ancienne tolerance fixe
+        // "semaine_actuelle-1 a semaine_actuelle" (2026-08-21) qui gardait aussi bien
+        // trop longtemps un tournoi deja termine la semaine precedente que pas assez
+        // longtemps un tournoi encore en cours a cheval sur 2 semaines - demande
+        // explicite de l'utilisateur, 2026-09-17 : un tournoi termine doit disparaitre
+        // de "Mes matchs" des que la semaine change, pas rester visible une semaine de
+        // plus. "Historique de mes matchs" sur la fiche joueur (adversaire.html) reste
+        // la vraie page d'archive complete.
         const matchs = db.prepare(`
             SELECT matchs.id, matchs.player_id, matchs.surface, matchs.difficulte, matchs.semaine,
                    matchs.vainqueur, matchs.score, matchs.niveau_joueur, matchs.niveau_adversaire, matchs.date_creation,
                    matchs.tournoi_id, matchs.numero_tour, matchs.coupe_equipe_id, tournois.nom AS tournoi_nom, tournois.calendrier_id AS tournoi_calendrier_id,
+                   tournois.statut AS tournoi_statut, coupe_equipes.statut AS coupe_statut,
                    players.prenom, players.nom, players.type, players.nationalite,
                    tj1.player_id AS tj1_player_id, tj1.rival_id AS tj1_rival_id, tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite,
                    tj2.player_id AS tj2_player_id, tj2.rival_id AS tj2_rival_id, tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite
             FROM matchs
             JOIN players ON players.id = matchs.player_id
             LEFT JOIN tournois ON tournois.id = matchs.tournoi_id
+            LEFT JOIN coupe_equipes ON coupe_equipes.id = matchs.coupe_equipe_id
             LEFT JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id OR tm.match_id_j2 = matchs.id
             LEFT JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
             LEFT JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
-            WHERE matchs.user_id = ? AND matchs.semaine >= ? AND matchs.semaine <= ?
+            WHERE matchs.user_id = ?
+              AND (tournois.statut = 'a_venir' OR coupe_equipes.statut = 'a_venir' OR matchs.semaine = ?)
             ORDER BY matchs.id DESC
-        `).all(userId, etat.semaine_actuelle - 1, etat.semaine_actuelle);
+        `).all(userId, etat.semaine_actuelle);
 
         const nbDivisionsCoupeCache = {};
         matchs.forEach(function (m) {
-            // Un tournoi se joue integralement a la semaine "semaine" au moment ou
-            // avancer-semaine incremente semaine_actuelle dans la meme requete : au
-            // moment ou le coach peut voir le match, semaine_actuelle a deja avance
-            // d'un cran. D'ou la tolerance d'un ecart de 1 (sinon le Live d'un match
-            // de tournoi ne serait jamais accessible).
-            m.estSemaineActuelle = etat.semaine_actuelle - m.semaine <= 1;
+            // Meme critere que le WHERE ci-dessus (coherent avec ce qui est visible du
+            // tout) : Live reste accessible tant que le tournoi/la rencontre est encore
+            // en cours, ou si le match a eu lieu cette semaine precisement.
+            m.estSemaineActuelle = m.tournoi_statut === 'a_venir' || m.coupe_statut === 'a_venir' || m.semaine === etat.semaine_actuelle;
             m.positionSemaine = positionSemaineAffichee(m.semaine);
             // Les matchs amicaux (pas de tournoi_id) peuvent avoir lieu meme en
             // Pre-saison/Semaine 0, ou positionSemaine est null - libelle de repli
