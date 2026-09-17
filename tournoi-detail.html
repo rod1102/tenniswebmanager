@@ -429,8 +429,33 @@
                     entrants = entrants / 2;
                 }
 
+                // Represente le vainqueur d'un match REEL comme un "joueur" affichable
+                // (meme forme que tournoi_joueurs) - sert a preremplir le tour suivant des
+                // que ses 2 qualifies sont connus, sans jamais montrer de score puisque ce
+                // tour-la n'a pas encore ete joue (demande explicite de l'utilisateur,
+                // 2026-09-17 : avant, meme un tour dont les 2 qualifies etaient deja
+                // certains restait affiche "? vs ?" jusqu'a sa propre simulation).
+                function vainqueurCommeJoueur(m) {
+                    const estJ1 = m.vainqueur_nom === m.joueur1_nom;
+                    return {
+                        nom: m.vainqueur_nom,
+                        drapeau: estJ1 ? m.joueur1_drapeau : m.joueur2_drapeau,
+                        est_reel: estJ1 ? m.joueur1_est_reel : m.joueur2_est_reel,
+                        player_id: estJ1 ? m.joueur1_player_id : m.joueur2_player_id,
+                        rival_id: estJ1 ? m.joueur1_rival_id : m.joueur2_rival_id,
+                        rang: estJ1 ? m.joueur1_rang : m.joueur2_rang,
+                        tete_de_serie: estJ1 ? m.joueur1_seed : m.joueur2_seed
+                    };
+                }
+
+                // Qualifies connus pour le PROCHAIN tour non encore joue - reste null tant
+                // qu'un tour intermediaire n'a pas ete simule (ses propres qualifies sont
+                // alors eux-memes inconnus).
+                let qualifiesConnus = null;
+
                 const colonnes = labelsRounds.map(function (label, roundIndex) {
                     if (parTour[label]) {
+                        qualifiesConnus = parTour[label].map(vainqueurCommeJoueur);
                         return { label: label, matchs: parTour[label].map(function (m) { return { reel: m }; }) };
                     }
                     if (roundIndex === 0) {
@@ -438,11 +463,17 @@
                         for (let i = 0; i < joueursTries.length; i += 2) {
                             paires.push({ vide: { j1: joueursTries[i], j2: joueursTries[i + 1] } });
                         }
+                        qualifiesConnus = null;
                         return { label: label, matchs: paires };
                     }
                     const nbMatchsCeTour = Math.pow(2, labelsRounds.length - 1 - roundIndex);
                     const vides = [];
-                    for (let i = 0; i < nbMatchsCeTour; i++) vides.push({ vide: { j1: null, j2: null } });
+                    for (let i = 0; i < nbMatchsCeTour; i++) {
+                        vides.push(qualifiesConnus
+                            ? { vide: { j1: qualifiesConnus[2 * i], j2: qualifiesConnus[2 * i + 1] } }
+                            : { vide: { j1: null, j2: null } });
+                    }
+                    qualifiesConnus = null;
                     return { label: label, matchs: vides };
                 });
 
