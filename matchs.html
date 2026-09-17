@@ -182,9 +182,12 @@
                 bouton.addEventListener('click', function () {
                     typeCourant = bouton.dataset.type;
                     synchroniserOngletActif();
-                    rendreMesMatchs();
-                    rendreAutresMatchs();
-                    appliquerFiltreMultiplex();
+                    // Chaque etape dans son propre try/catch : une exception sur l'une
+                    // (donnees inattendues) ne doit pas empecher les autres onglets/vues
+                    // de se mettre a jour.
+                    try { rendreMesMatchs(); } catch (err) { console.error(err); }
+                    try { rendreAutresMatchs(); } catch (err) { console.error(err); }
+                    try { appliquerFiltreMultiplex(); } catch (err) { console.error(err); }
                 });
             });
         }
@@ -900,30 +903,48 @@
         }
 
         async function chargerMatchs() {
-            const response = await fetch('/api/matchs/' + userId);
-            const data = await response.json();
+            // Ne doit JAMAIS rejeter (try/catch large) : chargerAutresMatchs() est
+            // chainee juste apres cet appel (cf. sequence d'appel plus bas) precisement
+            // pour que la bascule d'onglet ?id=... ci-dessous soit deja faite avant son
+            // rendu - si cette fonction plantait sans filet, la promesse rejetterait et
+            // "Autres matchs de la semaine"/le Multiplex ne se chargeraient plus jamais,
+            // meme si leurs propres donnees sont parfaitement valides (bug corrige
+            // 2026-09-17, signale par l'utilisateur : tournois de la semaine en cours
+            // absents de la page alors que leurs resultats existaient bien en base).
+            try {
+                const response = await fetch('/api/matchs/' + userId);
+                const data = await response.json();
 
-            if (!response.ok) {
-                alert(data.error || 'Impossible de charger les matchs.');
-                matchsMiensCache = [];
-                rendreMesMatchs();
-                return;
-            }
+                if (!response.ok) {
+                    alert(data.error || 'Impossible de charger les matchs.');
+                    matchsMiensCache = [];
+                } else {
+                    matchsMiensCache = data.matchs;
 
-            matchsMiensCache = data.matchs;
-
-            // Un lien direct vers un match (?id=...) doit ouvrir le bon onglet de
-            // circuit, meme si ce n'est pas celui affiche par defaut - sinon le match
-            // cible serait filtre hors de la liste sans explication.
-            if (matchIdCible) {
-                const cible = matchsMiensCache.find(function (m) { return String(m.id) === String(matchIdCible); });
-                if (cible) {
-                    typeCourant = cible.type;
-                    synchroniserOngletActif();
+                    // Un lien direct vers un match (?id=...) doit ouvrir le bon onglet de
+                    // circuit, meme si ce n'est pas celui affiche par defaut - sinon le
+                    // match cible serait filtre hors de la liste sans explication.
+                    if (matchIdCible) {
+                        const cible = matchsMiensCache.find(function (m) { return String(m.id) === String(matchIdCible); });
+                        if (cible) {
+                            typeCourant = cible.type;
+                            synchroniserOngletActif();
+                        }
+                    }
                 }
+            } catch (err) {
+                console.error(err);
+                matchsMiensCache = [];
             }
 
-            rendreMesMatchs();
+            // Rendu isole dans son propre try/catch : une exception de rendu (donnees
+            // inattendues pour CE coach) ne doit pas non plus empecher la suite de la
+            // chaine (chargerAutresMatchs/construireMultiplex) de s'executer.
+            try {
+                rendreMesMatchs();
+            } catch (err) {
+                console.error(err);
+            }
         }
 
         function rendreMesMatchs() {
@@ -973,11 +994,22 @@
         }
 
         async function chargerAutresMatchs() {
-            const response = await fetch('/api/matchs/semaine/' + userId);
-            const data = await response.json();
-
-            tournoisAutresCache = (response.ok && data.tournois) ? data.tournois : [];
-            rendreAutresMatchs();
+            // Meme filet que chargerMatchs() : ne doit jamais rejeter, sinon
+            // construireMultiplex() ne se lancerait plus jamais dans la chaine
+            // d'initialisation.
+            try {
+                const response = await fetch('/api/matchs/semaine/' + userId);
+                const data = await response.json();
+                tournoisAutresCache = (response.ok && data.tournois) ? data.tournois : [];
+            } catch (err) {
+                console.error(err);
+                tournoisAutresCache = [];
+            }
+            try {
+                rendreAutresMatchs();
+            } catch (err) {
+                console.error(err);
+            }
         }
 
         function rendreAutresMatchs() {
