@@ -105,6 +105,12 @@
 
         function formaterNomComplet(nomComplet) {
             if (!nomComplet) return nomComplet;
+            // Normalise tout caractere d'espacement inhabituel (espace insecable,
+            // espaces multiples...) en un espace simple avant de decouper prenom/nom -
+            // sans ca, un nom contenant un tel caractere ne matchait jamais
+            // lastIndexOf(' ') et repartait inchange (signale par l'utilisateur,
+            // 2026-09-18 : certains joueurs n'affichaient pas NOM en majuscules).
+            nomComplet = nomComplet.replace(/\s+/g, ' ').trim();
             // Cas coach avec 2 personnages : "Prenom Nom / Prenom Nom" (classement Pronos
             // combine) - formate chaque moitie separement plutot que de ne traiter que le
             // dernier mot du tout.

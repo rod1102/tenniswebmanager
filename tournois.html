@@ -108,6 +108,12 @@
 
         function formaterNomComplet(nomComplet) {
             if (!nomComplet) return nomComplet;
+            // Normalise tout caractere d'espacement inhabituel (espace insecable,
+            // espaces multiples...) en un espace simple avant de decouper prenom/nom -
+            // sans ca, un nom contenant un tel caractere ne matchait jamais
+            // lastIndexOf(' ') et repartait inchange (signale par l'utilisateur,
+            // 2026-09-18 : certains joueurs n'affichaient pas NOM en majuscules).
+            nomComplet = nomComplet.replace(/\s+/g, ' ').trim();
             const i = nomComplet.lastIndexOf(' ');
             if (i === -1) return nomComplet;
             const prenom = nomComplet.slice(0, i).toLowerCase().replace(/(^|[\s'-])\p{L}/gu, function (c) { return c.toUpperCase(); });

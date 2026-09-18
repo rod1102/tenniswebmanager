@@ -6547,8 +6547,12 @@ function rebalancerTournoi(tournoiId, entree, semaine) {
         curseur++;
         if (!slot) return; // ne devrait pas arriver, comptes verifies ci-dessus
         if (c.type === 'reel') {
+            // .toUpperCase() sur le nom de famille (2026-09-18, coherence avec les
+            // autres points d'insertion d'un vrai joueur, ex. genererEntrantsFinals) -
+            // cet instantane etait le seul a stocker le nom brut tel que saisi a la
+            // creation, sans la convention "Prenom NOM" du reste du site.
             db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 1, player_id = ?, rival_id = NULL, energie_misee = 0 WHERE id = ?')
-                .run(c.data.prenom + ' ' + c.data.nom, c.data.nationalite, c.niveau, c.id, slot.id);
+                .run(c.data.prenom + ' ' + c.data.nom.toUpperCase(), c.data.nationalite, c.niveau, c.id, slot.id);
         } else {
             const r = db.prepare('SELECT * FROM classement_joueurs WHERE id = ?').get(c.id);
             db.prepare('UPDATE tournoi_joueurs SET nom = ?, nationalite = ?, niveau = ?, est_reel = 0, player_id = NULL, rival_id = ? WHERE id = ?')
