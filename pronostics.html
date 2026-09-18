@@ -176,11 +176,57 @@
             });
         }
 
+        // Affichage d'un match REELLEMENT joue (score + vainqueur en gras) - meme
+        // logique que nomAffiche dans tournoi-detail.html, sans le concept "estMoi"
+        // (pronostics.html n'a pas de playerId de reference).
+        function nomAfficheMatch(m, cote) {
+            const nom = cote === 1 ? m.joueur1_nom : m.joueur2_nom;
+            if (!nom) return '<span class="bracket-joueur bracket-bye">BYE</span>';
+            const drap = cote === 1 ? m.joueur1_drapeau : m.joueur2_drapeau;
+            const estReel = cote === 1 ? m.joueur1_est_reel : m.joueur2_est_reel;
+            const seed = cote === 1 ? m.joueur1_seed : m.joueur2_seed;
+            const pId = cote === 1 ? m.joueur1_player_id : m.joueur2_player_id;
+            const rId = cote === 1 ? m.joueur1_rival_id : m.joueur2_rival_id;
+            const estVainqueur = m.vainqueur_nom === nom;
+            const classe = (estVainqueur ? ' bracket-vainqueur' : '') + (estReel ? ' bracket-autre-reel' : ' bracket-bot');
+            const nomHtml = lienAdversaire(`${drap ? flagImg(drap) + ' ' : ''}${formaterNomComplet(nom)}`, estReel, pId, rId);
+            return `<span class="bracket-joueur${classe}">${nomHtml}</span><span class="bracket-seed">${seed ? '[' + seed + ']' : ''}</span>`;
+        }
+
+        function carteReelle(m, roundIndex, ordre) {
+            return `
+                <div class="bracket-match-wrap" data-round-index="${roundIndex}" data-ordre="${ordre}" data-key="${roundIndex}-${ordre}">
+                    <div class="bracket-match">
+                        <div class="bracket-match-row">${nomAfficheMatch(m, 1)}</div>
+                        <div class="bracket-match-row">${nomAfficheMatch(m, 2)}</div>
+                        ${m.score ? `<div class="bracket-score">${m.score}</div>` : ''}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Represente le vainqueur d'un match REEL comme un "joueur" affichable, pour
+        // preremplir le tour suivant des que ses 2 qualifies sont connus (meme logique
+        // que vainqueurCommeJoueur dans tournoi-detail.html).
+        function vainqueurCommeJoueur(m) {
+            const estJ1 = m.vainqueur_nom === m.joueur1_nom;
+            return {
+                nom: m.vainqueur_nom,
+                drapeau: estJ1 ? m.joueur1_drapeau : m.joueur2_drapeau,
+                est_reel: estJ1 ? m.joueur1_est_reel : m.joueur2_est_reel,
+                player_id: estJ1 ? m.joueur1_player_id : m.joueur2_player_id,
+                rival_id: estJ1 ? m.joueur1_rival_id : m.joueur2_rival_id,
+                tete_de_serie: estJ1 ? m.joueur1_seed : m.joueur2_seed
+            };
+        }
+
         // Tableau complet jusqu'a la finale (comme l'onglet "Tableau" de
-        // tournoi-detail.html) : seul le 1er tour est reellement connu au moment ou
-        // les pronostics ouvrent (tableau tire au sort, aucun match encore joue), les
-        // tours suivants sont donc affiches en "?" plutot que d'etre omis.
-        function construireBracketElimination(joueurs) {
+        // tournoi-detail.html) : chaque tour deja joue affiche son vrai score, et
+        // prefill le tour suivant avec les qualifies connus des qu'ils le sont - les
+        // tours dont l'issue reste incertaine restent en "?" (demande explicite de
+        // l'utilisateur, 2026-09-18 : avant, le tableau de pronostics.html restait
+        // fige sur le seul tirage initial, jamais mis a jour avec les resultats).
+        function construireBracketElimination(joueurs, parTour) {
             const labelsRounds = [];
             let entrants = joueurs.length;
             while (entrants >= 2) {
@@ -188,20 +234,29 @@
                 entrants = entrants / 2;
             }
 
+            let qualifiesConnus = null;
+
             const colonnesHtml = labelsRounds.map(function (label, roundIndex) {
-                let matchsHtml;
-                if (roundIndex === 0) {
-                    matchsHtml = '';
+                let matchsHtml = '';
+                if (parTour[label]) {
+                    parTour[label].forEach(function (m, ordre) {
+                        matchsHtml += carteReelle(m, roundIndex, ordre);
+                    });
+                    qualifiesConnus = parTour[label].map(vainqueurCommeJoueur);
+                } else if (roundIndex === 0) {
                     let ordre = 0;
                     for (let i = 0; i < joueurs.length; i += 2, ordre++) {
                         matchsHtml += carteVide(joueurs[i], joueurs[i + 1], roundIndex, ordre);
                     }
+                    qualifiesConnus = null;
                 } else {
                     const nbMatchsCeTour = Math.pow(2, labelsRounds.length - 1 - roundIndex);
-                    matchsHtml = '';
                     for (let ordre = 0; ordre < nbMatchsCeTour; ordre++) {
-                        matchsHtml += carteVide(null, null, roundIndex, ordre);
+                        matchsHtml += qualifiesConnus
+                            ? carteVide(qualifiesConnus[2 * ordre], qualifiesConnus[2 * ordre + 1], roundIndex, ordre)
+                            : carteVide(null, null, roundIndex, ordre);
                     }
+                    qualifiesConnus = null;
                 }
                 return `
                     <div class="bracket-round">
@@ -211,6 +266,10 @@
                 `;
             }).join('');
 
+            const dernierLabel = labelsRounds[labelsRounds.length - 1];
+            const finale = parTour[dernierLabel] && parTour[dernierLabel][0];
+            const vainqueurFinal = finale && finale.vainqueur_nom;
+
             return `
                 <div class="bracket">
                     ${colonnesHtml}
@@ -218,7 +277,7 @@
                         <div class="bracket-round-title">Vainqueur</div>
                         <div class="bracket-match-wrap">
                             <div class="bracket-match bracket-match-final">
-                                <span class="bracket-joueur">?</span>
+                                ${vainqueurFinal ? `<span class="bracket-joueur bracket-vainqueur">${formaterNomComplet(vainqueurFinal)}</span>` : '<span class="bracket-joueur">?</span>'}
                             </div>
                         </div>
                     </div>
@@ -298,9 +357,15 @@
                 const joueurs = data.joueurs
                     .filter(function (j) { return j.position_tableau !== null && j.position_tableau >= 0; })
                     .sort(function (a, b) { return a.position_tableau - b.position_tableau; });
+                const parTour = {};
+                (data.matchs || []).forEach(function (m) {
+                    if (!parTour[m.numero_tour]) parTour[m.numero_tour] = [];
+                    parTour[m.numero_tour].push(m);
+                });
+                Object.keys(parTour).forEach(function (t) { parTour[t].sort(function (a, b) { return a.ordre - b.ordre; }); });
                 html = joueurs.length < 2
                     ? '<div class="match-hint">Le tableau n\'a pas encore été tiré au sort.</div>'
-                    : construireBracketElimination(joueurs);
+                    : construireBracketElimination(joueurs, parTour);
             }
 
             tableauCache[tournoiId] = html;

@@ -6381,7 +6381,31 @@ app.get('/api/tournois/:id', (req, res) => {
             }
         });
 
-        res.json({ success: true, tournoi, joueurs });
+        // Resultats deja joues (2026-09-18, pour que le tableau de pronostics.html
+        // avance avec les vrais scores/qualifies comme celui de tournoi-detail.html,
+        // au lieu de rester fige sur le seul tirage initial). Meme forme de lignes
+        // que la requete equivalente de /api/tournois/fiche/:calendrierId, sans les
+        // champs lies a un playerId particulier (pronostics.html n'a pas ce contexte).
+        const matchs = db.prepare(`
+            SELECT tournoi_matchs.id, tournoi_matchs.numero_tour, tournoi_matchs.ordre, tournoi_matchs.score,
+                   j1.nom AS joueur1_nom, j1.nationalite AS joueur1_nationalite, j1.est_reel AS joueur1_est_reel,
+                   j1.rival_id AS joueur1_rival_id, j1.player_id AS joueur1_player_id, j1.tete_de_serie AS joueur1_seed,
+                   j2.nom AS joueur2_nom, j2.nationalite AS joueur2_nationalite, j2.est_reel AS joueur2_est_reel,
+                   j2.rival_id AS joueur2_rival_id, j2.player_id AS joueur2_player_id, j2.tete_de_serie AS joueur2_seed,
+                   vj.nom AS vainqueur_nom
+            FROM tournoi_matchs
+            JOIN tournoi_joueurs AS j1 ON j1.id = tournoi_matchs.joueur1_id
+            LEFT JOIN tournoi_joueurs AS j2 ON j2.id = tournoi_matchs.joueur2_id
+            LEFT JOIN tournoi_joueurs AS vj ON vj.id = tournoi_matchs.vainqueur_id
+            WHERE tournoi_matchs.tournoi_id = ?
+            ORDER BY tournoi_matchs.ordre
+        `).all(id);
+        matchs.forEach(function (m) {
+            m.joueur1_drapeau = drapeau(m.joueur1_nationalite);
+            m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
+        });
+
+        res.json({ success: true, tournoi, joueurs, matchs });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
