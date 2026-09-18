@@ -2864,14 +2864,21 @@ function executerAvancementSemaine() {
                 }
             }
 
-            // Protection contre l'erosion : ce qui s'est REELLEMENT passe pendant la
-            // semaine qu'on quitte (phaseActuelle), jamais le plan de la semaine qu'on
-            // s'apprete a commencer (surfaceProtegee ci-dessus, qui sert uniquement a
-            // crediter le bonus d'automatismes/XP DE CETTE semaine-la) - sinon un
-            // automatisme tout juste monte par un entrainement de surface se faisait
-            // immediatement raboter de 5 au changement suivant, a moins de planifier
-            // encore la meme surface la semaine d'apres, ce qui n'a aucun sens (bug
-            // signale par l'utilisateur, 2026-08-20). Un joueur engage en tournoi
+            // Protection contre l'erosion, DEUX sources cumulees :
+            //  1. ce qui s'est REELLEMENT passe pendant la semaine qu'on quitte
+            //     (phaseActuelle, surfaceProtegeeErosion ci-dessous) - sinon un
+            //     automatisme tout juste monte par un entrainement de surface se
+            //     faisait raboter de 5 au changement suivant, a moins de planifier
+            //     encore la meme surface la semaine d'apres, ce qui n'a aucun sens (bug
+            //     signale par l'utilisateur, 2026-08-20) ;
+            //  2. la surface entrainee pour la semaine qu'on s'apprete a commencer
+            //     (surfaceProtegee ci-dessus, celle dont le +15 est credite juste
+            //     avant) - sinon le meme changement de semaine creditait +15 puis
+            //     retirait aussitot 5 sur cette meme surface (net +10 au lieu de +15) :
+            //     demande explicite de l'utilisateur, 2026-09-18, "apres un
+            //     entrainement de surface il ne faut pas faire perdre 5 d'automatisme
+            //     pendant le changement de semaine".
+            // Un joueur engage en tournoi
             // protege la surface jouee (regle exacte du PDF : exclusion de "la surface
             // ou le joueur a joue durant la semaine en simple") ; sinon on relit le
             // journal de la semaine qu'on quitte (ecrit lors de la transition
@@ -2896,7 +2903,7 @@ function executerAvancementSemaine() {
             COMPETENCES.forEach(function (cle) { competencesErodees[cle] = player[cle]; });
             if (phaseActuelle.type === 'tournoi') {
                 SURFACES.forEach(function (surf) {
-                    if (surf !== surfaceProtegeeErosion) {
+                    if (surf !== surfaceProtegeeErosion && surf !== surfaceProtegee) {
                         automatismes[surf] = Math.max(0, automatismes[surf] - 5);
                     }
                 });
