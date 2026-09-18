@@ -3132,8 +3132,12 @@ function executerAvancementSemaine() {
         // Coupe Davis / Fed Cup : capitaine tranche une seule fois par saison, a la
         // bascule S1->S2 (le vote de S1 vient de se terminer). Les manches elles-memes
         // se simulent rencontre par rencontre via executerAvancementTourCoupe (memes
-        // creneaux qu'un tournoi individuel classique), pas ici.
-        if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine === 2) {
+        // creneaux qu'un tournoi individuel classique), pas ici. Jamais en Saison 1
+        // (demande explicite de l'utilisateur, 2026-09-18) : le capitainat ne
+        // s'active qu'a partir de la Saison 2, le temps que les coachs decouvrent la
+        // fonctionnalite (candidature/vote) des la Pre-saison suivante.
+        if (phaseNouvelleSemaine.type === 'tournoi' && phaseNouvelleSemaine.positionSemaine === 2
+            && phaseAffichee(nouvelleSemaine).numeroSaison >= 2) {
             resoudreCapitainesSaison(phaseAffichee(nouvelleSemaine).numeroSaison);
         }
 
@@ -10301,8 +10305,11 @@ app.get('/api/coupe/statut-capitaine/:playerId', (req, res) => {
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         const phase = phaseDeSemaine(etat.semaine_actuelle);
 
-        const fenetreCandidature = phase.type === 'presaison' || phase.type === 's0';
-        const fenetreVote = phase.type === 'tournoi' && phase.positionSemaine === 1;
+        // Pas de capitainat en Saison 1 (demande explicite de l'utilisateur,
+        // 2026-09-18) : masque les fenetres de candidature/vote cote UI, en plus des
+        // garde-fous sur les routes POST correspondantes.
+        const fenetreCandidature = saison >= 2 && (phase.type === 'presaison' || phase.type === 's0');
+        const fenetreVote = saison >= 2 && phase.type === 'tournoi' && phase.positionSemaine === 1;
 
         const dansLeTableau = !!db.prepare(`
             SELECT 1 FROM coupe_equipes WHERE saison = ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?)
@@ -10458,6 +10465,12 @@ app.post('/api/coupe/candidature', (req, res) => {
         if (phase.type !== 'presaison' && phase.type !== 's0') {
             return res.status(400).json({ error: 'La candidature au poste de capitaine n\'est ouverte qu\'en Pré-saison et Semaine 0.' });
         }
+        // Pas de capitainat en toute 1ere saison (demande explicite de l'utilisateur,
+        // 2026-09-18) : le temps que les coachs decouvrent la fonctionnalite, elle ne
+        // s'active qu'a partir de la Saison 2.
+        if (saison < 2) {
+            return res.status(400).json({ error: 'Le capitainat de Coupe Davis / BJK Cup ne commence qu\'a partir de la Saison 2.' });
+        }
 
         // Regle du PDF : un capitaine doit etre designe en debut de saison pour
         // TOUTE nation, qu'elle fasse partie du Groupe mondial ou non - meme celles
@@ -10487,6 +10500,10 @@ app.post('/api/coupe/vote', (req, res) => {
 
         if (!(phase.type === 'tournoi' && phase.positionSemaine === 1)) {
             return res.status(400).json({ error: 'Le vote pour le capitaine n\'est ouvert qu\'en Semaine 1.' });
+        }
+        // Meme regle que la candidature ci-dessus : pas de capitainat en Saison 1.
+        if (saison < 2) {
+            return res.status(400).json({ error: 'Le capitainat de Coupe Davis / BJK Cup ne commence qu\'a partir de la Saison 2.' });
         }
 
         const estCandidat = db.prepare('SELECT 1 FROM coupe_candidatures WHERE saison = ? AND circuit = ? AND nation = ? AND player_id = ?')

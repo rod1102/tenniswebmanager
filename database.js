@@ -1493,4 +1493,25 @@ if (db.prepare('SELECT patch_lund_jorgensen_tournois_20260917 AS p FROM jeu_etat
     db.prepare('UPDATE jeu_etat SET patch_lund_jorgensen_tournois_20260917 = 1 WHERE id = 1').run();
 }
 
+// Retire les capitaines de Coupe Davis / BJK Cup deja designes en Saison 1 -
+// demande explicite de l'utilisateur, 2026-09-18 : le capitainat (candidature/
+// vote/repli automatique) ne doit s'activer qu'a partir de la Saison 2, le temps
+// que les coachs decouvrent la fonctionnalite. Les garde-fous cote server.js
+// (candidature, vote, resolution automatique en fin de S1) empechent desormais
+// toute nouvelle designation en Saison 1, mais ceux deja resolus par le repli
+// automatique (aucune candidature/vote necessaire pour se declencher) doivent
+// etre annules retroactivement. "saison" ici est deja le numero AFFICHE (voir
+// nombreSaisonAffichee/phaseAffichee cote server.js), donc "= 1" cible
+// precisement la Saison 1 affichee, jamais une saison bots anterieure au
+// decalage d'affichage.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_retrait_capitaines_saison1_20260918 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_retrait_capitaines_saison1_20260918 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const capitaines = db.prepare('DELETE FROM coupe_capitaines WHERE saison = 1').run();
+    const candidatures = db.prepare('DELETE FROM coupe_candidatures WHERE saison = 1').run();
+    const votes = db.prepare('DELETE FROM coupe_votes WHERE saison = 1').run();
+    console.log('[patch_retrait_capitaines_saison1_20260918] capitaines/candidatures/votes retires :',
+        capitaines.changes, candidatures.changes, votes.changes);
+    db.prepare('UPDATE jeu_etat SET patch_retrait_capitaines_saison1_20260918 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
