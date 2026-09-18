@@ -1514,4 +1514,52 @@ if (db.prepare('SELECT patch_retrait_capitaines_saison1_20260918 AS p FROM jeu_e
     db.prepare('UPDATE jeu_etat SET patch_retrait_capitaines_saison1_20260918 = 1 WHERE id = 1').run();
 }
 
+// Rattrapage RETROACTIF de l'erosion des automatismes sur un entrainement de surface
+// (demande explicite de l'utilisateur, 2026-09-18, a la suite du correctif de
+// executerAvancementSemaine dans server.js) : avant ce correctif, le changement de
+// semaine qui creditait un entrainement de surface (+15) retirait aussitot 5 sur cette
+// meme surface (net +10). Le journal hebdomadaire garde l'automatisme avant/apres de
+// chaque surface : une ligne dont action_prevue = surface_X ET dont apres ==
+// (credite - 5), avec credite = avant > 15 ? 30 : avant + 15, est PRECISEMENT une
+// transition victime de ce bug - aucune ligne deja correcte (apres == credite, ex.
+// produite apres le correctif) n'est jamais retouchee. Chaque ligne rend +5 a la
+// valeur COURANTE de la surface (plafond 30). Limite aux lignes de la saison en
+// cours : appliquerResetPreSaison remet tous les automatismes a 0 a chaque nouvelle
+// saison, un rattrapage sur une saison anterieure ajouterait des points de nulle part.
+// Approximation assumee : un plancher a 0 ou un plafond a 30 atteint depuis pourrait
+// absorber une partie des 5 points, ce qui ne peut que sous-restituer, jamais depasser
+// 30 (garanti par le plafond).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_automatismes_retroactif_20260918 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_automatismes_retroactif_20260918 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const { LONGUEUR_SAISON } = require('./calendrier-tournois');
+    const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
+    const debutSaison = semaineActuelle - ((semaineActuelle - 1) % LONGUEUR_SAISON);
+    const lignes = db.prepare(`
+        SELECT player_id, semaine, action_prevue,
+               automatismes_dur_avant, automatismes_dur_apres,
+               automatismes_terre_avant, automatismes_terre_apres,
+               automatismes_herbe_avant, automatismes_herbe_apres
+        FROM journal_semaine_joueur
+        WHERE action_prevue IN ('surface_dur', 'surface_terre', 'surface_herbe') AND semaine >= ?
+    `).all(debutSaison);
+    let corrigees = 0;
+    lignes.forEach(function (ligne) {
+        const surf = ligne.action_prevue.replace('surface_', '');
+        const avant = ligne['automatismes_' + surf + '_avant'];
+        const apres = ligne['automatismes_' + surf + '_apres'];
+        if (avant === null || apres === null) return;
+        const credite = avant > 15 ? 30 : Math.min(30, avant + 15);
+        if (apres !== credite - 5) return;
+        // surf vient de la liste blanche ci-dessus (dur/terre/herbe), jamais d'une saisie
+        const col = 'surface_' + surf + '_automatismes';
+        const r = db.prepare('UPDATE players SET ' + col + ' = MIN(30, ' + col + ' + 5) WHERE id = ?').run(ligne.player_id);
+        if (r.changes > 0) {
+            corrigees++;
+            console.log('[patch_automatismes_retroactif_20260918] player ' + ligne.player_id + ' semaine ' + ligne.semaine + ' : +5 sur ' + surf);
+        }
+    });
+    console.log('[patch_automatismes_retroactif_20260918] transitions rattrapees :', corrigees, '/', lignes.length, 'lignes d\'entrainement de surface examinees');
+    db.prepare('UPDATE jeu_etat SET patch_automatismes_retroactif_20260918 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
