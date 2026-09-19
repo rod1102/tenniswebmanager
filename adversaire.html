@@ -9,7 +9,7 @@
     <title>Adversaire — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260919">
+    <link rel="stylesheet" href="style.css?v=20260919b">
 </head>
 <body>
     <div class="dashboard-page">
@@ -86,6 +86,14 @@
         function flagImg(code) {
             if (!code) return '';
             return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        // Le pseudo d'un coach est une saisie libre (jamais nettoyee a l'inscription) :
+        // a echapper avant de l'inserer dans du HTML.
+        function echapperHtml(texte) {
+            return String(texte).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
         }
 
         // Icone generique (dessin original, pas d'image de vrai trophee - question de
@@ -381,9 +389,16 @@
             if (typeAdversaire === 'reel' && m.matchId && m.tournoi) {
                 carte.dataset.matchId = m.matchId;
                 const classementTxt = m.adversaireClassement ? `<span class="match-card-adversaire-classement">#${m.adversaireClassement}</span>` : '';
+                // Coach de l'adversaire (vrai joueur uniquement) en petit, entre
+                // parentheses, apres le classement - echappe car le pseudo est une saisie
+                // libre (demande explicite de l'utilisateur, 2026-09-19).
+                const coachTxt = m.adversaireCoach ? `<span class="match-card-adversaire-coach">(${echapperHtml(m.adversaireCoach)})</span>` : '';
                 const nomAdversaireHtml = lienVersAdversaireMatch(formaterNomComplet(m.adversaireNom), m.adversairePlayerId, m.adversaireRivalId);
+                // Bot (rival ou lambda, aucun vrai joueur derriere) : meme bleu que dans les
+                // tableaux de tournoi.
+                const classeBot = m.adversairePlayerId ? '' : ' match-card-adversaire-bot';
                 const blocAdversaire = m.adversaireNom
-                    ? `<div class="match-card-adversaire">${flagImg(m.adversaireDrapeau)}<span class="match-card-adversaire-nom">${nomAdversaireHtml}</span>${classementTxt}</div>`
+                    ? `<div class="match-card-adversaire">${flagImg(m.adversaireDrapeau)}<span class="match-card-adversaire-nom${classeBot}">${nomAdversaireHtml}</span>${classementTxt}${coachTxt}</div>`
                     : '';
                 // Trophee = la finale gagnee (dernier tour du tournoi, quel que soit son
                 // format elimination/poules, s'appelle toujours "Finale").
@@ -406,9 +421,10 @@
                     activerModeMatch(m.matchId, 'teletexte', this);
                 });
             } else {
+                const lienAdversaireFiche = lienVersAdversaireMatch(formaterNomComplet(m.adversaireNom), m.adversairePlayerId, m.adversaireRivalId);
                 const nomAdversaire = typeAdversaire === 'reel'
                     ? m.numeroTour
-                    : (lienVersAdversaireMatch(formaterNomComplet(m.adversaireNom), m.adversairePlayerId, m.adversaireRivalId) + ' · ' + m.numeroTour);
+                    : ((m.adversairePlayerId ? lienAdversaireFiche : `<span class="match-card-adversaire-bot">${lienAdversaireFiche}</span>`) + ' · ' + m.numeroTour);
                 carte.innerHTML = `
                     <div class="match-card-head">
                         <div class="match-card-info">

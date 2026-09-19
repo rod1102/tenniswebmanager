@@ -1433,6 +1433,21 @@ h1 {
     color: #8B98A5;
 }
 
+/* Pseudo du coach de l'adversaire, plus discret que le classement (2026-09-19). */
+.match-card-adversaire-coach {
+    font-size: 0.68rem;
+    font-weight: 500;
+    color: #8B98A5;
+}
+
+/* Bot (rival/lambda) : meme bleu et meme italique que .bracket-bot dans les tableaux.
+   Le lien interne herite de la couleur (.lien-adversaire { color: inherit }). */
+.match-card-adversaire-nom.match-card-adversaire-bot,
+.match-card-adversaire-bot {
+    font-style: italic;
+    color: #3E6B99;
+}
+
 .match-card-meta {
     font-size: 0.78rem;
     color: #8B98A5;

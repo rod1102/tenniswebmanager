@@ -8230,6 +8230,20 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
             .sort(function (a, b) { return b - a; });
         const saisonAffichee = req.query.saison ? Number(req.query.saison) : saisonCourante;
 
+        // Pseudo du coach de l'adversaire (2026-09-19, demande explicite de l'utilisateur :
+        // affiche entre parentheses a cote du classement) - uniquement pour un VRAI
+        // joueur (un rival/lambda n'a pas de coach). Un meme adversaire revient souvent
+        // dans l'historique, d'ou le petit cache par joueur.
+        const coachParJoueur = new Map();
+        function coachDeLAdversaire(adversairePlayerId) {
+            if (!adversairePlayerId) return null;
+            if (!coachParJoueur.has(adversairePlayerId)) {
+                const p = db.prepare('SELECT user_id FROM players WHERE id = ?').get(adversairePlayerId);
+                coachParJoueur.set(adversairePlayerId, p ? nomCoach(p.user_id) : null);
+            }
+            return coachParJoueur.get(adversairePlayerId);
+        }
+
         const derniersMatchs = matchsBruts
             .filter(function (m) { return phaseAffichee(m.semaine).numeroSaison === saisonAffichee; })
             .map(function (m) {
@@ -8240,7 +8254,8 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
                     tournoiId: m.tournoi_id, tournoiNom: m.tournoi_nom, tournoiCalendrierId: m.tournoi_calendrier_id, categorie: m.tournoi_categorie,
                     adversaireNom: m.adversaire_nom || null, adversaireDrapeau: drapeau(m.adversaire_nationalite),
                     adversaireClassement: m.adversaire_classement || null,
-                    adversairePlayerId: m.adversaire_player_id || null, adversaireRivalId: m.adversaire_rival_id || null
+                    adversairePlayerId: m.adversaire_player_id || null, adversaireRivalId: m.adversaire_rival_id || null,
+                    adversaireCoach: coachDeLAdversaire(m.adversaire_player_id)
                 };
             });
 
