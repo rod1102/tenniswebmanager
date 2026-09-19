@@ -9,7 +9,7 @@
     <title>Pronostics — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260829">
+    <link rel="stylesheet" href="style.css?v=20260919c">
 </head>
 <body>
     <div class="dashboard-page">
@@ -185,6 +185,10 @@
         // Affichage d'un match REELLEMENT joue (score + vainqueur en gras) - meme
         // logique que nomAffiche dans tournoi-detail.html, sans le concept "estMoi"
         // (pronostics.html n'a pas de playerId de reference).
+        // Petite coche verte a cote du vainqueur d'un match joue (demande explicite de
+        // l'utilisateur, 2026-09-19) - meme rendu que sur la fiche tournoi.
+        const COCHE_VAINQUEUR = '<span class="bracket-check" title="Vainqueur"><svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M2 6.5l2.6 2.6L10 3.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
+
         function nomAfficheMatch(m, cote) {
             const nom = cote === 1 ? m.joueur1_nom : m.joueur2_nom;
             if (!nom) return '<span class="bracket-joueur bracket-bye">BYE</span>';
@@ -196,7 +200,7 @@
             const estVainqueur = m.vainqueur_nom === nom;
             const classe = (estVainqueur ? ' bracket-vainqueur' : '') + (estReel ? ' bracket-autre-reel' : ' bracket-bot');
             const nomHtml = lienAdversaire(`${drap ? flagImg(drap) + ' ' : ''}${formaterNomComplet(nom)}`, estReel, pId, rId);
-            return `<span class="bracket-joueur${classe}">${nomHtml}</span><span class="bracket-seed">${seed ? '[' + seed + ']' : ''}</span>`;
+            return `<span class="bracket-joueur${classe}">${nomHtml}${estVainqueur ? COCHE_VAINQUEUR : ''}</span><span class="bracket-seed">${seed ? '[' + seed + ']' : ''}</span>`;
         }
 
         function carteReelle(m, roundIndex, ordre) {

@@ -2475,6 +2475,16 @@ table.points td.pts {
     font-weight: 700;
 }
 
+/* Petite coche verte a cote du vainqueur d'un match joue (fiche tournoi et
+   Pronostics) - meme vert que le fond des victoires. */
+.bracket-check {
+    display: inline-block;
+    margin-left: 6px;
+    color: #5CC57F;
+    line-height: 1;
+    vertical-align: -1px;
+}
+
 .bracket-moi {
     color: #D4F000;
     font-weight: 700;

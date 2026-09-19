@@ -9,7 +9,7 @@
     <title>Tournoi — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260829">
+    <link rel="stylesheet" href="style.css?v=20260919c">
 </head>
 <body>
     <div class="dashboard-page">
@@ -117,6 +117,10 @@
             const prenom = nomComplet.slice(0, i).toLowerCase().replace(/(^|[\s'-])\p{L}/gu, function (c) { return c.toUpperCase(); });
             return prenom + ' ' + nomComplet.slice(i + 1).toUpperCase();
         }
+
+        // Petite coche verte a cote du vainqueur d'un match joue dans le tableau
+        // (demande explicite de l'utilisateur, 2026-09-19).
+        const COCHE_VAINQUEUR = '<span class="bracket-check" title="Vainqueur"><svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M2 6.5l2.6 2.6L10 3.4" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"/></svg></span>';
 
         // Un adversaire a identite stable (vrai joueur d'un autre coach ou rival
         // persistant du roster de classement) devient un lien vers sa fiche - y
@@ -413,7 +417,7 @@
                 const classes = (estVainqueur ? ' bracket-vainqueur' : '') + classeJoueur(estMoi, estReel);
                 const rangTxt = rang ? ` <span class="bracket-rang">(${rang})</span>` : '';
                 const nomHtml = lienAdversaire(`${flagImg(drap)} ${formaterNomComplet(nom)}${rangTxt}`, estReel, pId, rId);
-                return `<span class="bracket-joueur${classes}">${nomHtml}</span><span class="bracket-seed">${seed ? '[' + seed + ']' : ''}</span>`;
+                return `<span class="bracket-joueur${classes}">${nomHtml}${estVainqueur ? COCHE_VAINQUEUR : ''}</span><span class="bracket-seed">${seed ? '[' + seed + ']' : ''}</span>`;
             }
 
             const parTour = {};
