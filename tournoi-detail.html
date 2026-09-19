@@ -803,6 +803,25 @@
             });
         }
 
+        // Bouton Pause/Reprendre d'un Live (demande explicite de l'utilisateur,
+        // 2026-09-19) : Pause = arret du minuteur (arreterLive), Reprendre = nouveau
+        // minuteur au meme rythme, sur l'index deja atteint (la position dans le deroule
+        // vit dans la fermeture de "avancer", jamais reinitialisee).
+        function brancherPauseLive(pauseBtn, cle, avancer) {
+            let enPause = false;
+            pauseBtn.addEventListener('click', function () {
+                if (enPause) {
+                    enPause = false;
+                    pauseBtn.textContent = 'Pause';
+                    liveEnCours[cle] = setInterval(avancer, 1500);
+                } else {
+                    enPause = true;
+                    pauseBtn.textContent = 'Reprendre';
+                    arreterLive(cle);
+                }
+            });
+        }
+
         function afficherLiveMatch(viewer, match, matchId) {
             if (!match.estSemaineActuelle) {
                 viewer.innerHTML = `<div class="match-hint">Le direct n'est plus disponible pour ce match (semaine passée). Utilise Résultat direct ou Téletexte.</div>`;
@@ -814,12 +833,16 @@
             viewer.innerHTML = `
                 <div class="live-score" id="live-score-${matchId}">C'est parti...</div>
                 <div class="live-log" id="live-log-${matchId}"></div>
-                <button class="cta cta-secondary live-skip-btn" id="live-skip-${matchId}" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
+                <div class="live-controles" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+                    <button class="cta cta-secondary live-pause-btn" id="live-pause-${matchId}" style="padding:8px 16px; font-size:0.75rem;">Pause</button>
+                    <button class="cta cta-secondary live-skip-btn" id="live-skip-${matchId}" style="padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
+                </div>
             `;
 
             const scoreDiv = document.getElementById('live-score-' + matchId);
             const logDiv = document.getElementById('live-log-' + matchId);
             const skipBtn = document.getElementById('live-skip-' + matchId);
+            const pauseBtn = document.getElementById('live-pause-' + matchId);
 
             let index = 0;
 
@@ -836,6 +859,7 @@
                     scoreDiv.textContent = evt.texte;
                     arreterLive(matchId);
                     skipBtn.style.display = 'none';
+                    pauseBtn.style.display = 'none';
                 }
             }
 
@@ -850,6 +874,7 @@
 
             avancer();
             liveEnCours[matchId] = setInterval(avancer, 1500);
+            brancherPauseLive(pauseBtn, matchId, avancer);
 
             skipBtn.addEventListener('click', function () {
                 arreterLive(matchId);
@@ -920,12 +945,16 @@
             viewer.innerHTML = `
                 <div class="live-score" id="live-score-${cle}">C'est parti...</div>
                 <div class="live-log" id="live-log-${cle}"></div>
-                <button class="cta cta-secondary live-skip-btn" id="live-skip-${cle}" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
+                <div class="live-controles" style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+                    <button class="cta cta-secondary live-pause-btn" id="live-pause-${cle}" style="padding:8px 16px; font-size:0.75rem;">Pause</button>
+                    <button class="cta cta-secondary live-skip-btn" id="live-skip-${cle}" style="padding:8px 16px; font-size:0.75rem;">Passer au résultat final</button>
+                </div>
             `;
 
             const scoreDiv = document.getElementById('live-score-' + cle);
             const logDiv = document.getElementById('live-log-' + cle);
             const skipBtn = document.getElementById('live-skip-' + cle);
+            const pauseBtn = document.getElementById('live-pause-' + cle);
 
             let index = 0;
 
@@ -942,6 +971,7 @@
                     scoreDiv.textContent = evt.texte;
                     arreterLive(cle);
                     skipBtn.style.display = 'none';
+                    pauseBtn.style.display = 'none';
                 }
             }
 
@@ -956,6 +986,7 @@
 
             avancer();
             liveEnCours[cle] = setInterval(avancer, 1500);
+            brancherPauseLive(pauseBtn, cle, avancer);
 
             skipBtn.addEventListener('click', function () {
                 arreterLive(cle);
