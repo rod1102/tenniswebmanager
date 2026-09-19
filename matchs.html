@@ -818,7 +818,11 @@
                     <span class="tag-you">Toi</span>
                     <span class="mx-status-live" hidden><span class="status-dot"></span>En direct</span>
                 </div>
-                ${squeletteTuileScore(formaterNom(match.prenom, match.nom), match.joueur_drapeau, match.classement, formaterNomComplet(match.adversaire_nom || 'Adversaire'), match.adversaire_drapeau, match.adversaire_classement)}
+                ${squeletteTuileScore(
+                    `<a class="lien-adversaire" href="joueur.html?type=${match.type}">${formaterNom(match.prenom, match.nom)}</a>`,
+                    match.joueur_drapeau, match.classement,
+                    lienVersAdversaireMatch(formaterNomComplet(match.adversaire_nom || 'Adversaire'), match.adversaire_player_id, match.adversaire_rival_id),
+                    match.adversaire_drapeau, match.adversaire_classement)}
                 <div class="mx-tile-meta">${nomContexte ? nomContexte + ' · ' : ''}${match.numero_tour || ''}</div>
                 <button type="button" class="cta cta-primary mx-launch-btn" style="width:100%; padding:10px 16px; font-size:0.8rem;">Lancer le match</button>
                 <button type="button" class="mx-skip-btn" hidden>Passer au score final</button>
@@ -850,7 +854,7 @@
                 carte.dataset.filtreGroupe = 'autre';
                 carte.dataset.filtreCircuit = tournoi.circuit === 'ATP' ? 'joueur' : 'joueuse';
                 carte.innerHTML = `
-                    <div class="tournoi-card-name">${flagImg(m.joueur1_drapeau)} ${formaterNomComplet(m.joueur1_nom)}${rangHtml(m.joueur1_classement)} vs ${flagImg(m.joueur2_drapeau)} ${formaterNomComplet(m.joueur2_nom)}${rangHtml(m.joueur2_classement)}</div>
+                    <div class="tournoi-card-name">${flagImg(m.joueur1_drapeau)} ${lienVersAdversaireMatch(formaterNomComplet(m.joueur1_nom), m.joueur1_player_id, m.joueur1_rival_id)}${rangHtml(m.joueur1_classement)} vs ${flagImg(m.joueur2_drapeau)} ${lienVersAdversaireMatch(formaterNomComplet(m.joueur2_nom), m.joueur2_player_id, m.joueur2_rival_id)}${rangHtml(m.joueur2_classement)}</div>
                     <div class="match-card-meta">${tournoi.nom} · ${m.numero_tour}${m.score ? ' · ' + m.score : ''}</div>
                 `;
                 return carte;
@@ -865,7 +869,11 @@
                     <span class="tag-circuit">${tournoi.circuit}</span>
                     <span class="mx-status-live" hidden><span class="status-dot"></span>En direct</span>
                 </div>
-                ${squeletteTuileScore(formaterNomComplet(m.joueur1_nom), m.joueur1_drapeau, m.joueur1_classement, formaterNomComplet(m.joueur2_nom), m.joueur2_drapeau, m.joueur2_classement)}
+                ${squeletteTuileScore(
+                    lienVersAdversaireMatch(formaterNomComplet(m.joueur1_nom), m.joueur1_player_id, m.joueur1_rival_id),
+                    m.joueur1_drapeau, m.joueur1_classement,
+                    lienVersAdversaireMatch(formaterNomComplet(m.joueur2_nom), m.joueur2_player_id, m.joueur2_rival_id),
+                    m.joueur2_drapeau, m.joueur2_classement)}
                 <div class="mx-tile-meta">${tournoi.nom} · ${m.numero_tour}</div>
                 <button type="button" class="cta cta-primary mx-launch-btn" style="width:100%; padding:10px 16px; font-size:0.8rem;">Lancer le match</button>
                 <button type="button" class="mx-skip-btn" hidden>Passer au score final</button>
