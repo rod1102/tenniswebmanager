@@ -130,6 +130,16 @@
             return nomHtml;
         }
 
+        // Retourne un score "a-b, c-d" (vu de l'autre joueur) ; un score non numerique
+        // (forfait...) reste tel quel. Sert aux poules, ou la ligne du haut suit l'ordre
+        // du calendrier et non l'ordre joueur1/joueur2 de la base.
+        function miroirScoreClient(score) {
+            const c = score.match(/^(.*?)( \([^)]*\))?$/);
+            const sets = c[1].split(', ');
+            if (!sets.every(function (s) { return /^\d+-\d+$/.test(s); })) return score;
+            return sets.map(function (s) { const p = s.split('-'); return p[1] + '-' + p[0]; }).join(', ') + (c[2] || '');
+        }
+
         function labelsPoints(info) {
             if (info.format === 'poules') return ['Vainqueur', 'Finale', 'Demi-finale', 'Poules'];
             return ['Vainqueur', 'Finale', '1/2 finale', '1/4 finale', '8e de finale', '16e de finale', '32e de finale', '64e de finale'];
@@ -545,7 +555,7 @@
                             <div class="bracket-match">
                                 <div class="bracket-match-row">${ligne1}</div>
                                 <div class="bracket-match-row">${ligne2}</div>
-                                ${joue && joue.score ? `<div class="bracket-score">${joue.score}</div>` : ''}
+                                ${joue && joue.score ? `<div class="bracket-score">${joue.joueur1_id === j1.id ? joue.score : miroirScoreClient(joue.score)}</div>` : ''}
                             </div>
                         </div>
                     `;

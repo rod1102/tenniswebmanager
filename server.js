@@ -5345,6 +5345,28 @@ function miroirScore(score) {
     return setsMiroir + suffixe;
 }
 
+// Version sure de miroirScore pour l'AFFICHAGE : un score non numerique (ex. "Forfait
+// de X (blessure)") est renvoye tel quel, alors que miroirScore le transformerait en
+// "undefined-...".
+function miroirScoreSur(score) {
+    if (!score) return score;
+    const correspondance = score.match(/^(.*?)( \([^)]*\))?$/);
+    const sets = correspondance[1].split(', ');
+    if (!sets.every(function (set) { return /^\d+-\d+$/.test(set); })) return score;
+    return miroirScore(score);
+}
+
+// tournoi_matchs.score est stocke du point de vue du cote "A" du moteur : le joueur
+// REEL s'il n'y en a qu'un des deux (jouerMatchTournoi le simule toujours cote A, meme
+// place en joueur2 du tableau), sinon joueur1. Un tableau affiche pourtant le score du
+// point de vue du joueur1 (celui du HAUT) : un vrai joueur en bas du tableau qui gagne
+// 6-3, 6-0 doit donc y apparaitre "3-6, 0-6" (demande explicite de l'utilisateur,
+// 2026-09-19). Ne touche pas au stockage : d'autres calculs (poules, face-a-face)
+// s'appuient sur cette convention.
+function scoreVuDeJ1(score, j1EstReel, j2EstReel) {
+    return (j2EstReel && !j1EstReel) ? miroirScoreSur(score) : score;
+}
+
 function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
     if (j1.est_reel && j2.est_reel) {
         return jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex);
@@ -6412,6 +6434,7 @@ app.get('/api/tournois/:id', (req, res) => {
             ORDER BY tournoi_matchs.ordre
         `).all(id);
         matchs.forEach(function (m) {
+            m.score = scoreVuDeJ1(m.score, m.joueur1_est_reel, m.joueur2_est_reel);
             m.joueur1_drapeau = drapeau(m.joueur1_nationalite);
             m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
         });
@@ -7142,6 +7165,7 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
                 ORDER BY tournoi_matchs.ordre
             `).all(instanceRow.id);
             matchs.forEach(function (m) {
+                m.score = scoreVuDeJ1(m.score, m.joueur1_est_reel, m.joueur2_est_reel);
                 m.joueur1_drapeau = drapeau(m.joueur1_nationalite);
                 m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
                 m.joueur1_rang = rangDe(rangs, m.joueur1_rival_id, m.joueur1_est_reel, m.joueur1_player_id);
@@ -8365,7 +8389,11 @@ app.get('/api/adversaire/rival/:rivalId', (req, res) => {
             const adversaireNom = rivalEstJ1 ? m.j2_nom : m.j1_nom;
             const adversairePlayerId = rivalEstJ1 ? m.j2_player_id : m.j1_player_id;
             const adversaireRivalId = rivalEstJ1 ? m.j2_rival_id : m.j1_rival_id;
-            const score = rivalEstJ1 ? m.score : miroirScore(m.score);
+            // Score du point de vue du joueur1 d'abord (cf. scoreVuDeJ1), puis retourne si
+            // le rival est en position joueur2 - avant, m.score etait suppose deja vu du
+            // joueur1, ce qui inversait a tort un bot joueur1 face a un vrai joueur joueur2.
+            const scoreJ1 = scoreVuDeJ1(m.score, !!m.j1_player_id, !!m.j2_player_id);
+            const score = rivalEstJ1 ? scoreJ1 : miroirScoreSur(scoreJ1);
             return {
                 tournoiId: m.tournoi_id, tournoiCalendrierId: m.tournoi_calendrier_id,
                 tournoiNom: m.tournoi_nom, semaine: m.semaine, positionSemaine: positionSemaineAffichee(m.semaine),
@@ -8953,6 +8981,7 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
             // l'utilisateur pour le Multiplex (2026-09-05).
             const rangsCircuit = calculerRangsLiveGlobal(t.circuit);
             matchs.forEach(function (m) {
+                m.score = scoreVuDeJ1(m.score, !!m.joueur1_player_id, !!m.joueur2_player_id);
                 m.joueur1_drapeau = drapeau(m.joueur1_nationalite);
                 m.joueur2_drapeau = drapeau(m.joueur2_nationalite);
                 m.joueur1_classement = rangsCircuit.get(m.joueur1_player_id ? 'joueur:' + m.joueur1_player_id : 'rival:' + m.joueur1_rival_id) || null;
