@@ -1373,6 +1373,19 @@ h1 {
     border-color: #D4F000;
 }
 
+/* Teinte tres legere selon l'issue du match, superposee au fond existant (gradient
+   plutot que background-color, pour conserver le voile blanc de .match-card).
+   Uniquement sur les pages ou le resultat est deja affiche d'emblee (historique d'une
+   fiche joueur) - jamais sur la page Matchs, qui cache le resultat tant qu'on n'a pas
+   clique (anti-spoiler). Demande explicite de l'utilisateur, 2026-09-19. */
+.match-card.match-card-victoire {
+    background-image: linear-gradient(rgba(92, 197, 127, 0.09), rgba(92, 197, 127, 0.09));
+}
+
+.match-card.match-card-defaite {
+    background-image: linear-gradient(rgba(226, 75, 74, 0.09), rgba(226, 75, 74, 0.09));
+}
+
 .match-card-head {
     display: flex;
     align-items: center;

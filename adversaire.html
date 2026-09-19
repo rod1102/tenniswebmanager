@@ -9,7 +9,7 @@
     <title>Adversaire — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260829">
+    <link rel="stylesheet" href="style.css?v=20260919">
 </head>
 <body>
     <div class="dashboard-page">
@@ -367,7 +367,11 @@
 
         function creerCarteMatchAdversaire(m) {
             const carte = document.createElement('div');
-            carte.className = 'match-card';
+            // Fond vert/rouge tres leger selon l'issue (demande explicite de
+            // l'utilisateur, 2026-09-19) - meme critere que le libelle Victoire/Defaite
+            // affiche dans la carte, donc jamais de spoiler ici (le resultat est deja
+            // visible d'emblee sur cette page).
+            carte.className = 'match-card ' + (m.victoire ? 'match-card-victoire' : 'match-card-defaite');
 
             // Le badge Kine ne reflete jamais que la propre condition du joueur/rival
             // de cette fiche (matchs.kine_intervenu est calcule cote serveur par
