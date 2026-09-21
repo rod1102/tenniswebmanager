@@ -7183,7 +7183,11 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
                 const estMonMatch = m.joueur1_player_id === Number(playerId) || m.joueur2_player_id === Number(playerId);
                 const aUnDeroulePublic = !!m.evenements || !!m.match_id || !!m.match_id_j2;
                 if (m.joueur2_player_id === Number(playerId)) {
-                    m.match_id = m.match_id_j2;
+                    // Reel-vs-reel : ma ligne est match_id_j2. Reel-vs-bot avec mon joueur tire
+                    // en position joueur2 : match_id_j2 est NULL et ma ligne reste match_id
+                    // (elle pointe toujours vers l'unique vrai joueur) - l'ecraser par NULL
+                    // faisait perdre a MON match les 3 modes Live/Resultat/Teletexte.
+                    m.match_id = m.match_id_j2 || m.match_id;
                 } else if (m.joueur1_player_id !== Number(playerId)) {
                     m.match_id = null;
                 }
