@@ -2029,12 +2029,15 @@ function joueursEngagesCoupeDavis(player, debut, fin) {
     const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
     const ties = db.prepare(`
         SELECT * FROM coupe_equipes
-        WHERE statut != 'termine' AND saison >= 2 AND semaine BETWEEN ? AND ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?)
+        WHERE statut != 'termine' AND semaine BETWEEN ? AND ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?)
     `).all(debut, fin, circuit, player.nationalite, player.nationalite);
 
     const nomCoupe = circuit === 'ATP' ? 'Coupe Davis' : 'Fed Cup';
     const resultats = [];
     ties.forEach(function (tie) {
+        // Saison AFFICHEE de la semaine du match (pas tie.saison, qui peut etre fausse sur
+        // une rencontre residuelle) : pas de Coupe Davis/Fed Cup en Saison 1.
+        if (phaseAffichee(tie.semaine).numeroSaison <= 1) return;
         const compo = db.prepare('SELECT * FROM coupe_composition WHERE coupe_equipe_id = ? AND nation = ?').get(tie.id, player.nationalite);
         if (!compo) return;
         const postes = [['joueur_a_est_reel', 'joueur_a_id'], ['joueur_b_est_reel', 'joueur_b_id'], ['double_j1_est_reel', 'double_j1_id'], ['double_j2_est_reel', 'double_j2_id']];

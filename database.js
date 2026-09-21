@@ -1566,18 +1566,24 @@ if (db.prepare('SELECT patch_automatismes_retroactif_20260918 AS p FROM jeu_etat
 // signale par l'utilisateur : "Coupe Davis" affichee en S4 dans la programmation
 // alors qu'il n'y en a pas en Saison 1). Reliquat d'un tableau cree avant la regle
 // "pas de Coupe Davis en Saison 1" ou avant le passage a 52 semaines.
-try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_retrait_coupe_saison1_20260921 INTEGER DEFAULT 0"); } catch (e) {}
-if (db.prepare('SELECT patch_retrait_coupe_saison1_20260921 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
-    const ids = db.prepare('SELECT id FROM coupe_equipes WHERE saison = 1').all().map(function (r) { return r.id; });
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_retrait_coupe_saison1_v2_20260921 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_retrait_coupe_saison1_v2_20260921 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    // Selon la saison AFFICHEE de la semaine du match (tie.saison peut etre fausse sur un
+    // reliquat, cas de Nikola STAKHAN : rencontre en S4 de la Saison 1 mais saison != 1).
+    const { phaseDeSemaine } = require('./calendrier-tournois');
+    const decalage = (db.prepare('SELECT saison_offset FROM jeu_etat WHERE id = 1').get().saison_offset) || 0;
+    const ids = db.prepare('SELECT id, semaine FROM coupe_equipes').all()
+        .filter(function (r) { return phaseDeSemaine(r.semaine).numeroSaison - decalage <= 1; })
+        .map(function (r) { return r.id; });
     ids.forEach(function (id) {
         db.prepare('DELETE FROM coupe_composition WHERE coupe_equipe_id = ?').run(id);
         db.prepare('DELETE FROM coupe_rubbers WHERE coupe_equipe_id = ?').run(id);
         db.prepare('DELETE FROM coupe_styles WHERE coupe_equipe_id = ?').run(id);
     });
-    db.prepare('DELETE FROM coupe_equipes WHERE saison = 1').run();
+    ids.forEach(function (id) { db.prepare('DELETE FROM coupe_equipes WHERE id = ?').run(id); });
     db.prepare('DELETE FROM coupe_groupe_mondial WHERE saison = 1').run();
-    console.log('[patch_retrait_coupe_saison1_20260921] rencontres de Saison 1 retirees :', ids.length);
-    db.prepare('UPDATE jeu_etat SET patch_retrait_coupe_saison1_20260921 = 1 WHERE id = 1').run();
+    console.log('[patch_retrait_coupe_saison1_v2_20260921] rencontres de Saison 1 retirees :', ids.length);
+    db.prepare('UPDATE jeu_etat SET patch_retrait_coupe_saison1_v2_20260921 = 1 WHERE id = 1').run();
 }
 
 module.exports = db;
