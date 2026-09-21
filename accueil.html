@@ -282,16 +282,19 @@
                 ? '<p class="match-hint" style="margin:12px 0 0;">En attente de validation par un administrateur.</p>'
                 : '';
 
-            // Encadre rouge tant que des XP en reserve n'ont pas ete programmees (aucune
-            // repartition validee) - disparait des que la repartition est enregistree, ce
-            // qui permet au coach de verifier que ses ordres d'XP sont bien passes (demande
-            // explicite de l'utilisateur, 2026-09-21). Independant du planning de la semaine.
-            let xpProgrammee = false;
+            // Encadre rouge tant que des XP en reserve n'ont pas ete TOUTES programmees
+            // (repartition absente ou partielle) - disparait une fois la totalite repartie,
+            // ce qui permet au coach de verifier que ses ordres d'XP sont bien passes.
+            // Meme dependance au planning que le rappel textuel (afficherBadgeAttente) : une
+            // fois les ordres de la semaine prochaine valides (plan choisi ou tournoi en
+            // cours), il n'a plus lieu d'etre. Demande explicite de l'utilisateur, 2026-09-21.
+            let xpProgrammee = 0;
             try {
                 const rep = JSON.parse(player.xp_repartition_en_attente || '{}');
-                xpProgrammee = Object.keys(rep).some(function (cle) { return rep[cle] > 0; });
-            } catch (e) { xpProgrammee = false; }
-            const xpNonAttribuee = player.statut === 'valide' && player.points_experience > 0 && !xpProgrammee
+                Object.keys(rep).forEach(function (cle) { xpProgrammee += Number(rep[cle]) > 0 ? Number(rep[cle]) : 0; });
+            } catch (e) { xpProgrammee = 0; }
+            const planningDejaValide = semaineInfo && semaineInfo.semaineProchaine.libelle !== 'Pas encore défini';
+            const xpNonAttribuee = player.statut === 'valide' && player.points_experience > xpProgrammee && !planningDejaValide
                 ? '<div class="xp-non-attribuee">!! Points d\'expérience non attribués</div>'
                 : '';
 
