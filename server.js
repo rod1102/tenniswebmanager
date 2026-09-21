@@ -4174,6 +4174,13 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
         });
         let jeuxA = 0, jeuxB = 0;
         while (true) {
+            // Serveur annonce au debut de CHAQUE jeu (Live et Teletexte), pas seulement au
+            // debut du set - demande explicite de l'utilisateur, 2026-09-21. Pas pour le jeu
+            // decisif (tie-break), qui a sa propre annonce. N'a pas de jeuxA/jeuxB : ignore
+            // par le suivi de score (Live, Multiplex).
+            if (!(jeuxA === 6 && jeuxB === 6)) {
+                evenements.push({ type: 'jeu_debut', texte: 'Service : ' + nomJoueur(serveur), numeroSet, serveur });
+            }
             // Tirage kine/abandon AVANT ce jeu (pas apres) : l'alerte concerne le jeu
             // qui va se jouer, pas le suivant - elle s'affiche donc avant l'annonce de
             // son resultat, et son malus (le cas echeant) s'applique des ce jeu-la.
