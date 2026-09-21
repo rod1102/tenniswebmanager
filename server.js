@@ -1142,6 +1142,37 @@ app.get('/api/admin/chercher-joueur', (req, res) => {
     }
 });
 
+// Diagnostic (admin) de la planification d'un joueur reel : ce qui a ete soumis
+// (planning_historique, trace permanente), ce qui est encore en attente (plannings),
+// ce que le moteur a reellement credite (journal_semaine_joueur) et pourquoi une
+// semaine pourrait etre consideree "engagee" (tournoi tire non termine) - sert a
+// comprendre un entrainement "pas pris en compte" (2026-09-21, joueur id 121).
+app.get('/api/admin/diagnostic-planning/:playerId', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const id = Number(req.params.playerId);
+        const joueur = db.prepare('SELECT id, prenom, nom, type, user_id, points_experience, condition FROM players WHERE id = ?').get(id);
+        if (!joueur) return res.status(404).json({ error: 'Joueur introuvable.' });
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        res.json({
+            success: true, joueur, semaineActuelle: etat.semaine_actuelle, phase: phaseAffichee(etat.semaine_actuelle),
+            soumissions: db.prepare('SELECT semaine, action, horodatage FROM planning_historique WHERE player_id = ? ORDER BY id DESC LIMIT 30').all(id),
+            planningsEnAttente: db.prepare('SELECT semaine, action FROM plannings WHERE player_id = ? ORDER BY semaine').all(id),
+            journal: db.prepare('SELECT semaine, action_prevue, tournoi_nom, xp_credite, horodatage FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine DESC LIMIT 12').all(id),
+            tournoisEngages: db.prepare(`
+                SELECT t.id, t.nom, t.semaine, t.statut, t.tour_actuel, tj.tour_elimine
+                FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+                WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut != 'termine' ORDER BY t.semaine
+            `).all(id)
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Diagnostic (admin) du niveau des bots d'un tournoi : moyenne du niveau de jeu
 // des joueurs reels REELLEMENT INSCRITS (celle qui calibre les bots), moyenne du
 // circuit (repli), bande 50-70 % qui en decoule, et niveau stocke de chaque bot
