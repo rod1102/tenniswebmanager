@@ -8830,7 +8830,7 @@ function calculerBadges(circuit, cle, filtreColonne, id) {
             estRecord: intouchable === maxSequentiels.maxIntouchable },
         { id: 'serie_victoires', nom: 'Série de victoires', description: 'Meilleure série de matchs gagnés à la suite', valeur: meilleureSerie, seuils: [5, 10, 15, 25, 50],
             estRecord: meilleureSerie === maxSequentiels.maxSerie },
-        { id: 'sang_froid', nom: 'Sang-froid', description: 'Balles de break sauvées, cumulées sur la carrière', valeur: ballesBreakSauvees, seuils: [10, 25, 50, 100, 200],
+        { id: 'sang_froid', nom: 'Sang-froid', description: 'Balles de break sauvées, cumulées sur la carrière', valeur: ballesBreakSauvees, seuils: [40, 100, 200, 400, 800],
             estRecord: filtreColonne === 'player_id' && ballesBreakSauvees === R.sangFroid }
     ]);
 }
