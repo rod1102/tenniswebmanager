@@ -176,8 +176,28 @@
                 return;
             }
 
+            // Recherche : ne garde que les confrontations ou l'un des deux joueurs correspond
+            // (prenom, nom ou "prenom nom", sans tenir compte des accents/majuscules).
+            const normaliser = function (t) { return String(t || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim(); };
             container.innerHTML = '<p class="match-hint" style="margin-bottom:16px;">Uniquement les confrontations entre personnages de vrais coachs (pas les rivaux ni les adversaires jetables des tournois).</p>' +
-                data.confrontations.map(carteConfrontation).join('');
+                '<div class="form-group" style="margin-bottom:16px;"><input type="text" id="recherche-confrontations" placeholder="Rechercher un joueur (ne montrer que ses confrontations)" autocomplete="off"></div>' +
+                '<div id="liste-confrontations"></div>';
+
+            const liste = document.getElementById('liste-confrontations');
+            function afficher() {
+                const recherche = normaliser(document.getElementById('recherche-confrontations').value);
+                const filtrees = data.confrontations.filter(function (c) {
+                    if (!recherche) return true;
+                    return [c.joueur1, c.joueur2].some(function (j) {
+                        return (normaliser(j.prenom + ' ' + j.nom) + ' ' + normaliser(j.nom + ' ' + j.prenom)).indexOf(recherche) !== -1;
+                    });
+                });
+                liste.innerHTML = filtrees.length > 0
+                    ? filtrees.map(carteConfrontation).join('')
+                    : '<p class="match-hint">Aucune confrontation pour ce joueur.</p>';
+            }
+            document.getElementById('recherche-confrontations').addEventListener('input', afficher);
+            afficher();
         }
 
         function panneauTop10(titre, liste, type) {
