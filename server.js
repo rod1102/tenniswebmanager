@@ -1153,14 +1153,18 @@ app.get('/api/admin/diagnostic-planning/:playerId', (req, res) => {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
         const id = Number(req.params.playerId);
-        const joueur = db.prepare('SELECT id, prenom, nom, type, user_id, points_experience, condition FROM players WHERE id = ?').get(id);
+        const joueur = db.prepare('SELECT id, prenom, nom, type, user_id, points_experience, condition, xp_repartition_en_attente, service, retour, coup_droit_revers, effet, volee, deplacement, puissance, resistance FROM players WHERE id = ?').get(id);
         if (!joueur) return res.status(404).json({ error: 'Joueur introuvable.' });
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         res.json({
             success: true, joueur, semaineActuelle: etat.semaine_actuelle, phase: phaseAffichee(etat.semaine_actuelle),
             soumissions: db.prepare('SELECT semaine, action, horodatage FROM planning_historique WHERE player_id = ? ORDER BY id DESC LIMIT 30').all(id),
             planningsEnAttente: db.prepare('SELECT semaine, action FROM plannings WHERE player_id = ? ORDER BY semaine').all(id),
-            journal: db.prepare('SELECT semaine, action_prevue, tournoi_nom, xp_credite, horodatage FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine DESC LIMIT 12').all(id),
+            journal: db.prepare(`SELECT semaine, action_prevue, tournoi_nom, xp_credite, horodatage,
+                service_avant, service_apres, retour_avant, retour_apres, coup_droit_revers_avant, coup_droit_revers_apres,
+                effet_avant, effet_apres, volee_avant, volee_apres, deplacement_avant, deplacement_apres,
+                puissance_avant, puissance_apres, resistance_avant, resistance_apres
+                FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine DESC LIMIT 12`).all(id),
             tournoisEngages: db.prepare(`
                 SELECT t.id, t.nom, t.semaine, t.statut, t.tour_actuel, tj.tour_elimine
                 FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
