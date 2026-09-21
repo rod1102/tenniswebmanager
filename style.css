@@ -825,6 +825,18 @@ h1 {
     color: #5CC57F;
 }
 
+/* Encadre rouge de la page d'accueil : XP en reserve pas encore programmees. */
+.xp-non-attribuee {
+    margin: 12px auto 0;
+    padding: 8px 12px;
+    border: 2px solid #E24B4A;
+    border-radius: 4px;
+    background: rgba(226, 75, 74, 0.12);
+    color: #E24B4A;
+    font-size: 0.8rem;
+    font-weight: 700;
+}
+
 .planning-tournoi-lock {
     font-size: 0.78rem;
     font-weight: 700;

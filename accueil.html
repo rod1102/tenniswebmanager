@@ -282,6 +282,19 @@
                 ? '<p class="match-hint" style="margin:12px 0 0;">En attente de validation par un administrateur.</p>'
                 : '';
 
+            // Encadre rouge tant que des XP en reserve n'ont pas ete programmees (aucune
+            // repartition validee) - disparait des que la repartition est enregistree, ce
+            // qui permet au coach de verifier que ses ordres d'XP sont bien passes (demande
+            // explicite de l'utilisateur, 2026-09-21). Independant du planning de la semaine.
+            let xpProgrammee = false;
+            try {
+                const rep = JSON.parse(player.xp_repartition_en_attente || '{}');
+                xpProgrammee = Object.keys(rep).some(function (cle) { return rep[cle] > 0; });
+            } catch (e) { xpProgrammee = false; }
+            const xpNonAttribuee = player.statut === 'valide' && player.points_experience > 0 && !xpProgrammee
+                ? '<div class="xp-non-attribuee">!! Points d\'expérience non attribués</div>'
+                : '';
+
             const semaineTxt = semaineInfo
                 ? `<p class="match-hint" style="margin:8px 0 0;">Semaine en cours : ${semaineInfo.semaineActuelle.libelle}<br>Semaine prochaine : ${semaineInfo.semaineProchaine.libelle}</p>`
                 : '';
@@ -293,6 +306,7 @@
                     <div class="player-summary-name">${formaterNom(player.prenom, player.nom)}</div>
                     <p class="match-hint" style="margin:8px 0 16px;">${flagImg(player.drapeau)} ${player.nationalite}</p>
                     ${enAttente}
+                    ${xpNonAttribuee}
                     ${semaineTxt}
                     <a href="joueur.html?type=${type}" class="cta cta-primary" style="padding:10px 20px; font-size:0.8rem; margin-top:12px;">Voir la fiche</a>
                 </div>
