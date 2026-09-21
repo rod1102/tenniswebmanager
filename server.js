@@ -1160,6 +1160,7 @@ app.get('/api/admin/diagnostic-planning/:playerId', (req, res) => {
             success: true, joueur, semaineActuelle: etat.semaine_actuelle, phase: phaseAffichee(etat.semaine_actuelle),
             soumissions: db.prepare('SELECT semaine, action, horodatage FROM planning_historique WHERE player_id = ? ORDER BY id DESC LIMIT 30').all(id),
             planningsEnAttente: db.prepare('SELECT semaine, action FROM plannings WHERE player_id = ? ORDER BY semaine').all(id),
+            validationsXp: db.prepare('SELECT semaine, repartition, total, points_experience, horodatage FROM xp_repartition_historique WHERE player_id = ? ORDER BY id DESC LIMIT 20').all(id),
             journal: db.prepare(`SELECT semaine, action_prevue, tournoi_nom, xp_credite, horodatage,
                 service_avant, service_apres, retour_avant, retour_apres, coup_droit_revers_avant, coup_droit_revers_apres,
                 effet_avant, effet_apres, volee_avant, volee_apres, deplacement_avant, deplacement_apres,
@@ -2526,6 +2527,8 @@ app.post('/api/repartir-xp', (req, res) => {
         }
 
         db.prepare('UPDATE players SET xp_repartition_en_attente = ? WHERE id = ?').run(JSON.stringify(valeurs), playerId);
+        db.prepare('INSERT INTO xp_repartition_historique (player_id, semaine, repartition, total, points_experience, horodatage) VALUES (?, ?, ?, ?, ?, ?)')
+            .run(playerId, db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle, JSON.stringify(valeurs), total, player.points_experience, new Date().toISOString());
 
         res.json({ success: true });
     } catch (err) {

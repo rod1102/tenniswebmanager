@@ -1610,4 +1610,37 @@ if (db.prepare('SELECT patch_break_sauvees_toutes_20260921 AS p FROM jeu_etat WH
     db.prepare('UPDATE jeu_etat SET patch_break_sauvees_toutes_20260921 = 1 WHERE id = 1').run();
 }
 
+// Trace permanente de chaque validation de repartition d'XP (2026-09-21, demande
+// explicite de l'utilisateur, a la suite du cas de Vane id 121 dont la repartition de
+// la S2 n'etait plus en base au changement de semaine) : players.xp_repartition_en_attente
+// est ecrasee a chaque nouvelle validation puis effacee au changement de semaine, donc
+// aucune trace ne restait de ce que le coach avait valide ni de l'heure.
+db.exec(`
+    CREATE TABLE IF NOT EXISTS xp_repartition_historique (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER NOT NULL,
+        semaine INTEGER NOT NULL,
+        repartition TEXT NOT NULL,
+        total INTEGER NOT NULL,
+        points_experience INTEGER NOT NULL,
+        horodatage TEXT NOT NULL
+    )
+`);
+
+// Correction ponctuelle : les 8 points de deplacement valides par Vane (id 121) en S2
+// ne se sont jamais appliques au passage en S3 (journal : deplacement 9 -> 9, aucune
+// repartition trouvee par le moteur). On ne touche que si la valeur est encore celle
+// constatee (9) et pour cette joueuse precisement - jamais si elle a bouge depuis.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_vane_xp_s2_20260921 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_vane_xp_s2_20260921 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const vane = db.prepare("SELECT id, deplacement FROM players WHERE id = 121 AND prenom = 'April' COLLATE NOCASE AND nom = 'Vane' COLLATE NOCASE").get();
+    if (vane && vane.deplacement === 9) {
+        db.prepare('UPDATE players SET deplacement = 17 WHERE id = 121').run();
+        console.log('[patch_vane_xp_s2_20260921] April Vane (id 121) : deplacement 9 -> 17');
+    } else {
+        console.log('[patch_vane_xp_s2_20260921] non applique (joueuse absente ou deplacement =', vane ? vane.deplacement : 'n/a', ')');
+    }
+    db.prepare('UPDATE jeu_etat SET patch_vane_xp_s2_20260921 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
