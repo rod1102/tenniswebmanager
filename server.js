@@ -4155,11 +4155,14 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
 
             // Recalcule a CHAQUE jeu (pas une fois par set) : une alerte kine peut avoir
             // change le malus de condition a l'instant, et ca doit affecter immediatement
-            // le niveau de jeu utilise pour CE jeu.
-            const niveauxA = ajusterNiveauxStyle(niveauA_normal - malusActuelA + bonusSetDecisifA, niveauA_mental - malusActuelA, styleA, mentalCourantA, numeroSet);
+            // le niveau de jeu utilise pour CE jeu. Le bonus Sang froid s'ajoute au niveau
+            // normal ET au niveau mental (points importants), comme les bonus "fixes" qui
+            // passent par niveauNormal puis niveauMental : sinon il ne servait a rien sur
+            // les points decisifs du set decisif, justement la ou il devrait compter.
+            const niveauxA = ajusterNiveauxStyle(niveauA_normal - malusActuelA + bonusSetDecisifA, niveauA_mental - malusActuelA + bonusSetDecisifA, styleA, mentalCourantA, numeroSet);
             const niveauA_normal_manche = niveauxA.normal;
             const niveauA_mental_manche = niveauxA.mental;
-            const niveauxB = ajusterNiveauxStyle(niveauB_normal - malusActuelB + bonusSetDecisifB, niveauB_mental - malusActuelB, styleB, mentalCourantB, numeroSet);
+            const niveauxB = ajusterNiveauxStyle(niveauB_normal - malusActuelB + bonusSetDecisifB, niveauB_mental - malusActuelB + bonusSetDecisifB, styleB, mentalCourantB, numeroSet);
             const niveauB_normal_manche = niveauxB.normal;
             const niveauB_mental_manche = niveauxB.mental;
 
