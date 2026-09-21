@@ -1562,4 +1562,22 @@ if (db.prepare('SELECT patch_automatismes_retroactif_20260918 AS p FROM jeu_etat
     db.prepare('UPDATE jeu_etat SET patch_automatismes_retroactif_20260918 = 1 WHERE id = 1').run();
 }
 
+// Retrait des rencontres de Coupe Davis/Fed Cup de la Saison 1 (2026-09-21, bug
+// signale par l'utilisateur : "Coupe Davis" affichee en S4 dans la programmation
+// alors qu'il n'y en a pas en Saison 1). Reliquat d'un tableau cree avant la regle
+// "pas de Coupe Davis en Saison 1" ou avant le passage a 52 semaines.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_retrait_coupe_saison1_20260921 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_retrait_coupe_saison1_20260921 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const ids = db.prepare('SELECT id FROM coupe_equipes WHERE saison = 1').all().map(function (r) { return r.id; });
+    ids.forEach(function (id) {
+        db.prepare('DELETE FROM coupe_composition WHERE coupe_equipe_id = ?').run(id);
+        db.prepare('DELETE FROM coupe_rubbers WHERE coupe_equipe_id = ?').run(id);
+        db.prepare('DELETE FROM coupe_styles WHERE coupe_equipe_id = ?').run(id);
+    });
+    db.prepare('DELETE FROM coupe_equipes WHERE saison = 1').run();
+    db.prepare('DELETE FROM coupe_groupe_mondial WHERE saison = 1').run();
+    console.log('[patch_retrait_coupe_saison1_20260921] rencontres de Saison 1 retirees :', ids.length);
+    db.prepare('UPDATE jeu_etat SET patch_retrait_coupe_saison1_20260921 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;

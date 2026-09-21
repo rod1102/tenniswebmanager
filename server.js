@@ -2029,7 +2029,7 @@ function joueursEngagesCoupeDavis(player, debut, fin) {
     const circuit = player.type === 'joueur' ? 'ATP' : 'WTA';
     const ties = db.prepare(`
         SELECT * FROM coupe_equipes
-        WHERE statut != 'termine' AND semaine BETWEEN ? AND ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?)
+        WHERE statut != 'termine' AND saison >= 2 AND semaine BETWEEN ? AND ? AND circuit = ? AND (nation_domicile = ? OR nation_exterieur = ?)
     `).all(debut, fin, circuit, player.nationalite, player.nationalite);
 
     const nomCoupe = circuit === 'ATP' ? 'Coupe Davis' : 'Fed Cup';
@@ -6121,8 +6121,9 @@ app.get('/api/tournois/calendrier/:playerId', (req, res) => {
                 // l'utilisateur, 2026-08-24, suite au decalage de calendrier du meme jour).
                 .filter(function (t) { return t.circuit === circuit && t.semaine_debut === phase.positionSemaine && !tournoiDejaCreeCetteSaison(t.id, semaine); })
                 .forEach(function (t) { eligibles.push(Object.assign({}, t, { semaine, positionSemaine: t.semaine_debut, ouvert: semaine <= finOuvert })); });
+            // Pas de Coupe Davis/Fed Cup en Saison 1 (cf. assurerTableauCoupe).
             SEMAINES_COUPES_EQUIPE
-                .filter(function (sc) { return sc.semaine === phase.positionSemaine; })
+                .filter(function (sc) { return sc.semaine === phase.positionSemaine && phaseAffichee(semaine).numeroSaison >= 2; })
                 .forEach(function (sc) {
                     eligibles.push({
                         id: 'coupe-' + circuit + '-' + sc.manche, estCoupe: true, circuit: circuit,
@@ -6214,7 +6215,7 @@ app.get('/api/tournois/calendrier-circuit/:circuit', (req, res) => {
                 .filter(function (t) { return t.circuit === circuit && t.semaine_debut === phase.positionSemaine && !tournoiDejaCreeCetteSaison(t.id, semaine); })
                 .forEach(function (t) { eligibles.push(Object.assign({}, t, { semaine, positionSemaine: t.semaine_debut, ouvert: semaine <= finOuvert })); });
             SEMAINES_COUPES_EQUIPE
-                .filter(function (sc) { return sc.semaine === phase.positionSemaine; })
+                .filter(function (sc) { return sc.semaine === phase.positionSemaine && phaseAffichee(semaine).numeroSaison >= 2; })
                 .forEach(function (sc) {
                     eligibles.push({
                         id: 'coupe-' + circuit + '-' + sc.manche, estCoupe: true, circuit: circuit,
