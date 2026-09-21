@@ -1586,4 +1586,28 @@ if (db.prepare('SELECT patch_retrait_coupe_saison1_v2_20260921 AS p FROM jeu_eta
     db.prepare('UPDATE jeu_etat SET patch_retrait_coupe_saison1_v2_20260921 = 1 WHERE id = 1').run();
 }
 
+// Badge Sang-froid : recomptage RETROACTIF de TOUTES les balles de break sauvees
+// (2026-09-21, demande explicite de l'utilisateur). Avant, le moteur ne comptait que
+// les balles de break qui auraient aussi termine un set/match. Les evenements du
+// teletexte de chaque match sont conserves (matchs.evenements, toujours du point de
+// vue du joueur de la ligne : "Toi") - une balle de break sauvee y est tracee par
+// "Break sauve par Toi". On ne fait jamais BAISSER un compteur existant.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_break_sauvees_toutes_20260921 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_break_sauvees_toutes_20260921 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    let modifies = 0;
+    const lignes = db.prepare('SELECT id, balles_break_sauvees AS b, evenements FROM matchs WHERE (tournoi_id IS NOT NULL OR coupe_equipe_id IS NOT NULL) AND evenements IS NOT NULL').all();
+    lignes.forEach(function (l) {
+        let ev;
+        try { ev = JSON.parse(l.evenements); } catch (e) { return; }
+        if (!Array.isArray(ev)) return;
+        const n = ev.filter(function (x) { return x && x.type === 'point_important' && typeof x.texte === 'string' && x.texte.indexOf('Break sauve par Toi') === 0; }).length;
+        if (n > (l.b || 0)) {
+            db.prepare('UPDATE matchs SET balles_break_sauvees = ? WHERE id = ?').run(n, l.id);
+            modifies++;
+        }
+    });
+    console.log('[patch_break_sauvees_toutes_20260921] matchs recomptes :', modifies, '/', lignes.length);
+    db.prepare('UPDATE jeu_etat SET patch_break_sauvees_toutes_20260921 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;

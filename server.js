@@ -3877,6 +3877,12 @@ function resoudreJeu(serveur, niveauA_normal, niveauB_normal, niveauA_mental, ni
             : mot;
 
         const vainqueurPoint = resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacantPoint, libelleUtilisePourCePoint, motUtilisePourCePoint, stats, evenements);
+        // Balle de break sauvee (badge Sang-froid, records) : TOUTE balle de break, pas
+        // seulement celles qui auraient aussi termine un set/match - le serveur
+        // remporte le point alors que le relanceur menacait de gagner le jeu.
+        if (menacantPoint === relanceur && vainqueurPoint === serveur) {
+            if (serveur === 'A') stats.ballesBreakSauveesA++; else stats.ballesBreakSauveesB++;
+        }
         if (vainqueurPoint === 'A') ptsA++; else ptsB++;
 
         if ((ptsA >= 4 || ptsB >= 4) && Math.abs(ptsA - ptsB) >= 2) break;
@@ -4078,10 +4084,9 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
     const scoreParManche = [];
     let totalJeux = 0;
     let serveur = 'A';
-    const stats = { pointsImportants: 0 };
+    const stats = { pointsImportants: 0, ballesBreakSauveesA: 0, ballesBreakSauveesB: 0 };
     const evenements = [];
     let numeroSet = 1;
-    let ballesBreakSauveesA = 0, ballesBreakSauveesB = 0;
 
     // Condition/malus dynamiques : demarrent a l'etat d'avant-match, puis peuvent
     // evoluer jeu par jeu (voir tenterAlerteKine plus bas) - un adversaire sans
@@ -4216,13 +4221,6 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
             const resultatJeu = resoudreJeu(serveur, niveauA_normal_manche, niveauB_normal_manche, niveauA_mental_manche, niveauB_mental_manche, pointImportant, libelleAnnonce, motResolution, menacant, stats, evenements);
             const vainqueurJeu = resultatJeu.vainqueur;
 
-            // Balle de break sauvee : le serveur de CE jeu (avant relève ci-dessous)
-            // remporte un jeu qui, s'il l'avait perdu, aurait ete un break pour le
-            // relanceur - jamais compte dans un tie-break (pas de notion de break la-dedans).
-            if (motResolution === 'break' && vainqueurJeu === serveur) {
-                if (serveur === 'A') ballesBreakSauveesA++; else ballesBreakSauveesB++;
-            }
-
             if (vainqueurJeu === 'A') jeuxA++; else jeuxB++;
             totalJeux++;
             serveur = relanceur;
@@ -4265,8 +4263,8 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
             score: scoreAbandon,
             totalJeux,
             pointsImportants: stats.pointsImportants,
-            ballesBreakSauveesA,
-            ballesBreakSauveesB,
+            ballesBreakSauveesA: stats.ballesBreakSauveesA,
+            ballesBreakSauveesB: stats.ballesBreakSauveesB,
             conditionFinaleA: conditionActuelleA,
             conditionFinaleB: conditionActuelleB,
             evenements
@@ -4284,8 +4282,8 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
         score: scoreParManche.join(', '),
         totalJeux,
         pointsImportants: stats.pointsImportants,
-        ballesBreakSauveesA,
-        ballesBreakSauveesB,
+        ballesBreakSauveesA: stats.ballesBreakSauveesA,
+        ballesBreakSauveesB: stats.ballesBreakSauveesB,
         conditionFinaleA: conditionActuelleA,
         conditionFinaleB: conditionActuelleB,
         evenements
