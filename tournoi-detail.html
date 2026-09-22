@@ -57,7 +57,7 @@
             <div class="tab-panel" id="tab-palmares" style="display:none;"></div>
 
             <div style="text-align:center; margin-top:24px;">
-                <button class="cta cta-secondary" id="vitesse-teletexte-btn" style="padding:9px 18px; font-size:0.82rem;">Choisir la vitesse du télétexte</button>
+                <button class="cta cta-secondary" id="vitesse-teletexte-btn" style="padding:9px 18px; font-size:0.82rem;">Choisir la vitesse du direct (Live)</button>
             </div>
         </div>
     </div>
@@ -721,30 +721,32 @@
                 clearInterval(liveEnCours[matchId]);
                 delete liveEnCours[matchId];
             }
-            delete teletexteAvancerParCle[matchId];
+            delete liveAvancerParCle[matchId];
         }
 
-        // Vitesse du Teletexte (delai entre chaque ligne affichee) : preference du
-        // navigateur, partagee entre toutes les pages qui ont un Teletexte (meme cle
-        // localStorage), demande explicite de l'utilisateur, 2026-09-14.
+        // Vitesse du Live (delai entre chaque evenement affiche) : preference du
+        // navigateur, partagee entre toutes les pages qui ont un Live (meme cle
+        // localStorage), demande explicite de l'utilisateur, 2026-09-14. Le Teletexte,
+        // lui, affiche tout le deroule d'un coup (voir afficherTeletexteMatch) - revu le
+        // 2026-09-22 a la demande de l'utilisateur : avant cette date, c'etait l'inverse
+        // (le Live avait un rythme fixe de 1500ms et seul le Teletexte etait reglable),
+        // ce qui pretait a confusion ("le reglage de vitesse ne change rien").
         const VITESSES_TELETEXTE = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000];
         function vitesseTeletexte() {
             const v = Number(localStorage.getItem('teletexteVitesseMs'));
             return VITESSES_TELETEXTE.includes(v) ? v : 2000;
         }
 
-        // Cle -> fonction "avancer" de chaque Teletexte actuellement affiche (jamais les
-        // Live, qui ont leur propre rythme fixe de 1500ms) - permet de reprogrammer
-        // l'intervalle en cours des que la vitesse change, au lieu d'attendre que ce
-        // Teletexte se termine ou soit relance (bug signale par l'utilisateur, 2026-09-22 :
-        // changer la vitesse pendant un defilement deja en cours restait sans effet).
-        const teletexteAvancerParCle = {};
-        function redemarrerTeletextesEnCours() {
+        // Cle -> fonction "avancer" de chaque Live actuellement affiche - permet de
+        // reprogrammer l'intervalle en cours des que la vitesse change, au lieu
+        // d'attendre que ce Live se termine ou soit relance.
+        const liveAvancerParCle = {};
+        function redemarrerLiveEnCours() {
             const nouvelleVitesse = vitesseTeletexte();
-            Object.keys(teletexteAvancerParCle).forEach(function (cle) {
+            Object.keys(liveAvancerParCle).forEach(function (cle) {
                 if (!liveEnCours[cle]) return;
                 clearInterval(liveEnCours[cle]);
-                liveEnCours[cle] = setInterval(teletexteAvancerParCle[cle], nouvelleVitesse);
+                liveEnCours[cle] = setInterval(liveAvancerParCle[cle], nouvelleVitesse);
             });
         }
 
@@ -755,7 +757,7 @@
             overlay.innerHTML = `
                 <div class="dispo-blocage-box">
                     <div class="stats-header" style="margin-top:0;">Choisir sa vitesse</div>
-                    <p class="match-hint" style="margin-bottom:10px;">Délai entre chaque ligne du télétexte.</p>
+                    <p class="match-hint" style="margin-bottom:10px;">Délai entre chaque évènement affiché en direct (Live).</p>
                     <div style="display:flex; flex-direction:column; gap:8px;">
                         ${VITESSES_TELETEXTE.map(function (ms) {
                             const label = (ms / 1000).toString().replace('.', ',') + ' s';
@@ -771,7 +773,7 @@
             overlay.querySelectorAll('.vitesse-option-btn').forEach(function (btn) {
                 btn.addEventListener('click', function () {
                     localStorage.setItem('teletexteVitesseMs', btn.getAttribute('data-ms'));
-                    redemarrerTeletextesEnCours();
+                    redemarrerLiveEnCours();
                     overlay.remove();
                 });
             });
@@ -796,43 +798,19 @@
             `;
         }
 
-        function afficherTeletexteMatch(viewer, match, cle) {
-            viewer.innerHTML = `
-                <div class="match-journal" style="display:block;"></div>
-                <button class="cta cta-secondary live-skip-btn" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Tout afficher</button>
-            `;
+        // Contrairement au Live (vitesse reglable, voir plus bas), le Teletexte
+        // affiche tout le deroule d'un coup, comme une vraie page de teletexte qu'on
+        // feuillette a son propre rythme - demande explicite de l'utilisateur,
+        // 2026-09-22 (avant, il defilait ligne par ligne, ce qui faisait doublon avec
+        // le Live et pretait a confusion sur ce que reglait le bouton de vitesse).
+        function afficherTeletexteMatch(viewer, match) {
+            viewer.innerHTML = '<div class="match-journal" style="display:block;"></div>';
             const journalDiv = viewer.querySelector('.match-journal');
-            const skipBtn = viewer.querySelector('.live-skip-btn');
-            let index = 0;
-
-            function afficherLigne(evt) {
+            match.evenements.forEach(function (evt) {
                 const ligne = document.createElement('div');
                 ligne.className = 'teletexte-ligne teletexte-' + evt.type;
                 ligne.textContent = evt.texte;
                 journalDiv.appendChild(ligne);
-            }
-
-            function avancer() {
-                if (index >= match.evenements.length) {
-                    arreterLive(cle);
-                    skipBtn.style.display = 'none';
-                    return;
-                }
-                afficherLigne(match.evenements[index]);
-                index++;
-            }
-
-            avancer();
-            liveEnCours[cle] = setInterval(avancer, vitesseTeletexte());
-            teletexteAvancerParCle[cle] = avancer;
-
-            skipBtn.addEventListener('click', function () {
-                arreterLive(cle);
-                while (index < match.evenements.length) {
-                    afficherLigne(match.evenements[index]);
-                    index++;
-                }
-                skipBtn.style.display = 'none';
             });
         }
 
@@ -846,7 +824,8 @@
                 if (enPause) {
                     enPause = false;
                     pauseBtn.textContent = 'Pause';
-                    liveEnCours[cle] = setInterval(avancer, 1500);
+                    liveEnCours[cle] = setInterval(avancer, vitesseTeletexte());
+                    liveAvancerParCle[cle] = avancer;
                 } else {
                     enPause = true;
                     pauseBtn.textContent = 'Reprendre';
@@ -906,7 +885,8 @@
             }
 
             avancer();
-            liveEnCours[matchId] = setInterval(avancer, 1500);
+            liveEnCours[matchId] = setInterval(avancer, vitesseTeletexte());
+            liveAvancerParCle[matchId] = avancer;
             brancherPauseLive(pauseBtn, matchId, avancer);
 
             skipBtn.addEventListener('click', function () {
@@ -932,7 +912,7 @@
             try {
                 const match = await obtenirDetail(matchId);
                 if (mode === 'resultat') afficherResultatMatch(viewer, match);
-                else if (mode === 'teletexte') afficherTeletexteMatch(viewer, match, matchId);
+                else if (mode === 'teletexte') afficherTeletexteMatch(viewer, match);
                 else if (mode === 'live') afficherLiveMatch(viewer, match, matchId);
             } catch (err) {
                 viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
@@ -962,8 +942,8 @@
             `;
         }
 
-        function afficherTeletexteBot(viewer, match, cle) {
-            afficherTeletexteMatch(viewer, match, cle);
+        function afficherTeletexteBot(viewer, match) {
+            afficherTeletexteMatch(viewer, match);
         }
 
         function afficherLiveBot(viewer, match, tournoiMatchId) {
@@ -1018,7 +998,8 @@
             }
 
             avancer();
-            liveEnCours[cle] = setInterval(avancer, 1500);
+            liveEnCours[cle] = setInterval(avancer, vitesseTeletexte());
+            liveAvancerParCle[cle] = avancer;
             brancherPauseLive(pauseBtn, cle, avancer);
 
             skipBtn.addEventListener('click', function () {
@@ -1044,7 +1025,7 @@
             try {
                 const match = await obtenirDetailBot(tournoiMatchId);
                 if (mode === 'resultat') afficherResultatBot(viewer, match);
-                else if (mode === 'teletexte') afficherTeletexteBot(viewer, match, 'bot-' + tournoiMatchId);
+                else if (mode === 'teletexte') afficherTeletexteBot(viewer, match);
                 else if (mode === 'live') afficherLiveBot(viewer, match, tournoiMatchId);
             } catch (err) {
                 viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';

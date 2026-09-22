@@ -259,23 +259,7 @@
         // comme sur matchs.html/tournoi-detail.html).
 
         const detailsCache = {};
-        const teletexteEnCours = {};
 
-        function arreterTeletexte(matchId) {
-            if (teletexteEnCours[matchId]) {
-                clearInterval(teletexteEnCours[matchId]);
-                delete teletexteEnCours[matchId];
-            }
-        }
-
-        // Vitesse du Teletexte (delai entre chaque ligne affichee) : preference du
-        // navigateur, partagee entre toutes les pages qui ont un Teletexte (meme cle
-        // localStorage), demande explicite de l'utilisateur, 2026-09-14.
-        const VITESSES_TELETEXTE = [500, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 4500, 5000];
-        function vitesseTeletexte() {
-            const v = Number(localStorage.getItem('teletexteVitesseMs'));
-            return VITESSES_TELETEXTE.includes(v) ? v : 2000;
-        }
         // Le journal d'un match stocke "Toi"/"Adversaire" du point de vue de son
         // proprietaire - ici le spectateur n'est jamais ce proprietaire (on consulte
         // toujours la fiche d'un AUTRE joueur), donc "Toi" serait trompeur sans
@@ -298,52 +282,27 @@
             return data.match;
         }
 
+        // Affiche tout le deroule d'un coup, comme une vraie page de teletexte qu'on
+        // feuillette a son propre rythme (pas d'animation ligne par ligne ici, contrairement
+        // au Live de matchs.html/tournoi-detail.html) - demande explicite de l'utilisateur,
+        // 2026-09-22.
         async function activerModeMatch(matchId, mode, boutonClique) {
             const carte = document.querySelector('.match-card[data-match-id="' + matchId + '"]');
             const viewer = carte.querySelector('.match-viewer');
 
-            arreterTeletexte(matchId);
             boutonClique.classList.add('active');
             viewer.style.display = 'block';
             viewer.innerHTML = '<div class="match-viewer-loading">Chargement...</div>';
 
             try {
                 const match = await obtenirDetail(matchId);
-                viewer.innerHTML = `
-                    <div class="match-journal" style="display:block;"></div>
-                    <button class="cta cta-secondary live-skip-btn" style="margin-top:10px; padding:8px 16px; font-size:0.75rem;">Tout afficher</button>
-                `;
+                viewer.innerHTML = '<div class="match-journal" style="display:block;"></div>';
                 const journalDiv = viewer.querySelector('.match-journal');
-                const skipBtn = viewer.querySelector('.live-skip-btn');
-                let index = 0;
-
-                function afficherLigne(evt) {
+                match.evenements.forEach(function (evt) {
                     const ligne = document.createElement('div');
                     ligne.className = 'teletexte-ligne teletexte-' + evt.type;
                     ligne.textContent = evt.texte;
                     journalDiv.appendChild(ligne);
-                }
-
-                function avancer() {
-                    if (index >= match.evenements.length) {
-                        arreterTeletexte(matchId);
-                        skipBtn.style.display = 'none';
-                        return;
-                    }
-                    afficherLigne(match.evenements[index]);
-                    index++;
-                }
-
-                avancer();
-                teletexteEnCours[matchId] = setInterval(avancer, vitesseTeletexte());
-
-                skipBtn.addEventListener('click', function () {
-                    arreterTeletexte(matchId);
-                    while (index < match.evenements.length) {
-                        afficherLigne(match.evenements[index]);
-                        index++;
-                    }
-                    skipBtn.style.display = 'none';
                 });
             } catch (err) {
                 viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
