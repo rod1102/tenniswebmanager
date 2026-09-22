@@ -1170,7 +1170,24 @@ app.get('/api/admin/diagnostic-planning/:playerId', (req, res) => {
                 SELECT t.id, t.nom, t.semaine, t.statut, t.tour_actuel, tj.tour_elimine
                 FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
                 WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut != 'termine' ORDER BY t.semaine
-            `).all(id)
+            `).all(id),
+            // Favoris (coeur "Programmer l'inscription des l'ouverture") : la ligne reste
+            // visible tant qu'elle n'a pas ete convertie en inscription reelle
+            // (tournoi_liste_attente) - jamais supprimee automatiquement en cas d'echec
+            // (cf. commentaire dans executerAvancementSemaine, "Auto-inscription des favoris").
+            favoris: db.prepare('SELECT calendrier_id, semaine FROM tournoi_favoris WHERE player_id = ? ORDER BY semaine').all(id)
+                .map(function (f) {
+                    const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === f.calendrier_id; });
+                    return Object.assign({}, f, {
+                        nom: entree ? entree.nom : f.calendrier_id,
+                        inscrit: !!db.prepare('SELECT 1 FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ? AND player_id = ?').get(f.calendrier_id, f.semaine, id),
+                        tournoiStatut: (db.prepare('SELECT statut FROM tournois WHERE calendrier_id = ? AND semaine = ?').get(f.calendrier_id, f.semaine) || {}).statut || null
+                    });
+                }),
+            // Condition/blessure a chacune des semaines ou l'inscription automatique
+            // aurait pu/du se declencher (utile pour un favori qui n'a jamais pris :
+            // "blesse" a ce moment-la bloque l'inscription, cf. inscrireJoueurAuTournoi).
+            conditionParSemaine: db.prepare('SELECT semaine, condition_avant, condition_apres FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine DESC LIMIT 12').all(id)
         });
     } catch (err) {
         console.error(err);
@@ -3270,15 +3287,31 @@ function executerAvancementSemaine() {
         // Auto-inscription des favoris : intrinsequement une action par coach/joueur,
         // reste une boucle par joueur (le pool existe deja grace a l'ouverture des
         // inscriptions ci-dessus, donc ceci remplace un lambda plutot que d'en creer un).
+        // Retente CHAQUE semaine pour tout favori dont le tournoi est dans la fenetre
+        // d'inscription ouverte (nouvelleSemaine+1 a nouvelleSemaine+5), plutot qu'une
+        // SEULE fois pile a l'ouverture (semaineOuvertureFavoris) : avant ce correctif,
+        // un echec ponctuel a ce moment precis (joueur blesse cette semaine-la par
+        // exemple) empechait silencieusement et DEFINITIVEMENT l'inscription promise
+        // ("Inscription automatique a l'ouverture des inscriptions") - le coeur restait
+        // affiche sur tournois.html sans que rien ne se passe plus jamais (bug signale
+        // par l'utilisateur, 2026-09-22). inscrireJoueurAuTournoi est deja sans effet
+        // si l'inscription existe deja ou si le tableau est tire, donc aucun risque de
+        // doublon ni de tentative tardive.
         joueurs.forEach(function (player) {
-            const favori = db.prepare('SELECT calendrier_id FROM tournoi_favoris WHERE player_id = ? AND semaine = ?').get(player.id, semaineOuvertureFavoris);
-            if (favori) {
+            const favoris = db.prepare('SELECT calendrier_id, semaine FROM tournoi_favoris WHERE player_id = ? AND semaine BETWEEN ? AND ?')
+                .all(player.id, nouvelleSemaine + 1, semaineOuvertureFavoris);
+            favoris.forEach(function (favori) {
                 const entreeFavori = CALENDRIER_TOURNOIS.find(function (t) { return t.id === favori.calendrier_id; });
-                if (entreeFavori) {
-                    const joueurAJour = db.prepare('SELECT * FROM players WHERE id = ?').get(player.id);
-                    inscrireJoueurAuTournoi(player.user_id, joueurAJour, entreeFavori, semaineOuvertureFavoris);
+                if (!entreeFavori) return;
+                const dejaInscrit = db.prepare('SELECT 1 FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ? AND player_id = ?')
+                    .get(favori.calendrier_id, favori.semaine, player.id);
+                if (dejaInscrit) return;
+                const joueurAJour = db.prepare('SELECT * FROM players WHERE id = ?').get(player.id);
+                const resultat = inscrireJoueurAuTournoi(player.user_id, joueurAJour, entreeFavori, favori.semaine);
+                if (resultat && resultat.error) {
+                    console.log('[favori] inscription automatique differee - player ' + player.id + ', ' + entreeFavori.id + ', semaine ' + favori.semaine + ' : ' + resultat.error);
                 }
-            }
+            });
         });
 
         notifierCopieDeTest();
