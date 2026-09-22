@@ -6862,6 +6862,15 @@ app.post('/api/tournois/desinscription', (req, res) => {
         const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
         rebalancerTournoi(tournoiId, entree, tournoi.semaine);
 
+        // Retire aussi le coeur ("Programmer l'inscription des l'ouverture") pose sur ce
+        // meme tournoi/cette meme semaine, s'il existe : sinon la semaine restait
+        // affichee verrouillee "Tournoi vise" sur la planification malgre la
+        // desinscription, ET l'inscription automatique retentee chaque semaine (voir
+        // executerAvancementSemaine) re-inscrivait le joueur malgre lui des le prochain
+        // changement de semaine (bug signale par l'utilisateur, 2026-09-22).
+        db.prepare('DELETE FROM tournoi_favoris WHERE player_id = ? AND semaine = ? AND calendrier_id = ?')
+            .run(playerId, tournoi.semaine, tournoi.calendrier_id);
+
         res.json({ success: true });
     } catch (err) {
         console.error(err);

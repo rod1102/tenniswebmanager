@@ -1643,4 +1643,30 @@ if (db.prepare('SELECT patch_vane_xp_s2_20260921 AS p FROM jeu_etat WHERE id = 1
     db.prepare('UPDATE jeu_etat SET patch_vane_xp_s2_20260921 = 1 WHERE id = 1').run();
 }
 
+// Correction ponctuelle : le coach de Myuutu (id 258) a desinscrit son joueur du
+// Rio Open (atp-rio), mais le coeur ("Tournoi vise") n'etait pas retire par la
+// desinscription avant ce correctif (voir server.js, /api/tournois/desinscription,
+// 2026-09-22) - la semaine restait verrouillee sur la planification, et l'inscription
+// automatique retentee chaque semaine (voir executerAvancementSemaine) l'aurait
+// re-inscrit malgre lui au prochain changement de semaine. Ne retire QUE ce favori
+// precis, et seulement s'il n'y a PAS de vraie inscription actuelle pour ce
+// tournoi/cette semaine (sinon il vient d'etre repose volontairement depuis, on ne
+// touche a rien).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_myuutu_favori_rio_20260922 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_myuutu_favori_rio_20260922 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const favori = db.prepare("SELECT * FROM tournoi_favoris WHERE player_id = 258 AND calendrier_id = 'atp-rio'").get();
+    if (favori) {
+        const inscrit = db.prepare('SELECT 1 FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ? AND player_id = 258').get(favori.calendrier_id, favori.semaine);
+        if (!inscrit) {
+            db.prepare('DELETE FROM tournoi_favoris WHERE id = ?').run(favori.id);
+            console.log('[patch_myuutu_favori_rio_20260922] favori Rio Open retire pour le joueur 258 (semaine ' + favori.semaine + ')');
+        } else {
+            console.log('[patch_myuutu_favori_rio_20260922] non applique : le joueur 258 est de nouveau inscrit a ce tournoi, favori laisse tel quel');
+        }
+    } else {
+        console.log('[patch_myuutu_favori_rio_20260922] non applique : aucun favori Rio Open trouve pour le joueur 258');
+    }
+    db.prepare('UPDATE jeu_etat SET patch_myuutu_favori_rio_20260922 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
