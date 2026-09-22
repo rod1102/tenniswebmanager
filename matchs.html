@@ -228,6 +228,7 @@
                 clearInterval(liveEnCours[matchId]);
                 delete liveEnCours[matchId];
             }
+            delete teletexteAvancerParCle[matchId];
         }
 
         // Vitesse du Teletexte (delai entre chaque ligne affichee) : preference du
@@ -237,6 +238,21 @@
         function vitesseTeletexte() {
             const v = Number(localStorage.getItem('teletexteVitesseMs'));
             return VITESSES_TELETEXTE.includes(v) ? v : 2000;
+        }
+
+        // Cle -> fonction "avancer" de chaque Teletexte actuellement affiche (jamais les
+        // Live, qui ont leur propre rythme fixe de 1500ms) - permet de reprogrammer
+        // l'intervalle en cours des que la vitesse change, au lieu d'attendre que ce
+        // Teletexte se termine ou soit relance (bug signale par l'utilisateur, 2026-09-22 :
+        // changer la vitesse pendant un defilement deja en cours restait sans effet).
+        const teletexteAvancerParCle = {};
+        function redemarrerTeletextesEnCours() {
+            const nouvelleVitesse = vitesseTeletexte();
+            Object.keys(teletexteAvancerParCle).forEach(function (cle) {
+                if (!liveEnCours[cle]) return;
+                clearInterval(liveEnCours[cle]);
+                liveEnCours[cle] = setInterval(teletexteAvancerParCle[cle], nouvelleVitesse);
+            });
         }
         function ouvrirVitesseTeletexte() {
             const overlay = document.createElement('div');
@@ -261,6 +277,7 @@
             overlay.querySelectorAll('.vitesse-option-btn').forEach(function (btn) {
                 btn.addEventListener('click', function () {
                     localStorage.setItem('teletexteVitesseMs', btn.getAttribute('data-ms'));
+                    redemarrerTeletextesEnCours();
                     overlay.remove();
                 });
             });
@@ -313,6 +330,7 @@
 
             avancer();
             liveEnCours[cle] = setInterval(avancer, vitesseTeletexte());
+            teletexteAvancerParCle[cle] = avancer;
 
             skipBtn.addEventListener('click', function () {
                 arreterLive(cle);
