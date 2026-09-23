@@ -5403,6 +5403,17 @@ function miroirEvenements(evenements) {
                 .replace(/\bToi\b/g, '@@MIROIR@@')
                 .replace(/\bAdversaire\b/g, 'Toi')
                 .replace(/@@MIROIR@@/g, 'Adversaire');
+            // "Match termine : Victoire/Defaite <score>" (evt.type === 'match_fin') est
+            // baker cote A (Victoire si A a gagne) - le remplacement Toi/Adversaire
+            // ci-dessus ne touche jamais ces 2 mots ni les chiffres du score, laissant le
+            // cote B avec une banniere Live/Teletexte totalement contradictoire (annonce
+            // "Defaite" a un coach qui vient pourtant de gagner) - bug signale par
+            // l'utilisateur, 2026-09-23. On inverse ici le mot ET le score (miroirScoreSur,
+            // deja utilise pour matchs.score, gere aussi le suffixe "(Abandon)").
+            copie.texte = copie.texte.replace(/^(Match termine : )(Victoire|Defaite) (.*)$/, function (m, prefixe, mot, score) {
+                const motInverse = mot === 'Victoire' ? 'Defaite' : 'Victoire';
+                return prefixe + motInverse + ' ' + miroirScoreSur(score);
+            });
         }
         if (copie.setsA !== undefined && copie.setsB !== undefined) { const t = copie.setsA; copie.setsA = copie.setsB; copie.setsB = t; }
         if (copie.jeuxA !== undefined && copie.jeuxB !== undefined) { const t = copie.jeuxA; copie.jeuxA = copie.jeuxB; copie.jeuxB = t; }

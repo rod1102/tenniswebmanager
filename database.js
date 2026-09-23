@@ -1669,4 +1669,50 @@ if (db.prepare('SELECT patch_myuutu_favori_rio_20260922 AS p FROM jeu_etat WHERE
     db.prepare('UPDATE jeu_etat SET patch_myuutu_favori_rio_20260922 = 1 WHERE id = 1').run();
 }
 
+// Rattrapage RETROACTIF du bug "Defaite/Victoire" inversé sur le Live/Teletexte d'un
+// match reel-vs-reel (2026-09-23, demande explicite de l'utilisateur, cas signale sur
+// la fiche de Eva NOVICE) : miroirEvenements (server.js) ne swappait jamais les mots
+// "Victoire"/"Defaite" de l'evenement match_fin (ni le score qui suit), contrairement a
+// "Toi"/"Adversaire" - la copie du coach qui a REELLEMENT gagne affichait quand meme
+// "Defaite" (et le score dans le mauvais sens). Corrige a la source le meme jour ; ce
+// patch retrouve chaque ligne deja jouee ou l'evenement match_fin CONTREDIT la colonne
+// vainqueur (seule source fiable, jamais fausse) et la corrige - ne touche jamais une
+// ligne deja coherente.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_miroir_victoire_defaite_20260923 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_miroir_victoire_defaite_20260923 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    function miroirScoreSurLocal(score) {
+        if (!score) return score;
+        const correspondance = score.match(/^(.*?)( \([^)]*\))?$/);
+        const sets = correspondance[1].split(', ');
+        if (!sets.every(function (set) { return /^\d+-\d+$/.test(set); })) return score;
+        const suffixe = correspondance[2] || '';
+        return sets.map(function (set) { const parts = set.split('-'); return parts[1] + '-' + parts[0]; }).join(', ') + suffixe;
+    }
+    let corrigees = 0;
+    const lignes = db.prepare(`
+        SELECT id, vainqueur, evenements FROM matchs
+        WHERE (tournoi_id IS NOT NULL OR coupe_equipe_id IS NOT NULL) AND evenements IS NOT NULL AND vainqueur IN ('joueur', 'adversaire')
+    `).all();
+    lignes.forEach(function (ligne) {
+        let ev;
+        try { ev = JSON.parse(ligne.evenements); } catch (e) { return; }
+        if (!Array.isArray(ev)) return;
+        const attendu = ligne.vainqueur === 'joueur' ? 'Victoire' : 'Defaite';
+        let modifie = false;
+        const evCorrige = ev.map(function (evt) {
+            if (!evt || evt.type !== 'match_fin' || typeof evt.texte !== 'string') return evt;
+            const m = evt.texte.match(/^(Match termine : )(Victoire|Defaite) (.*)$/);
+            if (!m || m[2] === attendu) return evt;
+            modifie = true;
+            return Object.assign({}, evt, { texte: m[1] + attendu + ' ' + miroirScoreSurLocal(m[3]) });
+        });
+        if (modifie) {
+            db.prepare('UPDATE matchs SET evenements = ? WHERE id = ?').run(JSON.stringify(evCorrige), ligne.id);
+            corrigees++;
+        }
+    });
+    console.log('[patch_miroir_victoire_defaite_20260923] matchs corriges :', corrigees, '/', lignes.length, 'lignes examinees');
+    db.prepare('UPDATE jeu_etat SET patch_miroir_victoire_defaite_20260923 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
