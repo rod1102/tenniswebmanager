@@ -3339,13 +3339,25 @@ function executerAvancementSemaine() {
             favoris.forEach(function (favori) {
                 const entreeFavori = CALENDRIER_TOURNOIS.find(function (t) { return t.id === favori.calendrier_id; });
                 if (!entreeFavori) return;
+                // Recale sur la position REELLEMENT attendue aujourd'hui avant d'inscrire :
+                // le calendrier a pu bouger depuis que ce coeur a ete pose (recalage de
+                // saison, decalage de tournoi...), et favori.semaine n'est jamais retouche
+                // par ces patches. Sans ce recalage, un favori devenu perime cree un
+                // tournoi FANTOME a l'ancienne semaine au lieu de rejoindre le vrai pool -
+                // le joueur se retrouve inscrit 2 fois (le vrai pool + le fantome), et les
+                // deux se masquent mutuellement du calendrier (bug signale par
+                // l'utilisateur, 2026-09-24 : Rotterdam Open et Qatar Open/Doha, chacun
+                // avec un pool fantome cree une semaine trop tot).
+                const phaseFavori = phaseDeSemaine(favori.semaine);
+                if (phaseFavori.type !== 'tournoi') return;
+                const semaineCible = favori.semaine + (entreeFavori.semaine_debut - phaseFavori.positionSemaine);
                 const dejaInscrit = db.prepare('SELECT 1 FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ? AND player_id = ?')
-                    .get(favori.calendrier_id, favori.semaine, player.id);
+                    .get(favori.calendrier_id, semaineCible, player.id);
                 if (dejaInscrit) return;
                 const joueurAJour = db.prepare('SELECT * FROM players WHERE id = ?').get(player.id);
-                const resultat = inscrireJoueurAuTournoi(player.user_id, joueurAJour, entreeFavori, favori.semaine);
+                const resultat = inscrireJoueurAuTournoi(player.user_id, joueurAJour, entreeFavori, semaineCible);
                 if (resultat && resultat.error) {
-                    console.log('[favori] inscription automatique differee - player ' + player.id + ', ' + entreeFavori.id + ', semaine ' + favori.semaine + ' : ' + resultat.error);
+                    console.log('[favori] inscription automatique differee - player ' + player.id + ', ' + entreeFavori.id + ', semaine ' + semaineCible + ' : ' + resultat.error);
                 }
             });
         });

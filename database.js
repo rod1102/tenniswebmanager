@@ -1715,4 +1715,64 @@ if (db.prepare('SELECT patch_miroir_victoire_defaite_20260923 AS p FROM jeu_etat
     db.prepare('UPDATE jeu_etat SET patch_miroir_victoire_defaite_20260923 = 1 WHERE id = 1').run();
 }
 
+// Nettoyage RETROACTIF des tournois "fantomes" crees une semaine trop tot pour un
+// meme calendrier_id, cette saison (2026-09-24, demande explicite de l'utilisateur -
+// cas confirmes : Rotterdam Open et Qatar Open/Doha, chacun avec 2 pools distincts a
+// 1 semaine d'ecart, quelques joueurs reels inscrits dans les DEUX). Origine probable :
+// un des recalages de calendrier/saison de la mi-septembre a fait recalculer la
+// position d'un tournoi differemment entre 2 avancees de semaine consecutives, la
+// "ouverture des inscriptions" (independante de tout coeur/favori) l'a alors cree 2
+// fois - une fois a chaque position. Consequence directe : tournoiDejaCreeCetteSaison
+// (server.js) masque les 2 instances l'une l'autre sur le calendrier browsable (ecart <
+// LONGUEUR_SAISON/2), alors que les 2 restent verrouillees separement sur la fiche des
+// joueurs concernes. Repere ici, PAR PRUDENCE, uniquement les tournois PAS ENCORE TIRES
+// (statut='inscriptions') dont la position calculee ne correspond pas a leur
+// semaine_debut ET qui ont un "jumeau" a la bonne position, meme calendrier_id, a moins
+// de LONGUEUR_SAISON/2 semaines - jamais un tournoi deja joue, jamais un tournoi isole
+// sans jumeau confirme (trop risque de se tromper sans certitude).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_tournois_fantomes_20260924 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_tournois_fantomes_20260924 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const { CALENDRIER_TOURNOIS, phaseDeSemaine } = require('./calendrier-tournois');
+    const LONGUEUR_SAISON = 52;
+    let tournoisSupprimes = 0, joueursDeplaces = 0;
+    const candidats = db.prepare("SELECT * FROM tournois WHERE statut = 'inscriptions'").all();
+    candidats.forEach(function (t) {
+        const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === t.calendrier_id; });
+        if (!entree) return;
+        const phase = phaseDeSemaine(t.semaine);
+        if (phase.type !== 'tournoi' || phase.positionSemaine === entree.semaine_debut) return; // position correcte, jamais touche
+
+        const jumeau = db.prepare("SELECT * FROM tournois WHERE calendrier_id = ? AND id != ? AND ABS(semaine - ?) < ? AND statut = 'inscriptions'")
+            .get(t.calendrier_id, t.id, t.semaine, LONGUEUR_SAISON / 2);
+        if (!jumeau) return; // pas de jumeau confirme a la bonne position -> on ne touche a rien
+        const phaseJumeau = phaseDeSemaine(jumeau.semaine);
+        if (phaseJumeau.type !== 'tournoi' || phaseJumeau.positionSemaine !== entree.semaine_debut) return; // le "jumeau" n'est pas lui-meme a la bonne position
+
+        // Ne supprime le fantome QUE si chacun de ses joueurs REELS a deja un vrai slot
+        // dans le pool correct (tournoi_joueurs, pas juste la liste d'attente) - sinon on
+        // risquerait de le faire disparaitre du tirage au sort sans lui laisser de vraie
+        // place nulle part. Dans les 2 cas confirmes (Rotterdam, Doha) c'est toujours le
+        // cas ; sinon on laisse ce fantome de cote pour une revue manuelle.
+        const reels = db.prepare('SELECT player_id FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 1').all(t.id);
+        const tousDejaDansLeVrai = reels.every(function (r) {
+            return !!db.prepare('SELECT 1 FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 1 AND player_id = ?').get(jumeau.id, r.player_id);
+        });
+        if (!tousDejaDansLeVrai) {
+            console.log('[patch_tournois_fantomes_20260924] fantome IGNORE (revue manuelle) : ' + t.calendrier_id + ' semaine ' + t.semaine + ' - au moins un joueur reel n a pas de place confirmee dans le pool correct (semaine ' + jumeau.semaine + ')');
+            return;
+        }
+        joueursDeplaces += reels.length;
+        db.prepare('DELETE FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ?').run(t.calendrier_id, t.semaine);
+        db.prepare('DELETE FROM tournoi_matchs WHERE tournoi_id = ?').run(t.id);
+        db.prepare('DELETE FROM tournoi_joueurs WHERE tournoi_id = ?').run(t.id);
+        db.prepare('DELETE FROM tournois WHERE id = ?').run(t.id);
+        tournoisSupprimes++;
+        console.log('[patch_tournois_fantomes_20260924] fantome supprime : ' + t.calendrier_id + ' semaine ' + t.semaine +
+            ' (position ' + phase.positionSemaine + ' au lieu de ' + entree.semaine_debut + '), ' + reels.length +
+            ' joueur(s) reel(s) rebascule(s) vers semaine ' + jumeau.semaine + ' : ' + reels.map(function (r) { return r.player_id; }).join(','));
+    });
+    console.log('[patch_tournois_fantomes_20260924] tournois fantomes supprimes :', tournoisSupprimes, '- joueurs rebascules :', joueursDeplaces);
+    db.prepare('UPDATE jeu_etat SET patch_tournois_fantomes_20260924 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
