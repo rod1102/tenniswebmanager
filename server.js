@@ -1195,6 +1195,42 @@ app.get('/api/admin/diagnostic-planning/:playerId', (req, res) => {
     }
 });
 
+// Diagnostic (admin) de toutes les instances d'un meme calendrier_id (toutes saisons/
+// semaines confondues) : sert a comprendre un tournoi qui "disparait" du calendrier
+// browsable (/api/tournois/calendrier, filtre par tournoiDejaCreeCetteSaison) tout en
+// restant verrouille sur la fiche joueur (qui lit directement tournoi_joueurs/tournois,
+// jamais ce filtre) - signale par l'utilisateur, 2026-09-24 (Rotterdam Open).
+app.get('/api/admin/diagnostic-tournoi/:calendrierId', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const calendrierId = req.params.calendrierId;
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === calendrierId; });
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+
+        const instances = db.prepare('SELECT id, semaine, statut, tour_actuel FROM tournois WHERE calendrier_id = ? ORDER BY semaine').all(calendrierId);
+        instances.forEach(function (t) {
+            t.phase = phaseAffichee(t.semaine);
+            t.positionAttendue = entree ? entree.semaine_debut : null;
+            t.positionEcart = entree ? (t.phase.type === 'tournoi' ? t.phase.positionSemaine - entree.semaine_debut : null) : null;
+            t.reels = db.prepare(`
+                SELECT p.id, p.prenom, p.nom, tj.est_reel FROM tournoi_joueurs tj JOIN players p ON p.id = tj.player_id
+                WHERE tj.tournoi_id = ? AND tj.est_reel = 1
+            `).all(t.id);
+            // Reproduction exacte du filtre de /api/tournois/calendrier : masque cette
+            // instance de la liste browsable si une AUTRE ligne (calendrier_id identique)
+            // existe a moins de LONGUEUR_SAISON/2 semaines d'ecart.
+            t.masqueeDuCalendrier = instances.some(function (autre) { return autre.id !== t.id && autre.semaine !== undefined && Math.abs(autre.semaine - t.semaine) < LONGUEUR_SAISON / 2; });
+        });
+
+        res.json({ success: true, calendrierId, entree, semaineActuelle: etat.semaine_actuelle, phaseActuelle: phaseAffichee(etat.semaine_actuelle), longueurSaison: LONGUEUR_SAISON, instances });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Diagnostic (admin) du niveau des bots d'un tournoi : moyenne du niveau de jeu
 // des joueurs reels REELLEMENT INSCRITS (celle qui calibre les bots), moyenne du
 // circuit (repli), bande 50-70 % qui en decoule, et niveau stocke de chaque bot
