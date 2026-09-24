@@ -1195,6 +1195,73 @@ app.get('/api/admin/diagnostic-planning/:playerId', (req, res) => {
     }
 });
 
+// Diagnostic (admin) DE TOUT LE CALENDRIER en une seule requete : balaie chaque entree
+// de CALENDRIER_TOURNOIS et signale toute entree dont au moins une instance
+// 'inscriptions'/'a_venir' n'est PAS a sa position attendue cette saison (meme defaut
+// que Rotterdam Open/Qatar Open Doha, corrige le 2026-09-24) - sert a verifier le
+// calendrier entier d'un coup plutot que tournoi par tournoi. N'inclut jamais les
+// instances 'termine' (Saison 0/bots ou editions deja jouees, jamais concernees).
+app.get('/api/admin/diagnostic-calendrier-complet', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const toutes = db.prepare("SELECT id, calendrier_id, semaine, statut, tour_actuel FROM tournois WHERE statut != 'termine'").all();
+        const parCalendrierId = new Map();
+        toutes.forEach(function (t) {
+            if (!parCalendrierId.has(t.calendrier_id)) parCalendrierId.set(t.calendrier_id, []);
+            parCalendrierId.get(t.calendrier_id).push(t);
+        });
+
+        const suspects = [];
+        const manquants = [];
+        const debut = etat.semaine_actuelle + 1;
+        const finOuvert = debut + 4;
+
+        CALENDRIER_TOURNOIS.forEach(function (entree) {
+            const instances = parCalendrierId.get(entree.id) || [];
+            instances.forEach(function (t) {
+                t.phase = phaseAffichee(t.semaine);
+                t.positionEcart = t.phase.type === 'tournoi' ? t.phase.positionSemaine - entree.semaine_debut : null;
+            });
+            const enDefaut = instances.filter(function (t) { return t.positionEcart !== 0; });
+            if (enDefaut.length > 0) {
+                suspects.push({
+                    calendrierId: entree.id, nom: entree.nom, circuit: entree.circuit, positionAttendue: entree.semaine_debut,
+                    instances: instances.map(function (t) {
+                        return {
+                            semaine: t.semaine, statut: t.statut, positionEcart: t.positionEcart,
+                            nbReels: db.prepare('SELECT COUNT(*) AS n FROM tournoi_joueurs WHERE tournoi_id = ? AND est_reel = 1').get(t.id).n
+                        };
+                    })
+                });
+            }
+            // Signale aussi une entree qui DEVRAIT deja avoir un pool ouvert cette saison
+            // (sa position tombe dans la fenetre des 5 prochaines semaines) mais n'en a
+            // AUCUNE instance a la bonne position - autre symptome possible d'un decalage
+            // de calendrier (jamais cree faute de correspondance de position). Categorie
+            // 'finals' exclue (creee a S-1 seulement, cf. genererEntrantsFinals).
+            if (entree.categorie !== 'finals') {
+                let positionDansLaFenetre = false;
+                for (let s = debut; s <= finOuvert; s++) {
+                    const ph = phaseDeSemaine(s);
+                    if (ph.type === 'tournoi' && ph.positionSemaine === entree.semaine_debut) { positionDansLaFenetre = true; break; }
+                }
+                const aLaBonnePosition = instances.some(function (t) { return t.positionEcart === 0; });
+                if (positionDansLaFenetre && !aLaBonnePosition) {
+                    manquants.push({ calendrierId: entree.id, nom: entree.nom, circuit: entree.circuit, positionAttendue: entree.semaine_debut });
+                }
+            }
+        });
+
+        res.json({ success: true, semaineActuelle: etat.semaine_actuelle, phaseActuelle: phaseAffichee(etat.semaine_actuelle), fenetreVisible: { debut, finOuvert }, nbEntreesCalendrier: CALENDRIER_TOURNOIS.length, suspects, manquants });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Diagnostic (admin) de toutes les instances d'un meme calendrier_id (toutes saisons/
 // semaines confondues) : sert a comprendre un tournoi qui "disparait" du calendrier
 // browsable (/api/tournois/calendrier, filtre par tournoiDejaCreeCetteSaison) tout en
