@@ -1775,4 +1775,45 @@ if (db.prepare('SELECT patch_tournois_fantomes_20260924 AS p FROM jeu_etat WHERE
     db.prepare('UPDATE jeu_etat SET patch_tournois_fantomes_20260924 = 1 WHERE id = 1').run();
 }
 
+// Correction RETROACTIF d'un tournoi isole cree UNE semaine trop tot, sans "jumeau" a
+// la bonne position (contrairement a Rotterdam/Doha, corrige juste au-dessus, qui
+// avaient CHACUN 2 pools) - cas d'Indian Wells (ATP et WTA), signale par l'utilisateur
+// le 2026-09-24, diagnostique via /api/admin/diagnostic-calendrier-complet. Ce cas est
+// URGENT et pas seulement historique : tant que ce pool mal place existe, le garde-fou
+// anti-doublon (tournoiDejaCreeCetteSaison, server.js) empeche pour de bon la creation
+// du VRAI pool a la bonne semaine lors de la prochaine "ouverture des inscriptions" -
+// laisser faire n'aurait donc jamais corrige le probleme tout seul. Corrige EN PLACE
+// (change la semaine du tournoi existant, jamais son id) plutot que supprimer+recreer :
+// aucune inscription reelle n'est perdue.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_tournois_isoles_mal_places_20260924 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_tournois_isoles_mal_places_20260924 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const { CALENDRIER_TOURNOIS, phaseDeSemaine } = require('./calendrier-tournois');
+    const LONGUEUR_SAISON = 52;
+    let corriges = 0;
+    const candidats = db.prepare("SELECT * FROM tournois WHERE statut = 'inscriptions'").all();
+    candidats.forEach(function (t) {
+        const entree = CALENDRIER_TOURNOIS.find(function (e) { return e.id === t.calendrier_id; });
+        if (!entree) return;
+        const phase = phaseDeSemaine(t.semaine);
+        if (phase.type !== 'tournoi' || phase.positionSemaine === entree.semaine_debut) return; // position correcte, jamais touche
+
+        // Doit etre ISOLE (aucun jumeau a la bonne position a proximite) - sinon c'est le
+        // cas Rotterdam/Doha, deja traite par le patch precedent, jamais celui-ci.
+        const jumeau = db.prepare("SELECT id FROM tournois WHERE calendrier_id = ? AND id != ? AND ABS(semaine - ?) < ?")
+            .get(t.calendrier_id, t.id, t.semaine, LONGUEUR_SAISON / 2);
+        if (jumeau) return;
+
+        const semaineCorrigee = t.semaine + (entree.semaine_debut - phase.positionSemaine);
+        const phaseCorrigee = phaseDeSemaine(semaineCorrigee);
+        if (phaseCorrigee.type !== 'tournoi' || phaseCorrigee.positionSemaine !== entree.semaine_debut) return; // recalage improbable, ne prend aucun risque
+
+        db.prepare('UPDATE tournois SET semaine = ? WHERE id = ?').run(semaineCorrigee, t.id);
+        db.prepare('UPDATE tournoi_liste_attente SET semaine = ? WHERE calendrier_id = ? AND semaine = ?').run(semaineCorrigee, t.calendrier_id, t.semaine);
+        corriges++;
+        console.log('[patch_tournois_isoles_mal_places_20260924] ' + t.calendrier_id + ' recale : semaine ' + t.semaine + ' (position ' + phase.positionSemaine + ') -> semaine ' + semaineCorrigee + ' (position ' + entree.semaine_debut + ')');
+    });
+    console.log('[patch_tournois_isoles_mal_places_20260924] tournois corriges :', corriges);
+    db.prepare('UPDATE jeu_etat SET patch_tournois_isoles_mal_places_20260924 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
