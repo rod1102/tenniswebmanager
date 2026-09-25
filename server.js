@@ -1195,6 +1195,52 @@ app.get('/api/admin/diagnostic-planning/:playerId', (req, res) => {
     }
 });
 
+// Diagnostic (admin) du "dernier carre" (4 joueurs ayant le plus progresse) d'un
+// tournoi a elimination directe, avec leur niveau de jeu sur la surface du tournoi -
+// le niveau est normalement confidentiel (jamais expose a un autre coach), cette route
+// reste donc reservee a l'admin. Demande explicite de l'utilisateur, 2026-09-25.
+app.get('/api/admin/derniers-carres/:calendrierId', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const calendrierId = req.params.calendrierId;
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === calendrierId; });
+        if (!entree) return res.status(404).json({ error: 'Tournoi introuvable dans le calendrier.' });
+
+        // Le plus recent d'abord (l'edition en cours ou la derniere jouee).
+        const tournoi = db.prepare("SELECT * FROM tournois WHERE calendrier_id = ? AND statut != 'inscriptions' ORDER BY semaine DESC LIMIT 1").get(calendrierId);
+        if (!tournoi) return res.status(404).json({ error: 'Aucune edition tiree au sort pour ce tournoi.' });
+
+        const labelsTours = calculerLabelsTours(tournoi.taille_tableau, tournoi.format);
+        function profondeur(tourElimine) {
+            if (tourElimine === 'Vainqueur') return labelsTours.length;
+            if (tourElimine === null) return labelsTours.length - 1; // encore en lice = suppose aussi loin que possible
+            const idx = labelsTours.indexOf(tourElimine);
+            return idx === -1 ? -1 : idx;
+        }
+
+        const joueurs = db.prepare("SELECT * FROM tournoi_joueurs WHERE tournoi_id = ? AND nom != 'BYE'").all(tournoi.id);
+        const classes = joueurs.map(function (j) {
+            return {
+                nom: j.nom, estReel: !!j.est_reel, tourElimine: j.tour_elimine,
+                profondeur: profondeur(j.tour_elimine),
+                niveau: j.est_reel
+                    ? (function () {
+                        const p = db.prepare('SELECT * FROM players WHERE id = ?').get(j.player_id);
+                        return p ? Math.round(niveauNormal(p, tournoi.surface) * 10) / 10 : null;
+                    })()
+                    : j.niveau
+            };
+        }).sort(function (a, b) { return b.profondeur - a.profondeur; });
+
+        res.json({ success: true, calendrierId, tournoi: { id: tournoi.id, semaine: tournoi.semaine, statut: tournoi.statut, surface: tournoi.surface }, dernierCarre: classes.slice(0, 4), classementComplet: classes });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Diagnostic (admin) DE TOUT LE CALENDRIER en une seule requete : balaie chaque entree
 // de CALENDRIER_TOURNOIS et signale toute entree dont au moins une instance
 // 'inscriptions'/'a_venir' n'est PAS a sa position attendue cette saison (meme defaut
