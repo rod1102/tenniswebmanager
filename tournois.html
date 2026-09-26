@@ -229,12 +229,19 @@
                 const carte = document.createElement('div');
                 carte.className = 'tournoi-card tournoi-card-' + classeSurface(t);
 
+                // Nom du vainqueur cliquable vers sa fiche (vrai joueur ou rival ; un lambda,
+                // sans fiche, reste en texte simple) - demande explicite de l'utilisateur,
+                // 2026-09-27.
+                let nomVainqueurHtml = formaterNomComplet(t.nomVainqueur) || '-';
+                if (t.vainqueurPlayerId) nomVainqueurHtml = `<a class="lien-adversaire" href="adversaire.html?type=reel&id=${t.vainqueurPlayerId}">${nomVainqueurHtml}</a>`;
+                else if (t.vainqueurRivalId) nomVainqueurHtml = `<a class="lien-adversaire" href="adversaire.html?type=rival&id=${t.vainqueurRivalId}">${nomVainqueurHtml}</a>`;
+
                 let resultatHtml;
                 if (t.participe) {
-                    const vainqueurTxt = `${flagImg(t.drapeauVainqueur)} ${formaterNomComplet(t.nomVainqueur) || '-'}`;
+                    const vainqueurTxt = `${flagImg(t.drapeauVainqueur)} ${nomVainqueurHtml}`;
                     resultatHtml = `Vainqueur : ${vainqueurTxt} · Ton résultat : ${t.tourElimineJoueur || '-'} (${t.pointsGagnesJoueur || 0} points)`;
                 } else if (t.nomVainqueur) {
-                    resultatHtml = `Vainqueur : ${flagImg(t.drapeauVainqueur)} ${formaterNomComplet(t.nomVainqueur)}`;
+                    resultatHtml = `Vainqueur : ${flagImg(t.drapeauVainqueur)} ${nomVainqueurHtml}`;
                 } else {
                     resultatHtml = 'Non disputé';
                 }

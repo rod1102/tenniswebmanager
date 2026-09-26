@@ -6658,9 +6658,13 @@ app.get('/api/tournois/passes/:playerId', (req, res) => {
             // Vainqueur affiche dans tous les cas (participation ou non) - demande
             // explicite de l'utilisateur : "Tournois passes" doit montrer TOUS les
             // tournois du circuit, avec le nom et le drapeau du vainqueur.
-            const vainqueur = db.prepare("SELECT nom, nationalite FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine = 'Vainqueur'").get(t.tournoiId);
+            const vainqueur = db.prepare("SELECT nom, nationalite, est_reel, player_id, rival_id FROM tournoi_joueurs WHERE tournoi_id = ? AND tour_elimine = 'Vainqueur'").get(t.tournoiId);
             t.nomVainqueur = vainqueur ? vainqueur.nom : null;
             t.drapeauVainqueur = vainqueur ? drapeau(vainqueur.nationalite) : null;
+            // Pour rendre le nom cliquable (fiche adversaire) : un vrai joueur ou un rival
+            // a une fiche, un lambda jetable non.
+            t.vainqueurPlayerId = vainqueur && vainqueur.est_reel ? vainqueur.player_id : null;
+            t.vainqueurRivalId = vainqueur && !vainqueur.est_reel ? vainqueur.rival_id : null;
         });
 
         passes.sort(function (a, b) { return b.semaine - a.semaine; });
