@@ -368,7 +368,7 @@
                 dispositionsGainHtml = `
                     <div class="xp-pool-panel">
                         <div class="xp-pool-title">Points de disposition en réserve : <span id="dispo-gain-restant">${player.points_dispositions_a_gagner}</span></div>
-                        <div class="planning-alerte-texte" style="margin-bottom:8px;">À répartir cette semaine (bonus Coaching mental) — non utilisés, ils seront perdus à la prochaine avancée de semaine. ${brouillonGain ? 'Brouillon enregistré, modifiable ou annulable tant que la semaine n\'a pas avancé.' : 'Rien n\'est définitif tant que la semaine n\'a pas avancé : tu peux revenir sur ton choix autant de fois que tu veux.'}</div>
+                        <div class="planning-alerte-texte${brouillonGain ? ' planning-alerte-texte-ok' : ''}" style="margin-bottom:8px;">À répartir cette semaine (bonus Coaching mental) — non utilisés, ils seront perdus à la prochaine avancée de semaine. ${brouillonGain ? 'Brouillon enregistré, modifiable ou annulable tant que la semaine n\'a pas avancé.' : 'Rien n\'est définitif tant que la semaine n\'a pas avancé : tu peux revenir sur ton choix autant de fois que tu veux.'}</div>
                         <div class="stats-grid">${inputsDispoHtml}</div>
                         <div style="display:flex; gap:10px; margin-top:10px;">
                             <button class="cta cta-primary dispo-gain-btn" data-pool="${player.points_dispositions_a_gagner}" style="padding:10px 20px; font-size:0.8rem;">${brouillonGain ? 'Mettre à jour' : 'Répartir ces points'}</button>
@@ -391,7 +391,7 @@
                 deplacerHtml = `
                     <div class="xp-pool-panel">
                         <div class="xp-pool-title">Déplacement de disposition disponible : <span>${player.points_dispositions_a_deplacer}</span></div>
-                        <div class="planning-alerte-texte" style="margin-bottom:8px;">Déplace 1 point déjà acquis d'une catégorie vers une autre (bonus Coaching mental) — à faire cette semaine, sinon perdu à la prochaine avancée de semaine. ${brouillonDeplacement ? 'Brouillon enregistré, modifiable ou annulable tant que la semaine n\'a pas avancé.' : 'Rien n\'est définitif tant que la semaine n\'a pas avancé.'}</div>
+                        <div class="planning-alerte-texte${brouillonDeplacement ? ' planning-alerte-texte-ok' : ''}" style="margin-bottom:8px;">Déplace 1 point déjà acquis d'une catégorie vers une autre (bonus Coaching mental) — à faire cette semaine, sinon perdu à la prochaine avancée de semaine. ${brouillonDeplacement ? 'Brouillon enregistré, modifiable ou annulable tant que la semaine n\'a pas avancé.' : 'Rien n\'est définitif tant que la semaine n\'a pas avancé.'}</div>
                         <div class="training-row">
                             <span class="match-hint">De</span>
                             <select class="dispo-deplacer-depuis">${optionsDispo(brouillonDeplacement ? brouillonDeplacement.depuis : null)}</select>
