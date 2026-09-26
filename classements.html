@@ -331,7 +331,7 @@
             document.getElementById('detail-pronos-fermer').addEventListener('click', function () { overlay.remove(); });
 
             try {
-                const response = await fetch('/api/pronostics/detail/' + userIdCible);
+                const response = await fetch('/api/pronostics/detail/' + userIdCible + (circuitCourant === 'atp' ? '?circuit=ATP' : (circuitCourant === 'wta' ? '?circuit=WTA' : '')));
                 const data = await response.json();
                 if (!overlay.isConnected) return;
                 const corps = document.getElementById('detail-pronos-corps');

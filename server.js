@@ -8266,7 +8266,11 @@ app.get('/api/pronostics/detail/:userId', (req, res) => {
         `).all(userId);
         const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
 
-        const detail = lignes.map(function (l) {
+        // Filtre optionnel par circuit (?circuit=ATP|WTA) : le classement Pronos ATP n'a pas
+        // a montrer les tournois WTA (et inversement) ; absent = tous (classement combine).
+        const circuitDemande = (req.query || {}).circuit === 'ATP' || (req.query || {}).circuit === 'WTA' ? req.query.circuit : null;
+
+        const detail = lignes.filter(function (l) { return !circuitDemande || l.circuit === circuitDemande; }).map(function (l) {
             return {
                 tournoiId: l.tournoi_id,
                 // Le pronostic d'un autre coach n'est consultable qu'une fois verrouille
