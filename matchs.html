@@ -656,8 +656,10 @@
         }
 
         function creerCarteBot(m, tournoi) {
-            const nomJ1 = flagImg(m.joueur1_drapeau) + ' ' + formaterNomComplet(m.joueur1_nom);
-            const nomJ2 = flagImg(m.joueur2_drapeau) + ' ' + formaterNomComplet(m.joueur2_nom);
+            // Noms cliquables vers la fiche du joueur/rival (un lambda, sans fiche, reste en
+            // texte simple) - meme regle que "Mes matchs" et le Multiplex (lienVersAdversaireMatch).
+            const nomJ1 = flagImg(m.joueur1_drapeau) + ' ' + lienVersAdversaireMatch(formaterNomComplet(m.joueur1_nom), m.joueur1_player_id, m.joueur1_rival_id);
+            const nomJ2 = flagImg(m.joueur2_drapeau) + ' ' + lienVersAdversaireMatch(formaterNomComplet(m.joueur2_nom), m.joueur2_player_id, m.joueur2_rival_id);
             const carte = document.createElement('div');
             if (m.aReplayBot) {
                 carte.className = 'match-card';
