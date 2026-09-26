@@ -149,13 +149,15 @@
             }
         }
 
-        let estAdminCourant = false;
+        let peutGererAvatars = false;
 
         async function verifierAdmin() {
             const response = await fetch('/api/utilisateur/' + userId);
             const data = await response.json();
+            // Avatars : admin OU coach redacteur (demande explicite de l'utilisateur,
+            // 2026-09-27) - le lien "Administration" reste reserve a l'admin.
+            if (response.ok && (data.user.role === 'admin' || data.user.est_redacteur)) peutGererAvatars = true;
             if (response.ok && data.user.role === 'admin') {
-                estAdminCourant = true;
                 document.getElementById('admin-link').style.display = 'inline-block';
             }
         }
@@ -576,7 +578,7 @@
             const zonePhoto = document.getElementById('adversaire-photo-zone');
             if (typeAdversaire !== 'reel') {
                 zonePhoto.innerHTML = '';
-            } else if (!estAdminCourant) {
+            } else if (!peutGererAvatars) {
                 zonePhoto.innerHTML = data.infos.photoAvatar
                     ? `<div class="fiche-adversaire-photo"><img src="${data.infos.photoAvatar}" alt=""></div>`
                     : `<div class="fiche-adversaire-photo avatar-generique"><img src="${iconeGeneriqueAdversaire}" alt=""></div>`;

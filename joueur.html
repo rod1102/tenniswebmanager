@@ -79,7 +79,7 @@
         // Gestion des avatars reservee a l'admin, meme pour son propre joueur
         // (demande explicite de l'utilisateur, 2026-09-14) - connu avant le premier
         // rendu de carte pour ne jamais afficher les boutons a tort.
-        let estAdminCourant = false;
+        let peutGererAvatars = false;
         let joueurData = null;
         let joueuseData = null;
 
@@ -225,9 +225,11 @@
         async function verifierAdmin() {
             const response = await fetch('/api/utilisateur/' + userId);
             const data = await response.json();
+            // Avatars : admin OU coach redacteur (demande explicite de l'utilisateur,
+            // 2026-09-27) - le lien "Administration" reste reserve a l'admin.
+            if (response.ok && (data.user.role === 'admin' || data.user.est_redacteur)) peutGererAvatars = true;
             if (response.ok && data.user.role === 'admin') {
                 document.getElementById('admin-link').style.display = 'inline-block';
-                estAdminCourant = true;
             }
         }
 
@@ -887,7 +889,7 @@
                 ? `<div class="player-avatar-photo avatar-personnalise"><img src="${player.photo_avatar}" alt=""></div>`
                 : `<div class="player-avatar-photo avatar-generique"><img src="${iconeGenerique}" alt=""></div>`;
 
-            const avatarActionsHtml = estAdminCourant ? `
+            const avatarActionsHtml = peutGererAvatars ? `
                 <div class="avatar-actions">
                     <button type="button" class="avatar-changer-btn">Changer la photo</button>
                     ${player.photo_avatar ? '<button type="button" class="avatar-retirer-btn">Retirer</button>' : ''}
@@ -989,7 +991,7 @@
             container.appendChild(card);
             chargerZoneCapitaine(player);
 
-            if (estAdminCourant) {
+            if (peutGererAvatars) {
             const inputAvatar = card.querySelector('.avatar-input');
             card.querySelector('.avatar-changer-btn').addEventListener('click', function () {
                 inputAvatar.click();

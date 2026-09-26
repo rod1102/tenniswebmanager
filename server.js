@@ -854,9 +854,17 @@ app.get('/api/joueurs/:userId', (req, res) => {
 // l'utilisateur 2026-08-22).
 // Reserve a l'admin, meme pour SES PROPRES joueurs (demande explicite de
 // l'utilisateur, 2026-09-14 - avant, un coach pouvait gerer l'avatar de ses
-// propres joueurs sans etre admin).
+// propres joueurs sans etre admin). Etendu le 2026-09-27 (demande explicite de
+// l'utilisateur) aux coachs "redacteurs" (users.est_redacteur, accorde par l'admin),
+// sur N'IMPORTE QUEL joueur, comme l'admin.
+function peutGererAvatars(userId) {
+    if (estAdmin(userId)) return true;
+    const user = db.prepare('SELECT est_redacteur FROM users WHERE id = ?').get(userId);
+    return !!(user && user.est_redacteur);
+}
+
 function joueurGerableParAvatar(playerId, userId) {
-    if (!estAdmin(userId)) return null;
+    if (!peutGererAvatars(userId)) return null;
     return db.prepare('SELECT id, photo_avatar FROM players WHERE id = ?').get(playerId);
 }
 
