@@ -9,7 +9,7 @@
     <title>Mes joueurs — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260927">
+    <link rel="stylesheet" href="style.css?v=20260927b">
 </head>
 <body>
     <div class="dashboard-page">
@@ -894,6 +894,7 @@
                     <button type="button" class="avatar-changer-btn">Changer la photo</button>
                     ${player.photo_avatar ? '<button type="button" class="avatar-retirer-btn">Retirer</button>' : ''}
                 </div>
+                <div class="avatar-format-hint">Format conseillé : 1024 × 1536 px (portrait 2:3)</div>
                 <input type="file" class="avatar-input" accept="image/png,image/jpeg,image/webp,image/gif" style="display:none;">
             ` : '';
 

@@ -1049,8 +1049,10 @@ h1 {
    fiche adversaire quand une photo a ete uploadee - .player-avatar (rond, ci-
    dessus) reste inchange partout ailleurs (accueil/matchs/coach, icone generique). */
 .player-avatar-photo {
+    /* Proportion 2:3 = format des photos attendu (1024 x 1536 px), demande explicite de
+       l'utilisateur, 2026-09-27. */
     width: 160px;
-    height: 200px;
+    height: 240px;
     border-radius: 14px;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.12);
@@ -1101,14 +1103,22 @@ h1 {
     font-family: inherit;
 }
 
+.avatar-format-hint {
+    text-align: center;
+    font-size: 0.68rem;
+    color: #8B98A5;
+    margin: -8px 0 14px;
+}
+
 .avatar-actions button:hover {
     color: #F5F7FA;
     border-color: rgba(255, 255, 255, 0.4);
 }
 
 .fiche-adversaire-photo {
+    /* Proportion 2:3 (photos 1024 x 1536 px), voir .player-avatar-photo. */
     width: 220px;
-    height: 275px;
+    height: 330px;
     border-radius: 16px;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.12);
