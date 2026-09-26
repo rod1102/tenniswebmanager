@@ -1593,6 +1593,14 @@ h1 {
     font-weight: 700;
 }
 
+/* Annonce du titre a la fin d'une finale ("X remporte <tournoi>"), Live et Teletexte. */
+.live-log-victoire_tournoi,
+.teletexte-victoire_tournoi {
+    color: #F5B942;
+    font-weight: 800;
+    font-size: 0.85rem;
+}
+
 .live-log-set_fin,
 .teletexte-set_fin {
     color: #D4F000;

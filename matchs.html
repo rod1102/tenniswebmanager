@@ -374,6 +374,7 @@
                 ligne.textContent = evt.texte;
                 logDiv.appendChild(ligne);
                 logDiv.scrollTop = logDiv.scrollHeight;
+                if (evt.type === 'victoire_tournoi' && window.lancerConfettis) window.lancerConfettis(5000);
 
                 const score = libelleScore(evt);
                 if (score) {
@@ -495,6 +496,7 @@
                 ligne.textContent = evt.texte;
                 logDiv.appendChild(ligne);
                 logDiv.scrollTop = logDiv.scrollHeight;
+                if (evt.type === 'victoire_tournoi' && window.lancerConfettis) window.lancerConfettis(5000);
 
                 const score = libelleScore(evt);
                 if (score) scoreDiv.textContent = score;
@@ -1133,6 +1135,7 @@
             chargerMatchs().then(chargerAutresMatchs).then(construireMultiplex);
         });
     </script>
+    <script src="confettis.js?v=20260926"></script>
     <script src="retour.js?v=20260829"></script>
     <script src="theme-saison.js?v=20260831"></script>
 </body>

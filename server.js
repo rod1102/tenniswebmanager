@@ -4306,7 +4306,7 @@ function ajusterNiveauxStyle(niveauA_normal, niveauA_mental, styleA, mentalCoura
 // demande explicite de l'utilisateur, 2026-08-21) - absent/falsy pour un
 // adversaire lambda/rival ou une equipe de double, qui n'ont pas de condition
 // physique individuelle suivie.
-function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_mental, styleA, mentalCourantA, styleB, mentalCourantB, bonusSangFroidA, bonusSangFroidB, meilleurDe5, etatPhysiqueA, etatPhysiqueB) {
+function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_mental, styleA, mentalCourantA, styleB, mentalCourantB, bonusSangFroidA, bonusSangFroidB, meilleurDe5, etatPhysiqueA, etatPhysiqueB, nomTournoiSiFinale) {
     // Exception PDF : un match de Grand Chelem chez les hommes se joue en 3 sets
     // gagnants (5 sets max) au lieu de 2 (3 sets max) partout ailleurs - le set
     // decisif (Sang froid, tie-break a 10 points) se deplace donc du 3e au 5e set.
@@ -4356,6 +4356,17 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
             return { type: 'abandon', texte: '➕ John n\'a rien pu faire pour ' + nomJoueur(cote) + ', ' + texteAbandon };
         }
         return { type: 'kine', texte: '🚑 ' + nomJoueur(cote) + ' fait appel à John le kiné.' };
+    }
+
+    // Finale d'un tournoi (nomTournoiSiFinale renseigne par l'appelant) : ligne d'annonce
+    // "<vainqueur> remporte <tournoi>" poussee JUSTE AVANT match_fin (le Live s'arrete sur
+    // match_fin, une ligne posee apres ne s'afficherait jamais) - le Live y declenche aussi
+    // les confettis (confettis.js). Meme convention Toi/Adversaire que les autres lignes,
+    // donc miroirEvenements/remplacerNomsEvenements la traitent sans rien de special.
+    // Demande explicite de l'utilisateur, 2026-09-26.
+    function annoncerVictoireTournoi(coteVainqueur) {
+        if (!nomTournoiSiFinale) return;
+        evenements.push({ type: 'victoire_tournoi', texte: nomJoueur(coteVainqueur) + ' remporte ' + nomTournoiSiFinale });
     }
 
     while (setsA < setsRequis && setsB < setsRequis) {
@@ -4492,6 +4503,7 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
     if (abandonCote) {
         const vainqueurAbandon = abandonCote === 'A' ? 'B' : 'A';
         const scoreAbandon = scoreParManche.join(', ') + ' (Abandon)';
+        annoncerVictoireTournoi(vainqueurAbandon);
         evenements.push({
             type: 'match_fin',
             texte: 'Match termine : ' + (vainqueurAbandon === 'A' ? 'Victoire' : 'Defaite') + ' ' + scoreAbandon,
@@ -4510,6 +4522,7 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
         };
     }
 
+    annoncerVictoireTournoi(setsA > setsB ? 'A' : 'B');
     evenements.push({
         type: 'match_fin',
         texte: 'Match termine : ' + (setsA > setsB ? 'Victoire' : 'Defaite') + ' ' + scoreParManche.join(', '),
@@ -5687,7 +5700,8 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
     const resultat = simulerMatch(
         niveauReel_normal_avecDispositions, niveauReel_mental, niveauLambda_normal, niveauLambda_mental,
         styleA, player.mental_courant, null, undefined, bonus.sangFroid, 0, meilleurDe5,
-        { forme: player.forme, pointsEnergie: player.points_energie, condition: player.condition, type: player.type }
+        { forme: player.forme, pointsEnergie: player.points_energie, condition: player.condition, type: player.type },
+        undefined, label === 'Finale' ? tournoi.nom : null
     );
 
     const { kineIntervenu } = appliquerEtatPostMatch(player, tournoi.surface, styleA, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA);
@@ -5795,7 +5809,8 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
         niveau1_normal, niveau1_mental, niveau2_normal, niveau2_mental,
         style1, player1.mental_courant, style2, player2.mental_courant, bonus1.sangFroid, bonus2.sangFroid, meilleurDe5,
         { forme: player1.forme, pointsEnergie: player1.points_energie, condition: player1.condition, type: player1.type },
-        { forme: player2.forme, pointsEnergie: player2.points_energie, condition: player2.condition, type: player2.type }
+        { forme: player2.forme, pointsEnergie: player2.points_energie, condition: player2.condition, type: player2.type },
+        label === 'Finale' ? tournoi.nom : null
     );
 
     const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA, false, style2);
@@ -5842,7 +5857,7 @@ function resoudreMatchAdversaire(tournoi, label, j1, j2, tourIndex) {
     // sets gagnants, produisant des scores en 2 manches impossibles pour un GC
     // (bug signale par l'utilisateur, 2026-08-20).
     const meilleurDe5 = tournoi.circuit === 'ATP' && tournoi.categorie === 'slam';
-    const resultat = simulerMatch(j1.niveau, j1.niveau + 100, j2.niveau, j2.niveau + 100, null, undefined, null, undefined, 0, 0, meilleurDe5);
+    const resultat = simulerMatch(j1.niveau, j1.niveau + 100, j2.niveau, j2.niveau + 100, null, undefined, null, undefined, 0, 0, meilleurDe5, undefined, undefined, label === 'Finale' ? tournoi.nom : null);
     // Le moteur etiquette toujours les 2 cotes "Toi"/"Adversaire" (perspective d'un
     // coach) - sans le moindre sens pour un match 100% bots, remplace par les vrais
     // noms des deux entrants avant stockage.
