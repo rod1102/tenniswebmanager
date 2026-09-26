@@ -8258,15 +8258,20 @@ app.get('/api/pronostics/detail/:userId', (req, res) => {
     try {
         const userId = req.params.userId;
         const lignes = db.prepare(`
-            SELECT p.points_gagnes, t.nom AS tournoi_nom, t.circuit, t.categorie, t.semaine
+            SELECT p.points_gagnes, p.tournoi_id, t.nom AS tournoi_nom, t.circuit, t.categorie, t.semaine, t.statut
             FROM pronostics p
             JOIN tournois t ON t.id = p.tournoi_id
             WHERE p.user_id = ?
             ORDER BY t.semaine DESC, p.tournoi_id DESC
         `).all(userId);
+        const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
 
         const detail = lignes.map(function (l) {
             return {
+                tournoiId: l.tournoi_id,
+                // Le pronostic d'un autre coach n'est consultable qu'une fois verrouille
+                // (tournoi commence) - avant, cela permettrait de copier ses choix.
+                consultable: l.statut !== 'a_venir' || semaineActuelle >= l.semaine,
                 tournoiNom: l.tournoi_nom,
                 circuit: l.circuit,
                 positionSemaine: positionSemaineAffichee(l.semaine),
@@ -8277,6 +8282,69 @@ app.get('/api/pronostics/detail/:userId', (req, res) => {
         const total = detail.reduce(function (acc, d) { return acc + (d.pointsGagnes || 0); }, 0);
 
         res.json({ success: true, detail, total });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Pronostic d'un coach precis pour un tournoi precis (clic sur les points dans le detail
+// du classement Pronos, classements.html) - lecture publique, comme /api/pronostics/detail,
+// MAIS uniquement une fois le pronostic verrouille (tournoi commence), pour qu'on ne puisse
+// pas copier les choix d'un autre coach avant le coup d'envoi. Chaque choix est accompagne
+// de son etat reel ('juste' / 'faux' / 'en_cours') d'apres tournoi_joueurs.tour_elimine.
+app.get('/api/pronostics/vue/:userId/:tournoiId', (req, res) => {
+    try {
+        const { userId, tournoiId } = req.params;
+        const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+        if (!tournoi) return res.status(404).json({ error: 'Tournoi introuvable.' });
+
+        const semaineActuelle = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
+        if (tournoi.statut === 'a_venir' && semaineActuelle < tournoi.semaine) {
+            return res.status(403).json({ error: 'Ce pronostic sera visible une fois le tournoi commencé.' });
+        }
+
+        const ligne = db.prepare('SELECT predictions, points_gagnes FROM pronostics WHERE user_id = ? AND tournoi_id = ?').get(userId, tournoiId);
+        if (!ligne) return res.status(404).json({ error: 'Aucun pronostic pour ce tournoi.' });
+        let predictions = null;
+        try { predictions = JSON.parse(ligne.predictions); } catch (e) { predictions = null; }
+        if (!predictions) return res.status(404).json({ error: 'Pronostic illisible.' });
+
+        const entrants = db.prepare('SELECT id, nom, nationalite, tour_elimine FROM tournoi_joueurs WHERE tournoi_id = ?').all(tournoiId);
+        const parId = new Map(entrants.map(function (e) { return [e.id, e]; }));
+        const type = typePronostic(tournoi);
+        const labelsTours = type === 'cascade' ? calculerLabelsTours(tournoi.taille_tableau, tournoi.format) : null;
+
+        // etat reel d'un choix pour un tour donne (tourCible = null : le vainqueur)
+        function etat(id, tourCible) {
+            const e = parId.get(id);
+            if (!e) return 'en_cours';
+            const reel = e.tour_elimine;
+            if (tourCible === null) return reel === 'Vainqueur' ? 'juste' : (reel ? 'faux' : 'en_cours');
+            if (!reel) return 'en_cours'; // toujours en lice
+            return aAtteintTour(reel, tourCible, labelsTours) ? 'juste' : 'faux';
+        }
+        function choix(id, tourCible) {
+            const e = parId.get(id);
+            return { nom: e ? e.nom : '?', drapeau: e ? drapeau(e.nationalite) : null, etat: etat(id, tourCible) };
+        }
+
+        const resultat = {
+            success: true,
+            coach: nomCoach(userId),
+            tournoi: { nom: tournoi.nom, circuit: tournoi.circuit, categorie: tournoi.categorie },
+            type,
+            pointsGagnes: ligne.points_gagnes
+        };
+        if (type === 'simple') {
+            resultat.vainqueur = choix(predictions.vainqueur, null);
+        } else {
+            resultat.tours = BAREME_CASCADE.map(function (etape) {
+                return { cle: etape.cle, libelle: etape.tour, choix: (predictions[etape.cle] || []).map(function (id) { return choix(id, etape.tour); }) };
+            });
+            resultat.vainqueur = choix(predictions.vainqueur, null);
+        }
+        res.json(resultat);
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });

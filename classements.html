@@ -261,6 +261,61 @@
             afficherClassement();
         }
 
+        function echapperHtmlProno(texte) {
+            return String(texte == null ? '' : texte).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+        }
+
+        // Pronostic pose par un coach pour un tournoi (clic sur ses points) : chaque choix
+        // est colore selon ce qui s'est reellement passe (vert = juste, rouge = faux, gris =
+        // pas encore joue). La route refuse tant que le tournoi n'a pas commence.
+        async function ouvrirPronoCoach(userIdCible, tournoiId) {
+            const overlay = document.createElement('div');
+            overlay.className = 'dispo-blocage-overlay';
+            overlay.style.zIndex = '10000';
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box" style="max-width:520px; max-height:85vh; overflow-y:auto;">
+                    <div class="stats-header" style="margin-top:0;" id="prono-coach-titre">Pronostic</div>
+                    <div id="prono-coach-corps"><div class="match-hint">Chargement...</div></div>
+                    <button class="cta cta-secondary" id="prono-coach-fermer" style="margin-top:16px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+            document.getElementById('prono-coach-fermer').addEventListener('click', function () { overlay.remove(); });
+
+            const COULEURS = { juste: '#5CC57F', faux: '#E24B4A', en_cours: '#C4CDD6' };
+            function chipHtml(c) {
+                return `<span style="display:inline-block; margin:2px 10px 2px 0; color:${COULEURS[c.etat] || COULEURS.en_cours};">${flagImg(c.drapeau)} ${echapperHtmlProno(formaterNomComplet(c.nom))}</span>`;
+            }
+
+            try {
+                const response = await fetch('/api/pronostics/vue/' + userIdCible + '/' + tournoiId);
+                const data = await response.json();
+                if (!overlay.isConnected) return;
+                const corps = document.getElementById('prono-coach-corps');
+                if (!response.ok) {
+                    corps.innerHTML = '<div class="match-hint">' + echapperHtmlProno(data.error || 'Impossible de charger ce pronostic.') + '</div>';
+                    return;
+                }
+                document.getElementById('prono-coach-titre').innerHTML =
+                    `Pronostic de ${echapperHtmlProno(data.coach)} — <span class="${data.tournoi.circuit === 'WTA' ? 'tournoi-name-wta' : 'tournoi-name-atp'}">${echapperHtmlProno(data.tournoi.nom)}</span>`;
+
+                let html = '';
+                if (data.type === 'cascade') {
+                    data.tours.forEach(function (tour) {
+                        html += `<div class="match-hint" style="margin:10px 0 2px;">${echapperHtmlProno(tour.libelle)}</div><div>${tour.choix.map(chipHtml).join('')}</div>`;
+                    });
+                    html += `<div class="match-hint" style="margin:12px 0 2px;">Vainqueur pronostiqué</div><div style="font-weight:700;">${chipHtml(data.vainqueur)}</div>`;
+                } else {
+                    html += `<div class="match-hint" style="margin:6px 0 2px;">Vainqueur pronostiqué</div><div style="font-weight:700;">${chipHtml(data.vainqueur)}</div>`;
+                }
+                html += `<div class="match-hint" style="margin-top:14px;">${data.pointsGagnes === null ? 'Points : en attente' : 'Points : ' + data.pointsGagnes}</div>`;
+                corps.innerHTML = html;
+            } catch (err) {
+                if (overlay.isConnected) document.getElementById('prono-coach-corps').innerHTML = '<div class="match-hint">Impossible de charger ce pronostic.</div>';
+            }
+        }
+
         async function ouvrirDetailPronos(userIdCible) {
             const overlay = document.createElement('div');
             overlay.className = 'dispo-blocage-overlay';
@@ -293,10 +348,15 @@
                 const lignesHtml = data.detail.map(function (d) {
                     const enAttente = d.pointsGagnes === null;
                     const pts = enAttente ? 'en attente' : (d.pointsGagnes + ' pts');
+                    // Les points ouvrent le pronostic pose par ce coach (uniquement une
+                    // fois le tournoi commence : jamais avant, pour ne pas etre copie).
+                    const valeurHtml = d.consultable
+                        ? `<button type="button" class="prono-voir-btn" data-tournoi-id="${d.tournoiId}" title="Voir le pronostic" style="background:none; border:none; padding:0; cursor:pointer; font:inherit; font-weight:700; color:${enAttente ? '#8a8f9b' : 'inherit'}; text-decoration:underline dotted;">${pts}</button>`
+                        : pts;
                     return `
                         <div class="stat-row">
                             <span class="stat-label"><span class="${d.circuit === 'WTA' ? 'tournoi-name-wta' : 'tournoi-name-atp'}">${d.tournoiNom}</span> <span class="match-hint">(S${d.positionSemaine}, Saison ${d.numeroSaison})</span></span>
-                            <span class="stat-value"${enAttente ? ' style="color:#8a8f9b;"' : ''}>${pts}</span>
+                            <span class="stat-value"${enAttente || !d.consultable ? ' style="color:#8a8f9b;"' : ''}>${valeurHtml}</span>
                         </div>
                     `;
                 }).join('');
@@ -307,6 +367,11 @@
                         <span class="stat-value" style="font-weight:700;">${data.total}</span>
                     </div>
                 `;
+                corps.querySelectorAll('.prono-voir-btn').forEach(function (bouton) {
+                    bouton.addEventListener('click', function () {
+                        ouvrirPronoCoach(userIdCible, bouton.dataset.tournoiId);
+                    });
+                });
             } catch (err) {
                 if (overlay.isConnected) {
                     document.getElementById('detail-pronos-corps').innerHTML = '<div class="match-hint">Impossible de charger le détail.</div>';
