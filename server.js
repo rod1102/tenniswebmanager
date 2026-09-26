@@ -9194,6 +9194,20 @@ function calculerBadgesCoach(userId) {
     ]);
 }
 
+// Tournois de 2 semaines : tournois.semaine (et donc matchs.semaine) porte la semaine de
+// DEBUT. Un tel tournoi termine pendant sa 2e semaine (semaine_actuelle = debut + 1) doit
+// donc rester visible cette semaine-la sur la page Matchs - sinon il disparaissait des
+// qu'il se terminait, en pleine semaine, alors que ses matchs venaient d'etre joues (bug
+// signale par l'utilisateur, 2026-09-26 : Open d'Australie, page Matchs vide en S4).
+// Retour : { sql: fragment AND-ready ou 'FALSE', params: [...] } pour la semaine donnee.
+const IDS_TOURNOIS_2_SEMAINES = CALENDRIER_TOURNOIS.filter(function (t) { return t.duree > 1; }).map(function (t) { return t.id; });
+function conditionDeuxiemeSemaine(semaineActuelle) {
+    return {
+        sql: '(tournois.calendrier_id IN (' + IDS_TOURNOIS_2_SEMAINES.map(function () { return '?'; }).join(',') + ') AND tournois.semaine = ?)',
+        params: IDS_TOURNOIS_2_SEMAINES.concat([semaineActuelle - 1])
+    };
+}
+
 app.get('/api/matchs/semaine/:userId', (req, res) => {
     try {
         const userId = req.userId;
@@ -9225,13 +9239,14 @@ app.get('/api/matchs/semaine/:userId', (req, res) => {
             return res.json({ success: true, tournois: [] });
         }
         const placeholders = circuits.map(function () { return '?'; }).join(',');
+        const deuxiemeSemaine = conditionDeuxiemeSemaine(semaineActuelle);
         const tournois = db.prepare(`
             SELECT tournois.id, tournois.nom, tournois.circuit, tournois.surface,
                    tournois.calendrier_id, tournois.semaine
             FROM tournois
-            WHERE (tournois.statut = 'a_venir' OR tournois.semaine = ?)
+            WHERE (tournois.statut = 'a_venir' OR tournois.semaine = ? OR ${deuxiemeSemaine.sql})
               AND tournois.circuit IN (${placeholders})
-        `).all(semaineActuelle, ...circuits);
+        `).all(semaineActuelle, ...deuxiemeSemaine.params, ...circuits);
 
         const resultat = tournois.map(function (t) {
             t.player_id = joueurParCircuit[t.circuit];
@@ -9307,6 +9322,7 @@ app.get('/api/matchs/:userId', (req, res) => {
         // de "Mes matchs" des que la semaine change, pas rester visible une semaine de
         // plus. "Historique de mes matchs" sur la fiche joueur (adversaire.html) reste
         // la vraie page d'archive complete.
+        const deuxiemeSemaine = conditionDeuxiemeSemaine(etat.semaine_actuelle);
         const matchs = db.prepare(`
             SELECT matchs.id, matchs.player_id, matchs.surface, matchs.difficulte, matchs.semaine,
                    matchs.vainqueur, matchs.score, matchs.niveau_joueur, matchs.niveau_adversaire, matchs.date_creation,
@@ -9323,16 +9339,17 @@ app.get('/api/matchs/:userId', (req, res) => {
             LEFT JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
             LEFT JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
             WHERE matchs.user_id = ?
-              AND (tournois.statut = 'a_venir' OR coupe_equipes.statut = 'a_venir' OR matchs.semaine = ?)
+              AND (tournois.statut = 'a_venir' OR coupe_equipes.statut = 'a_venir' OR matchs.semaine = ? OR ${deuxiemeSemaine.sql})
             ORDER BY matchs.id DESC
-        `).all(userId, etat.semaine_actuelle);
+        `).all(userId, etat.semaine_actuelle, ...deuxiemeSemaine.params);
 
         const nbDivisionsCoupeCache = {};
         matchs.forEach(function (m) {
             // Meme critere que le WHERE ci-dessus (coherent avec ce qui est visible du
             // tout) : Live reste accessible tant que le tournoi/la rencontre est encore
             // en cours, ou si le match a eu lieu cette semaine precisement.
-            m.estSemaineActuelle = m.tournoi_statut === 'a_venir' || m.coupe_statut === 'a_venir' || m.semaine === etat.semaine_actuelle;
+            m.estSemaineActuelle = m.tournoi_statut === 'a_venir' || m.coupe_statut === 'a_venir' || m.semaine === etat.semaine_actuelle
+                || (IDS_TOURNOIS_2_SEMAINES.indexOf(m.tournoi_calendrier_id) !== -1 && m.semaine === etat.semaine_actuelle - 1);
             m.positionSemaine = positionSemaineAffichee(m.semaine);
             // Les matchs amicaux (pas de tournoi_id) peuvent avoir lieu meme en
             // Pre-saison/Semaine 0, ou positionSemaine est null - libelle de repli
