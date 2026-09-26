@@ -1074,8 +1074,11 @@ h1 {
 .player-avatar-photo.avatar-personnalise img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    object-position: 50% 18%;
+    /* contain : la photo est affichee EN ENTIER (plus de recadrage qui coupait la tete
+       ou le corps), avec des bandes de fond si les proportions different du cadre -
+       demande explicite de l'utilisateur, 2026-09-27 (cas de Heinzo). */
+    object-fit: contain;
+    object-position: center;
     display: block;
 }
 
@@ -1116,8 +1119,9 @@ h1 {
 .fiche-adversaire-photo img {
     width: 100%;
     height: 100%;
-    object-fit: cover;
-    object-position: 50% 14%;
+    /* contain : voir .player-avatar-photo.avatar-personnalise img ci-dessus. */
+    object-fit: contain;
+    object-position: center;
     display: block;
 }
 
