@@ -1816,4 +1816,21 @@ if (db.prepare('SELECT patch_tournois_isoles_mal_places_20260924 AS p FROM jeu_e
     db.prepare('UPDATE jeu_etat SET patch_tournois_isoles_mal_places_20260924 = 1 WHERE id = 1').run();
 }
 
+// Droits d'administrateur pour le coach "Szynal" (user_id 29), demande explicite de
+// l'utilisateur le 2026-09-27 - compte identifie via /api/admin/chercher-joueur (un seul
+// utilisateur correspond, joueurs David Heinzo et Kikyo Kitsune). Aucune interface ne
+// permet de changer un role, d'ou ce correctif unique. Garde-fou : n'agit que si l'id ET
+// le pseudo correspondent bien, jamais sur un autre compte.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_admin_szynal_20260927 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_admin_szynal_20260927 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const cible = db.prepare("SELECT id, pseudo, role FROM users WHERE id = 29 AND pseudo = 'Szynal' COLLATE NOCASE").get();
+    if (cible) {
+        db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(cible.id);
+        console.log('[patch_admin_szynal_20260927] user ' + cible.id + ' (' + cible.pseudo + ') : role ' + cible.role + ' -> admin');
+    } else {
+        console.log('[patch_admin_szynal_20260927] non applique : aucun compte id 29 avec le pseudo Szynal');
+    }
+    db.prepare('UPDATE jeu_etat SET patch_admin_szynal_20260927 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
