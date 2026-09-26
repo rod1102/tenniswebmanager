@@ -9,7 +9,7 @@
     <title>Classements — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260829">
+    <link rel="stylesheet" href="style.css?v=20260927b">
 </head>
 <body>
     <div class="dashboard-page">
@@ -295,7 +295,7 @@
                     const pts = enAttente ? 'en attente' : (d.pointsGagnes + ' pts');
                     return `
                         <div class="stat-row">
-                            <span class="stat-label">${d.tournoiNom} <span class="match-hint">(S${d.positionSemaine}, Saison ${d.numeroSaison})</span></span>
+                            <span class="stat-label"><span class="${d.circuit === 'WTA' ? 'tournoi-name-wta' : 'tournoi-name-atp'}">${d.tournoiNom}</span> <span class="match-hint">(S${d.positionSemaine}, Saison ${d.numeroSaison})</span></span>
                             <span class="stat-value"${enAttente ? ' style="color:#8a8f9b;"' : ''}>${pts}</span>
                         </div>
                     `;
