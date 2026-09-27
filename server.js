@@ -749,6 +749,53 @@ app.post('/api/deconnexion', (req, res) => {
 // Duree de validite d'un jeton de reinitialisation de mot de passe.
 const EXPIRATION_RESET_MOT_DE_PASSE_MS = 60 * 60 * 1000; // 1 heure
 
+// Diagnostic (admin) d'un cas "je ne recois pas le mail de reinitialisation" :
+// verifie si le compte existe (exact ET insensible a la casse - users.email n'a pas
+// de COLLATE NOCASE, une casse differente donnerait "aucun compte" silencieusement),
+// puis tente un VRAI envoi Resend en attendant sa reponse (contrairement a la vraie
+// route qui l'envoie sans attendre et n'affiche l'erreur que dans les logs serveur) -
+// renvoie l'erreur Resend telle quelle si l'envoi echoue. Demande explicite de
+// l'utilisateur, 2026-09-28 (cas de florian.szynal@gmail.com).
+app.post('/api/admin/diagnostic-reset-email', async (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const email = String(req.body.email || '').trim();
+        if (!email) return res.status(400).json({ error: 'Adresse e-mail requise.' });
+
+        const exact = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
+        const insensible = db.prepare('SELECT id, email FROM users WHERE email = ? COLLATE NOCASE').get(email);
+
+        const resultat = {
+            emailRecherche: email,
+            compteTrouveExact: !!exact,
+            compteTrouveInsensibleCasse: !!insensible,
+            emailStockeSiDifferent: (insensible && insensible.email !== email) ? insensible.email : null,
+            resendConfigure: !!resend
+        };
+
+        if (resend) {
+            try {
+                const envoi = await resend.emails.send({
+                    from: 'Tennis Web Manager <noreply@tenniswebmanager.com>',
+                    to: [email],
+                    subject: '[Diagnostic] Test envoi Tennis Web Manager',
+                    html: '<p>Ceci est un e-mail de test pour verifier que les envois fonctionnent bien.</p>'
+                });
+                resultat.envoiTest = { succes: !envoi.error, reponse: envoi };
+            } catch (erreurEnvoi) {
+                resultat.envoiTest = { succes: false, erreur: erreurEnvoi.message, details: erreurEnvoi };
+            }
+        }
+
+        res.json({ success: true, resultat });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.post('/api/mot-de-passe-oublie', (req, res) => {
     try {
         const { email } = req.body;
