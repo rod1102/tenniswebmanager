@@ -815,6 +815,34 @@ app.post('/api/admin/diagnostic-reset-email', async (req, res) => {
     }
 });
 
+// Genere un vrai lien de reinitialisation (meme token/expiration que la vraie route)
+// et le renvoie DIRECTEMENT a l'admin, sans passer par l'e-mail - depannage pour un
+// coach dont la livraison echoue (ex. fournisseur qui bounce temporairement un
+// domaine tout juste verifie) : l'admin transmet alors le lien lui-meme (Discord,
+// SMS...). Demande explicite de l'utilisateur, 2026-09-28 (cas de David Szynal,
+// david.szynal@laposte.net).
+app.post('/api/admin/generer-lien-reset', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const email = String(req.body.email || '').trim();
+        if (!email) return res.status(400).json({ error: 'Adresse e-mail requise.' });
+
+        const user = db.prepare('SELECT id, email FROM users WHERE TRIM(email) = ? COLLATE NOCASE').get(email);
+        if (!user) return res.status(404).json({ error: 'Aucun compte ne correspond a cette adresse.' });
+
+        const token = crypto.randomBytes(32).toString('hex');
+        const expire = new Date(Date.now() + EXPIRATION_RESET_MOT_DE_PASSE_MS).toISOString();
+        db.prepare('UPDATE users SET reset_token = ?, reset_token_expire = ? WHERE id = ?').run(token, expire, user.id);
+
+        res.json({ success: true, emailStocke: user.email, lien: SITE_URL + '/reinitialiser-mot-de-passe.html?token=' + token, expire });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.post('/api/mot-de-passe-oublie', (req, res) => {
     try {
         // Meme normalisation que /api/connexion (espaces + casse) - sinon une adresse
