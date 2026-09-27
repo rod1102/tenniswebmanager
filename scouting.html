@@ -26,14 +26,29 @@
         .scout-moi-card { background: rgba(79, 163, 224, 0.15); border: 1px solid rgba(79, 163, 224, 0.4); border-radius: 14px; padding: 18px; margin-bottom: 24px; }
         .scout-moi-nom { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #4FA3E0; margin-bottom: 6px; }
         .scout-moi-rang { font-size: 2rem; font-weight: 800; }
-        .scout-table-wrap { overflow-x: auto; }
-        .scout-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; white-space: nowrap; }
-        .scout-table th { text-align: left; padding: 8px 10px; color: #8B98A5; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.12); position: sticky; top: 0; }
-        .scout-table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
-        .scout-table tr.scout-row-moi { background: rgba(79, 163, 224, 0.1); }
-        .scout-chip { display: inline-block; background: rgba(79, 163, 224, 0.18); color: #4FA3E0; border-radius: 6px; padding: 2px 6px; margin-right: 3px; font-weight: 700; font-size: 0.72rem; }
-        .scout-estime { color: #8B98A5; font-style: italic; }
-        .scout-legende { font-size: 0.72rem; color: #8B98A5; margin-top: 10px; line-height: 1.6; }
+
+        /* Filtre/recherche au-dessus du tableau. */
+        .scout-filtre { max-width: 320px; margin: 0 0 14px; }
+
+        .scout-table-wrap { overflow-x: auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; }
+        .scout-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+        .scout-table th {
+            text-align: left; padding: 12px 14px; color: #8B98A5; font-weight: 700; font-size: 0.72rem;
+            text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+            background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.14);
+        }
+        .scout-table th.num, .scout-table td.num { text-align: right; }
+        .scout-table td { padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: middle; }
+        .scout-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+        .scout-table tbody tr:hover { background: rgba(255,255,255,0.06); }
+        .scout-table tr.scout-row-moi { background: rgba(79, 163, 224, 0.14) !important; }
+        .scout-table td.nom { font-weight: 600; }
+        .scout-xp-total { font-weight: 800; font-size: 0.95rem; cursor: help; border-bottom: 1px dotted #8B98A5; }
+        .scout-auto { display: inline-flex; gap: 6px; font-size: 0.76rem; color: #C4CDD6; }
+        .scout-auto b { color: #F5F7FA; }
+        .scout-estime { color: #8B98A5; }
+        .scout-tag-estime { font-size: 0.62rem; vertical-align: super; color: #E8A13C; }
+        .scout-legende { font-size: 0.75rem; color: #8B98A5; margin-top: 14px; line-height: 1.7; }
     </style>
 </head>
 <body>
@@ -66,21 +81,26 @@
                 <div id="scout-podium" class="scout-podium"></div>
 
                 <div class="stats-header">Classement complet</div>
+                <div class="form-group scout-filtre">
+                    <input type="text" id="scout-recherche" placeholder="Filtrer par nom..." autocomplete="off">
+                </div>
                 <div class="scout-table-wrap">
                     <table class="scout-table">
                         <thead>
                             <tr>
-                                <th>#</th><th>Joueur</th><th>Classement live</th><th>Parcours (XP/semaine)</th>
-                                <th>XP saison</th><th>Tournois</th><th>V</th><th>D</th>
-                                <th>Forme perdue</th><th>Mental max</th>
+                                <th>#</th><th>Joueur</th><th class="num">Classement live</th>
+                                <th class="num">XP saison</th><th class="num">Tournois</th><th class="num">V</th><th class="num">D</th>
+                                <th>Forme perdue</th><th>Automatismes</th><th class="num">Mental max</th>
                             </tr>
                         </thead>
                         <tbody id="scout-tbody"></tbody>
                     </table>
                 </div>
                 <div class="scout-legende">
-                    <strong>Exact</strong> : uniquement pour tes propres joueurs (fond bleu).
-                    <strong>Estimé</strong> (en italique) : reconstruit à partir des scores publics et du taux de perte de forme par défaut (0,10/jeu) — le style de jeu choisi restant confidentiel, cette estimation peut s'écarter de la vraie valeur. Le mental n'est jamais estimé (les points importants disputés ne sont pas publics) : « — » pour tout joueur qui n'est pas le tien.
+                    Sans marque = exact (fond bleu = tes propres joueurs). <span class="scout-tag-estime">estimé</span> : reconstruit uniquement à partir de données déjà publiques (scores, tours atteints, télétexte des matchs de tournoi, surfaces jouées), jamais lu directement sur un joueur qui n'est pas le tien.
+                    <strong>Forme perdue</strong> : nombre de jeux disputés × un taux par défaut (0,10/jeu) — le style de jeu choisi restant confidentiel, l'écart avec la vraie valeur peut être significatif.
+                    <strong>Automatismes</strong> (Dur/Terre/Herbe) : +3 par match de tournoi joué sur cette surface cette semaine-là, −5 les semaines sans match dessus (jamais l'entraînement dédié, non public).
+                    <strong>Mental max</strong> : reconstruit à partir du nombre réel de points importants comptés dans le télétexte de chaque match (public), en ignorant un éventuel style « Mental d'acier » (confidentiel).
                 </div>
             </div>
         </div>
@@ -91,6 +111,7 @@
         if (!userId) window.location.href = 'connexion.html';
 
         let circuitCourant = 'ATP';
+        let classementCache = [];
 
         async function verifierAdmin() {
             const response = await fetch('/api/utilisateur/' + userId);
@@ -141,29 +162,49 @@
                 `;
             }).join('');
 
+            classementCache = data.classement;
+            afficherTableau();
+        }
+
+        function afficherTableau() {
+            const filtre = document.getElementById('scout-recherche').value.trim().toLowerCase();
+            const lignes = classementCache.filter(function (j) { return !filtre || formaterNom(j.nom).toLowerCase().indexOf(filtre) !== -1; });
+
             const tbody = document.getElementById('scout-tbody');
-            tbody.innerHTML = data.classement.map(function (j, i) {
-                const puces = j.xpParSemaine.map(function (s) { return '<span class="scout-chip">S' + s.semaine + ': ' + s.xp + '</span>'; }).join('');
+            if (lignes.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="10" class="match-hint">Aucun joueur ne correspond.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = lignes.map(function (j) {
+                const rang = classementCache.indexOf(j) + 1;
+                const detailXp = j.xpParSemaine.map(function (s) { return 'S' + s.semaine + ' : ' + s.xp; }).join(' · ') || 'aucun XP crédité';
                 const forme = j.estMoi
                     ? (j.formeActuelle !== null ? j.formeActuelle : '—')
-                    : (j.formePerdueEstimee !== null ? '<span class="scout-estime">-' + j.formePerdueEstimee + ' (estimé)</span>' : '—');
-                const mental = j.estMoi ? (j.mentalMax !== null ? j.mentalMax : '—') : '—';
+                    : (j.formePerdueEstimee !== null ? '<span class="scout-estime">−' + j.formePerdueEstimee + '</span> <span class="scout-tag-estime">estimé</span>' : '—');
+                const auto = j.automatismes
+                    ? `<span class="scout-auto"><b>D</b>${j.automatismes.dur} <b>T</b>${j.automatismes.terre} <b>H</b>${j.automatismes.herbe}</span>${j.estMoi ? '' : ' <span class="scout-tag-estime">estimé</span>'}`
+                    : '—';
+                const mental = j.mentalMax !== null
+                    ? (j.estMoi ? j.mentalMax : `<span class="scout-estime">${j.mentalMax}</span> <span class="scout-tag-estime">estimé</span>`)
+                    : '—';
                 return `
                     <tr class="${j.estMoi ? 'scout-row-moi' : ''}">
-                        <td>${i + 1}</td>
-                        <td>${formaterNom(j.nom)}</td>
-                        <td>${j.classementLive || '—'}</td>
-                        <td>${puces || '—'}</td>
-                        <td><strong>${j.xpTotalSaison}</strong></td>
-                        <td>${j.tournois}</td>
-                        <td>${j.victoires}</td>
-                        <td>${j.defaites}</td>
+                        <td>${rang}</td>
+                        <td class="nom">${formaterNom(j.nom)}</td>
+                        <td class="num">${j.classementLive || '—'}</td>
+                        <td class="num"><span class="scout-xp-total" title="${detailXp}">${j.xpTotalSaison}</span></td>
+                        <td class="num">${j.tournois}</td>
+                        <td class="num">${j.victoires}</td>
+                        <td class="num">${j.defaites}</td>
                         <td>${forme}</td>
-                        <td>${mental}</td>
+                        <td>${auto}</td>
+                        <td class="num">${mental}</td>
                     </tr>
                 `;
             }).join('');
         }
+
+        document.getElementById('scout-recherche').addEventListener('input', afficherTableau);
 
         document.querySelectorAll('[data-circuit]').forEach(function (bouton) {
             bouton.addEventListener('click', function () {

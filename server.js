@@ -1314,10 +1314,15 @@ app.get('/api/admin/diagnostic-planning/:playerId', (req, res) => {
 
 // Total XP credite (entrainement + tournoi, meme pool) sur la saison en cours,
 // semaine par semaine - alimente les puces "Parcours" et le total "XP au plus".
+// "semaine > debutSaison" (jamais BETWEEN, borne inclusive) : debutSaison est
+// l'absolu de la Semaine 0 elle-meme (borne EXCLUE, meme convention que partout
+// ailleurs dans server.js, ex. /api/classement/:userId) - une comparaison
+// inclusive faisait apparaitre une semaine "Snull" (positionSemaineAffichee rend
+// null pour la Pre-saison/S0, bug signale par l'utilisateur, 2026-09-28).
 function xpParSemaineSaison(playerId, debutSaison, semaineActuelle) {
     return db.prepare(`
         SELECT semaine, xp_credite FROM journal_semaine_joueur
-        WHERE player_id = ? AND semaine BETWEEN ? AND ? ORDER BY semaine
+        WHERE player_id = ? AND semaine > ? AND semaine <= ? ORDER BY semaine
     `).all(playerId, debutSaison, semaineActuelle);
 }
 
@@ -1330,6 +1335,68 @@ function jeuxTotalDuScore(score) {
         if (parts.length !== 2 || parts.some(isNaN)) return somme;
         return somme + parts[0] + parts[1];
     }, 0);
+}
+
+// Mental max ESTIME pour un joueur qui n'est pas le mien : rejoue la formule
+// reelle (appliquerEtatPostMatch : mental_max += pointsImportants * 0.1, taux
+// "Mental d'acier" 0.15 ignore car le style est confidentiel) a partir du
+// TELETEXTE de chacun de ses matchs de tournoi cette saison - matchs.evenements
+// est deja public pour tout match de tournoi (bracket consultable par n'importe
+// quel coach, cf. /api/matchs/detail), donc compter les evenements de type
+// "point_important" ne lit rien de prive. Rejoue aussi la reduction globale de
+// fin de Grand Chelem (evenements_globaux, -2/3 de l'exces au-dela de 100),
+// appliquee a TOUT le monde a la meme semaine, donc elle aussi publique. Part
+// d'une base de 100 (valeur de creation, remise a ce niveau chaque Pre-saison).
+function mentalMaxEstime(playerId, debutSaison, semaineActuelle) {
+    const matchs = db.prepare(`
+        SELECT semaine, evenements FROM matchs
+        WHERE player_id = ? AND tournoi_id IS NOT NULL AND semaine > ? AND semaine <= ?
+        ORDER BY semaine, id
+    `).all(playerId, debutSaison, semaineActuelle);
+    const pointsParSemaine = new Map();
+    matchs.forEach(function (m) {
+        let ev = [];
+        try { ev = JSON.parse(m.evenements) || []; } catch (e) { ev = []; }
+        const n = ev.filter(function (e) { return e && e.type === 'point_important'; }).length;
+        pointsParSemaine.set(m.semaine, (pointsParSemaine.get(m.semaine) || 0) + n);
+    });
+    const reductionsParSemaine = new Set(
+        db.prepare('SELECT DISTINCT semaine FROM evenements_globaux WHERE semaine > ? AND semaine <= ?').all(debutSaison, semaineActuelle)
+            .map(function (r) { return r.semaine; })
+    );
+
+    let mentalMax = 100;
+    for (let s = debutSaison + 1; s <= semaineActuelle; s++) {
+        if (pointsParSemaine.has(s)) mentalMax += pointsParSemaine.get(s) * 0.1;
+        if (reductionsParSemaine.has(s) && mentalMax > 100) mentalMax -= (mentalMax - 100) * (2 / 3);
+    }
+    return Math.round(mentalMax * 10) / 10;
+}
+
+// Automatismes ESTIMES (dur/terre/herbe) pour un joueur qui n'est pas le mien :
+// regle simplifiee demandee explicitement par l'utilisateur (2026-09-28) - +3 par
+// match de tournoi joue sur cette surface CETTE semaine-la (jamais +15, qui
+// suppose un entrainement de surface non public ; jamais +6 "Reperage", style
+// confidentiel), -5 les semaines sans match sur cette surface. Part de 0 (valeur
+// de creation, remise a ce niveau chaque Pre-saison). Plafonne 0-30 comme en jeu.
+function automatismesEstimes(playerId, debutSaison, semaineActuelle) {
+    const parSemaine = new Map();
+    db.prepare(`
+        SELECT DISTINCT semaine, surface FROM matchs
+        WHERE player_id = ? AND tournoi_id IS NOT NULL AND semaine > ? AND semaine <= ?
+    `).all(playerId, debutSaison, semaineActuelle).forEach(function (r) {
+        if (!parSemaine.has(r.semaine)) parSemaine.set(r.semaine, new Set());
+        parSemaine.get(r.semaine).add(r.surface);
+    });
+
+    const valeurs = { dur: 0, terre: 0, herbe: 0 };
+    for (let s = debutSaison + 1; s <= semaineActuelle; s++) {
+        const jouees = parSemaine.get(s) || new Set();
+        SURFACES.forEach(function (surf) {
+            valeurs[surf] = jouees.has(surf) ? Math.min(30, valeurs[surf] + 3) : Math.max(0, valeurs[surf] - 5);
+        });
+    }
+    return valeurs;
 }
 
 app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
@@ -1351,7 +1418,7 @@ app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
             const xpSemaines = xpParSemaineSaison(p.id, debutSaison, semaineActuelle);
             const xpTotal = xpSemaines.reduce(function (s, l) { return s + (l.xp_credite || 0); }, 0);
 
-            const matchsSaison = db.prepare('SELECT surface, vainqueur, score, tournoi_id FROM matchs WHERE player_id = ? AND semaine BETWEEN ? AND ? AND tournoi_id IS NOT NULL')
+            const matchsSaison = db.prepare('SELECT surface, vainqueur, score, tournoi_id FROM matchs WHERE player_id = ? AND semaine > ? AND semaine <= ? AND tournoi_id IS NOT NULL')
                 .all(p.id, debutSaison, semaineActuelle);
             const victoires = matchsSaison.filter(function (m) { return m.vainqueur === 'joueur'; }).length;
             const defaites = matchsSaison.length - victoires;
@@ -1367,11 +1434,14 @@ app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
                 xpParSemaine: xpSemaines.map(function (l) { return { semaine: positionSemaineAffichee(l.semaine), xp: l.xp_credite }; }),
                 tournois, victoires, defaites,
                 formePerdueEstimee,
-                // Exact uniquement pour ses propres joueurs - jamais lu pour un autre
-                // (voir commentaire en tete de section).
+                // Exact uniquement pour ses propres joueurs - estime (jamais lu tel quel)
+                // pour tout autre joueur, voir commentaire en tete de section.
                 formeActuelle: estMoi ? p.forme : null,
-                mentalMax: estMoi ? p.mental_max : null,
-                mentalCourant: estMoi ? p.mental_courant : null
+                mentalMax: estMoi ? p.mental_max : mentalMaxEstime(p.id, debutSaison, semaineActuelle),
+                mentalCourant: estMoi ? p.mental_courant : null,
+                automatismes: estMoi
+                    ? { dur: p.surface_dur_automatismes, terre: p.surface_terre_automatismes, herbe: p.surface_herbe_automatismes }
+                    : automatismesEstimes(p.id, debutSaison, semaineActuelle)
             };
         }).sort(function (a, b) { return b.xpTotalSaison - a.xpTotalSaison; });
 
