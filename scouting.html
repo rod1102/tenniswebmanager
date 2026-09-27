@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="ball.png">
+    <link rel="apple-touch-icon" href="ball.png">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Scouting — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20260927b">
+    <style>
+        /* Styles propres a cette page (pas de nom generique deja utilise ailleurs). */
+        .scout-podium { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 16px; }
+        @media (max-width: 800px) { .scout-podium { grid-template-columns: 1fr; } }
+        .scout-podium-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 14px; padding: 18px; border-top: 4px solid #8B98A5; }
+        .scout-podium-card.rang-1 { border-top-color: #D4B94A; }
+        .scout-podium-card.rang-2 { border-top-color: #B9C2CC; }
+        .scout-podium-card.rang-3 { border-top-color: #C68A4A; }
+        .scout-podium-rang { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,0.1); font-weight:800; margin-bottom:10px; }
+        .scout-podium-nom { font-size: 1.1rem; font-weight: 700; margin-bottom: 6px; }
+        .scout-podium-xp { font-size: 2rem; font-weight: 800; color: #D4F000; }
+        .scout-podium-xp span { font-size: 0.9rem; color: #8B98A5; font-weight: 600; }
+        .scout-podium-detail { font-size: 0.75rem; color: #8B98A5; margin-top: 4px; }
+        .scout-moi-card { background: rgba(79, 163, 224, 0.15); border: 1px solid rgba(79, 163, 224, 0.4); border-radius: 14px; padding: 18px; margin-bottom: 24px; }
+        .scout-moi-nom { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #4FA3E0; margin-bottom: 6px; }
+        .scout-moi-rang { font-size: 2rem; font-weight: 800; }
+        .scout-table-wrap { overflow-x: auto; }
+        .scout-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; white-space: nowrap; }
+        .scout-table th { text-align: left; padding: 8px 10px; color: #8B98A5; font-weight: 600; border-bottom: 1px solid rgba(255,255,255,0.12); position: sticky; top: 0; }
+        .scout-table td { padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); }
+        .scout-table tr.scout-row-moi { background: rgba(79, 163, 224, 0.1); }
+        .scout-chip { display: inline-block; background: rgba(79, 163, 224, 0.18); color: #4FA3E0; border-radius: 6px; padding: 2px 6px; margin-right: 3px; font-weight: 700; font-size: 0.72rem; }
+        .scout-estime { color: #8B98A5; font-style: italic; }
+        .scout-legende { font-size: 0.72rem; color: #8B98A5; margin-top: 10px; line-height: 1.6; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="admin.html">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Scouting</h1>
+            <p class="match-hint" style="text-align:center; margin-bottom:20px;">Outil perso, réservé à l'admin — classement XP et suivi de forme/mental estimé pour les autres joueurs.</p>
+
+            <div id="acces-refuse" class="match-hint" style="display:none; text-align:center;">Cette page est réservée à l'administrateur.</div>
+
+            <div id="contenu" style="display:none;">
+                <div style="text-align:center; margin-bottom:20px;">
+                    <button class="tab-btn active" data-circuit="ATP">ATP</button>
+                    <button class="tab-btn" data-circuit="WTA">WTA</button>
+                </div>
+
+                <div id="scout-moi-container"></div>
+                <div id="scout-podium" class="scout-podium"></div>
+
+                <div class="stats-header">Classement complet</div>
+                <div class="scout-table-wrap">
+                    <table class="scout-table">
+                        <thead>
+                            <tr>
+                                <th>#</th><th>Joueur</th><th>Classement live</th><th>Parcours (XP/semaine)</th>
+                                <th>XP saison</th><th>Tournois</th><th>V</th><th>D</th>
+                                <th>Forme perdue</th><th>Mental max</th>
+                            </tr>
+                        </thead>
+                        <tbody id="scout-tbody"></tbody>
+                    </table>
+                </div>
+                <div class="scout-legende">
+                    <strong>Exact</strong> : uniquement pour tes propres joueurs (fond bleu).
+                    <strong>Estimé</strong> (en italique) : reconstruit à partir des scores publics et du taux de perte de forme par défaut (0,10/jeu) — le style de jeu choisi restant confidentiel, cette estimation peut s'écarter de la vraie valeur. Le mental n'est jamais estimé (les points importants disputés ne sont pas publics) : « — » pour tout joueur qui n'est pas le tien.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userId = localStorage.getItem('currentUserId');
+        if (!userId) window.location.href = 'connexion.html';
+
+        let circuitCourant = 'ATP';
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (!response.ok || data.user.role !== 'admin') {
+                document.getElementById('acces-refuse').style.display = 'block';
+                return false;
+            }
+            document.getElementById('contenu').style.display = 'block';
+            return true;
+        }
+
+        function formaterNom(nomComplet) {
+            return nomComplet.replace(/\s+/g, ' ').trim();
+        }
+
+        async function chargerClassement() {
+            const response = await fetch('/api/admin/scouting/classement/' + circuitCourant);
+            const data = await response.json();
+            if (!response.ok) {
+                document.getElementById('scout-tbody').innerHTML = '<tr><td colspan="10" class="match-hint">' + (data.error || 'Erreur.') + '</td></tr>';
+                return;
+            }
+
+            const moi = data.classement.find(function (j) { return j.estMoi; });
+            const moiContainer = document.getElementById('scout-moi-container');
+            if (moi) {
+                const rangMoi = data.classement.indexOf(moi) + 1;
+                moiContainer.innerHTML = `
+                    <div class="scout-moi-card">
+                        <div class="scout-moi-nom">${formaterNom(moi.nom)}</div>
+                        <div class="scout-moi-rang">${rangMoi}<span style="font-size:1rem; color:#8B98A5;">e sur ${data.classement.length}</span> · ${moi.xpTotalSaison} XP</div>
+                    </div>
+                `;
+            } else {
+                moiContainer.innerHTML = '';
+            }
+
+            const podium = document.getElementById('scout-podium');
+            podium.innerHTML = data.classement.slice(0, 3).map(function (j, i) {
+                return `
+                    <div class="scout-podium-card rang-${i + 1}">
+                        <div class="scout-podium-rang">${i + 1}</div>
+                        <div class="scout-podium-nom">${formaterNom(j.nom)}</div>
+                        <div class="scout-podium-xp">${j.xpTotalSaison} <span>XP</span></div>
+                        <div class="scout-podium-detail">${j.tournois} tournoi(s) · ${j.victoires}V-${j.defaites}D</div>
+                    </div>
+                `;
+            }).join('');
+
+            const tbody = document.getElementById('scout-tbody');
+            tbody.innerHTML = data.classement.map(function (j, i) {
+                const puces = j.xpParSemaine.map(function (s) { return '<span class="scout-chip">S' + s.semaine + ': ' + s.xp + '</span>'; }).join('');
+                const forme = j.estMoi
+                    ? (j.formeActuelle !== null ? j.formeActuelle : '—')
+                    : (j.formePerdueEstimee !== null ? '<span class="scout-estime">-' + j.formePerdueEstimee + ' (estimé)</span>' : '—');
+                const mental = j.estMoi ? (j.mentalMax !== null ? j.mentalMax : '—') : '—';
+                return `
+                    <tr class="${j.estMoi ? 'scout-row-moi' : ''}">
+                        <td>${i + 1}</td>
+                        <td>${formaterNom(j.nom)}</td>
+                        <td>${j.classementLive || '—'}</td>
+                        <td>${puces || '—'}</td>
+                        <td><strong>${j.xpTotalSaison}</strong></td>
+                        <td>${j.tournois}</td>
+                        <td>${j.victoires}</td>
+                        <td>${j.defaites}</td>
+                        <td>${forme}</td>
+                        <td>${mental}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
+        document.querySelectorAll('[data-circuit]').forEach(function (bouton) {
+            bouton.addEventListener('click', function () {
+                document.querySelectorAll('[data-circuit]').forEach(function (b) { b.classList.remove('active'); });
+                bouton.classList.add('active');
+                circuitCourant = bouton.dataset.circuit;
+                chargerClassement();
+            });
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
+            localStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin().then(function (ok) { if (ok) chargerClassement(); });
+    </script>
+    <script src="retour.js?v=20260829"></script>
+    <script src="theme-saison.js?v=20260831"></script>
+</body>
+</html>

@@ -1301,6 +1301,87 @@ app.get('/api/admin/diagnostic-planning/:playerId', (req, res) => {
     }
 });
 
+// ---------- Scouting perso (admin) ----------
+// Outil de suivi prive de l'admin (jamais un onglet du menu, jamais accessible a un
+// coach normal) : classement XP + fiche match par match. Pour SES PROPRES joueurs
+// (players.user_id = req.userId), toutes les valeurs sont exactes (l'admin a de
+// toute facon acces a tout). Pour tout AUTRE joueur, uniquement des estimations
+// reconstruites a partir de donnees deja publiques (scores de match, tours
+// atteints, surface jouee) et des regles connues du jeu (erosion, automatismes,
+// perte de forme par style) - jamais une lecture directe de forme/mental_courant/
+// niveau reels d'un joueur qui n'est pas le sien, par choix explicite de
+// l'utilisateur, 2026-09-28, meme si l'admin pourrait techniquement y acceder.
+
+// Total XP credite (entrainement + tournoi, meme pool) sur la saison en cours,
+// semaine par semaine - alimente les puces "Parcours" et le total "XP au plus".
+function xpParSemaineSaison(playerId, debutSaison, semaineActuelle) {
+    return db.prepare(`
+        SELECT semaine, xp_credite FROM journal_semaine_joueur
+        WHERE player_id = ? AND semaine BETWEEN ? AND ? ORDER BY semaine
+    `).all(playerId, debutSaison, semaineActuelle);
+}
+
+// Jeux totaux d'un score ("6-3, 7-5" -> 21) - utilise pour estimer la perte de
+// forme (totalJeux x taux) sans jamais lire la forme reelle d'un adversaire.
+function jeuxTotalDuScore(score) {
+    if (!score) return 0;
+    return score.split(',').reduce(function (somme, set) {
+        const parts = set.trim().split('-').map(Number);
+        if (parts.length !== 2 || parts.some(isNaN)) return somme;
+        return somme + parts[0] + parts[1];
+    }, 0);
+}
+
+app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const circuit = req.params.circuit === 'WTA' ? 'WTA' : 'ATP';
+        const type = circuit === 'WTA' ? 'joueuse' : 'joueur';
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+        const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+        const debutSaison = semaineActuelle - positionSaisonBrute + 2;
+        const rangs = calculerRangsLiveGlobal(circuit);
+
+        const joueurs = db.prepare("SELECT * FROM players WHERE type = ? AND statut = 'valide'").all(type);
+        const classement = joueurs.map(function (p) {
+            const estMoi = Number(p.user_id) === Number(req.userId);
+            const xpSemaines = xpParSemaineSaison(p.id, debutSaison, semaineActuelle);
+            const xpTotal = xpSemaines.reduce(function (s, l) { return s + (l.xp_credite || 0); }, 0);
+
+            const matchsSaison = db.prepare('SELECT surface, vainqueur, score, tournoi_id FROM matchs WHERE player_id = ? AND semaine BETWEEN ? AND ? AND tournoi_id IS NOT NULL')
+                .all(p.id, debutSaison, semaineActuelle);
+            const victoires = matchsSaison.filter(function (m) { return m.vainqueur === 'joueur'; }).length;
+            const defaites = matchsSaison.length - victoires;
+            const tournois = new Set(matchsSaison.map(function (m) { return m.tournoi_id; })).size;
+            // Forme perdue ESTIMEE (taux "normal" par defaut, le style choisi etant
+            // confidentiel pour un adversaire) - jamais lue depuis players.forme.
+            const formePerdueEstimee = estMoi ? null : Math.round(matchsSaison.reduce(function (s, m) { return s + jeuxTotalDuScore(m.score) * 0.10; }, 0) * 10) / 10;
+
+            return {
+                id: p.id, nom: p.prenom + ' ' + p.nom, estMoi,
+                classementLive: rangs.get('joueur:' + p.id) || null,
+                xpTotalSaison: xpTotal,
+                xpParSemaine: xpSemaines.map(function (l) { return { semaine: positionSemaineAffichee(l.semaine), xp: l.xp_credite }; }),
+                tournois, victoires, defaites,
+                formePerdueEstimee,
+                // Exact uniquement pour ses propres joueurs - jamais lu pour un autre
+                // (voir commentaire en tete de section).
+                formeActuelle: estMoi ? p.forme : null,
+                mentalMax: estMoi ? p.mental_max : null,
+                mentalCourant: estMoi ? p.mental_courant : null
+            };
+        }).sort(function (a, b) { return b.xpTotalSaison - a.xpTotalSaison; });
+
+        res.json({ success: true, circuit, saison: phaseAffichee(semaineActuelle).numeroSaison, semaineActuelle, classement });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Diagnostic (admin) du "dernier carre" (4 joueurs ayant le plus progresse) d'un
 // tournoi a elimination directe, avec leur niveau de jeu sur la surface du tournoi -
 // le niveau est normalement confidentiel (jamais expose a un autre coach), cette route
