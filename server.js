@@ -1569,9 +1569,14 @@ function competencesEstimees(playerId, semaineActuelle) {
             .map(function (r) { return [r.semaine, r.xp_credite || 0]; })
     );
 
+    let erosionTotale = 0;
     for (let s = premiereSemaine + 1; s <= semaineActuelle; s++) {
         if (phaseDeSemaine(s - 1).type === 'tournoi') {
-            COMPETENCES.forEach(function (c) { valeurs[c] = Math.max(0, valeurs[c] - Math.floor(valeurs[c] / 24)); });
+            COMPETENCES.forEach(function (c) {
+                const perte = Math.floor(valeurs[c] / 24);
+                erosionTotale += perte;
+                valeurs[c] = Math.max(0, valeurs[c] - perte);
+            });
         }
         const part = (xpParSemaine.get(s) || 0) / 8;
         COMPETENCES.forEach(function (c) { valeurs[c] = Math.min(100, valeurs[c] + part); });
@@ -1580,7 +1585,30 @@ function competencesEstimees(playerId, semaineActuelle) {
     const parCompetence = {};
     COMPETENCES.forEach(function (c) { parCompetence[c] = Math.round(valeurs[c] * 10) / 10; });
     const total = Math.round(COMPETENCES.reduce(function (s, c) { return s + valeurs[c]; }, 0));
-    return { parCompetence, total, semaineInscription: premiereSemaine };
+    return { parCompetence, total, semaineInscription: premiereSemaine, erosionTotale };
+}
+
+// Erosion REELLE (pas estimee) pour un joueur qui EST le mien : rejoue la vraie
+// formule du moteur (floor(valeur * 0.04) par competence, uniquement quand la
+// semaine quittee etait une semaine de tournoi) a partir des vraies valeurs
+// "avant" deja enregistrees chaque semaine dans journal_semaine_joueur - jamais
+// une estimation la ou l'historique exact existe deja.
+function erosionExacte(playerId, semaineActuelle) {
+    const lignes = db.prepare(`
+        SELECT semaine, service_avant, retour_avant, coup_droit_revers_avant, effet_avant,
+               volee_avant, deplacement_avant, puissance_avant, resistance_avant
+        FROM journal_semaine_joueur WHERE player_id = ? AND semaine <= ? ORDER BY semaine
+    `).all(playerId, semaineActuelle);
+    let total = 0;
+    lignes.forEach(function (l) {
+        if (phaseDeSemaine(l.semaine - 1).type !== 'tournoi') return;
+        COMPETENCES.forEach(function (c) {
+            const val = l[c + '_avant'];
+            if (val === null || val === undefined) return;
+            total += Math.floor(val * 0.04);
+        });
+    });
+    return total;
 }
 
 app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
@@ -1639,7 +1667,14 @@ app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
                     : automatismesEstimes(p.id, debutSaison, semaineActuelle),
                 competences: estMoi
                     ? { total: COMPETENCES.reduce(function (s, c) { return s + p[c]; }, 0), parCompetence: null, estime: false }
-                    : (function () { const e = competencesEstimees(p.id, semaineActuelle); return e ? Object.assign({ estime: true }, e) : null; })()
+                    : (function () { const e = competencesEstimees(p.id, semaineActuelle); return e ? Object.assign({ estime: true }, e) : null; })(),
+                // Total de points perdus a l'erosion hebdomadaire depuis l'inscription -
+                // exact pour ses propres joueurs (rejoue a partir des vraies valeurs
+                // "avant" du journal), estime pour les autres (meme simplification que
+                // la case Competences, voir competencesEstimees).
+                erosion: estMoi
+                    ? { total: erosionExacte(p.id, semaineActuelle), estime: false }
+                    : (function () { const e = competencesEstimees(p.id, semaineActuelle); return e ? { total: e.erosionTotale, estime: true } : null; })()
             };
         }).sort(function (a, b) { return b.xpTotalSaison - a.xpTotalSaison; });
 

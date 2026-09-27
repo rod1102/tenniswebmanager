@@ -90,7 +90,7 @@
                             <tr>
                                 <th>#</th><th>Joueur</th><th class="num">Classement live</th>
                                 <th class="num">XP saison</th><th class="num">Tournois</th><th class="num">V</th><th class="num">D</th>
-                                <th>Forme perdue</th><th>Automatismes</th><th class="num">Mental max</th><th class="num">Mental actuel</th><th class="num">Compétences</th>
+                                <th>Forme perdue</th><th>Automatismes</th><th class="num">Mental max</th><th class="num">Mental actuel</th><th class="num">Compétences</th><th class="num">Érosion</th>
                             </tr>
                         </thead>
                         <tbody id="scout-tbody"></tbody>
@@ -133,7 +133,7 @@
             const response = await fetch('/api/admin/scouting/classement/' + circuitCourant);
             const data = await response.json();
             if (!response.ok) {
-                document.getElementById('scout-tbody').innerHTML = '<tr><td colspan="12" class="match-hint">' + (data.error || 'Erreur.') + '</td></tr>';
+                document.getElementById('scout-tbody').innerHTML = '<tr><td colspan="13" class="match-hint">' + (data.error || 'Erreur.') + '</td></tr>';
                 return;
             }
 
@@ -173,7 +173,7 @@
 
             const tbody = document.getElementById('scout-tbody');
             if (lignes.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="12" class="match-hint">Aucun joueur ne correspond.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="13" class="match-hint">Aucun joueur ne correspond.</td></tr>';
                 return;
             }
             tbody.innerHTML = lignes.map(function (j) {
@@ -199,6 +199,9 @@
                 const competences = j.competences
                     ? `<span class="scout-xp-total" title="${detailCompetences}">${j.competences.total}</span>${j.competences.estime ? ' <span class="scout-tag-estime">estimé</span>' : ''}`
                     : '—';
+                const erosion = j.erosion
+                    ? `−${j.erosion.total}${j.erosion.estime ? ' <span class="scout-tag-estime">estimé</span>' : ''}`
+                    : '—';
                 return `
                     <tr class="${j.estMoi ? 'scout-row-moi' : ''}">
                         <td>${rang}</td>
@@ -213,6 +216,7 @@
                         <td class="num">${mental}</td>
                         <td class="num">${mentalCourant}</td>
                         <td class="num">${competences}</td>
+                        <td class="num">${erosion}</td>
                     </tr>
                 `;
             }).join('');
