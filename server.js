@@ -5156,7 +5156,13 @@ function calculerClassementGlobal(circuit, semaineMin, semaineActuelle) {
 // ATP/WTA Live/Race de classements.html.
 function classementPartage(circuit, semaineMin, semaineActuelle, monUserId) {
     return calculerClassementGlobal(circuit, semaineMin, semaineActuelle).map(function (c) {
-        return Object.assign({}, c, { estMoi: c.userId !== null && Number(c.userId) === Number(monUserId) });
+        const estMoi = c.userId !== null && Number(c.userId) === Number(monUserId);
+        // Niveau confidentiel : jamais affiche par aucune page (classements.html ne le
+        // lit meme pas), mais restait visible en clair dans la reponse pour TOUS les
+        // joueurs/rivaux, meme cote d'un autre coach - efface ici pour tout le monde
+        // sauf mon propre joueur, meme regle que la fiche de tournoi et la fiche
+        // adversaire. Corrige a la demande de l'utilisateur, 2026-09-27.
+        return Object.assign({}, c, { estMoi, niveau: estMoi ? c.niveau : undefined });
     });
 }
 
@@ -7354,6 +7360,15 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
                 j.rang = rangDe(rangs, j.rival_id, j.est_reel, j.player_id);
                 j.rangRace = rangDe(rangsRace, j.rival_id, j.est_reel, j.player_id);
                 j.coachNom = j.est_reel ? nomCoach(j.coach_user_id) : null;
+            });
+            // Style de jeu choisi et mise d'energie : confidentiels avant le match (un
+            // coach ne doit pas pouvoir preparer son match en connaissant a l'avance le
+            // style/la mise de l'adversaire) - "SELECT tj.*" ci-dessus les incluait en
+            // clair pour TOUS les joueurs du tableau, effaces ici pour tout le monde sauf
+            // mon propre joueur. Corrige a la demande de l'utilisateur, 2026-09-27.
+            joueurs.forEach(function (j) {
+                const estMoi = j.est_reel && j.player_id === Number(playerId);
+                if (!estMoi) { j.style_choisi = null; j.energie_misee = null; }
             });
             // Tri : tetes de serie d'abord (dans l'ordre), puis par classement Live
             // (le rang affiche cote client) - jamais par niveau, qui est confidentiel
