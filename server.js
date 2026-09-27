@@ -9444,6 +9444,12 @@ app.get('/api/matchs/:userId', (req, res) => {
 
         const nbDivisionsCoupeCache = {};
         matchs.forEach(function (m) {
+            // Niveau de l'adversaire confidentiel, meme regle que partout ailleurs
+            // (fiche de tournoi, fiche adversaire, /api/matchs/detail) - niveau_joueur
+            // reste envoye tel quel, toujours le mien ici (WHERE matchs.user_id = userId
+            // ci-dessus), mais niveau_adversaire fuitait en clair pour chaque match de
+            // cette liste (bug signale par l'utilisateur, 2026-09-27).
+            delete m.niveau_adversaire;
             // Meme critere que le WHERE ci-dessus (coherent avec ce qui est visible du
             // tout) : Live reste accessible tant que le tournoi/la rencontre est encore
             // en cours, ou si le match a eu lieu cette semaine precisement.
