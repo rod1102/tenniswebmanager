@@ -456,7 +456,12 @@ function pseudoEnConflitPourUtilisateur(userId) {
 
 app.post('/api/inscription', (req, res) => {
     try {
-        const { email, password, pseudo } = req.body;
+        const { password, pseudo } = req.body;
+        // Normalise l'e-mail des la creation (espaces + minuscules) : coherent avec
+        // /api/connexion et /api/mot-de-passe-oublie, qui comparent desormais sans
+        // tenir compte de la casse - stocker directement en minuscules evite en plus
+        // tout doublon "Nom@x.fr" / "nom@x.fr" a l'inscription.
+        const email = String(req.body.email || '').trim().toLowerCase();
 
         if (!email || !password) {
             return res.status(400).json({ error: 'Email et mot de passe requis.' });
@@ -469,7 +474,7 @@ app.post('/api/inscription', (req, res) => {
             return res.status(400).json({ error: 'Le mot de passe doit faire au moins 8 caracteres.' });
         }
 
-        const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
+        const existing = db.prepare('SELECT id FROM users WHERE TRIM(email) = ? COLLATE NOCASE').get(email);
         if (existing) {
             return res.status(409).json({ error: 'Un compte existe deja avec cet email.' });
         }
@@ -706,13 +711,19 @@ app.get('/api/budget-creation', (req, res) => {
 
 app.post('/api/connexion', (req, res) => {
     try {
-        const { email, password } = req.body;
+        const { password } = req.body;
+        // Normalise l'e-mail (espaces autour + casse) avant toute recherche - un coach
+        // qui reste connecte des mois via la session memorisee ne retape quasiment
+        // jamais son e-mail, un espace ou une majuscule differente de celle stockee a
+        // l'inscription passait donc inapercu jusqu'a ce qu'il tente une reconnexion ou
+        // une reinitialisation de mot de passe, qui echouait alors silencieusement.
+        const email = String(req.body.email || '').trim();
 
         if (!email || !password) {
             return res.status(400).json({ error: 'Email et mot de passe requis.' });
         }
 
-        const user = db.prepare('SELECT id, password_hash FROM users WHERE email = ?').get(email);
+        const user = db.prepare('SELECT id, password_hash FROM users WHERE TRIM(email) = ? COLLATE NOCASE').get(email);
 
         if (!user) {
             return res.status(401).json({ error: 'Email ou mot de passe incorrect.' });
@@ -765,13 +776,21 @@ app.post('/api/admin/diagnostic-reset-email', async (req, res) => {
         if (!email) return res.status(400).json({ error: 'Adresse e-mail requise.' });
 
         const exact = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
-        const insensible = db.prepare('SELECT id, email FROM users WHERE email = ? COLLATE NOCASE').get(email);
+        // "insensible" = comme la vraie route desormais (TRIM + COLLATE NOCASE) - trouve
+        // le compte meme si l'e-mail stocke a un espace superflu ou une casse differente
+        // (bug reel trouve le 2026-09-28 : COLLATE NOCASE seul ne suffisait pas, un espace
+        // en fin d'e-mail stocke passait au travers).
+        const insensible = db.prepare('SELECT id, email FROM users WHERE TRIM(email) = ? COLLATE NOCASE').get(email);
 
         const resultat = {
             emailRecherche: email,
+            longueurRecherchee: email.length,
             compteTrouveExact: !!exact,
-            compteTrouveInsensibleCasse: !!insensible,
-            emailStockeSiDifferent: (insensible && insensible.email !== email) ? insensible.email : null,
+            compteTrouveTrimCasseInsensible: !!insensible,
+            // Longueur de l'e-mail stocke en base : si elle differe de longueurRecherchee
+            // alors que emailStocke semble identique a l'oeil, c'est un espace invisible.
+            emailStocke: insensible ? insensible.email : null,
+            longueurStockee: insensible ? insensible.email.length : null,
             resendConfigure: !!resend
         };
 
@@ -798,12 +817,16 @@ app.post('/api/admin/diagnostic-reset-email', async (req, res) => {
 
 app.post('/api/mot-de-passe-oublie', (req, res) => {
     try {
-        const { email } = req.body;
+        // Meme normalisation que /api/connexion (espaces + casse) - sinon une adresse
+        // tapee legerement differemment de celle stockee ne trouve silencieusement
+        // aucun compte, sans jamais avertir le coach (bug signale par l'utilisateur,
+        // 2026-09-28 : un coach ne recevait jamais le mail malgre un compte existant).
+        const email = String(req.body.email || '').trim();
         if (!email) {
             return res.status(400).json({ error: 'Adresse e-mail requise.' });
         }
 
-        const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(email);
+        const user = db.prepare('SELECT id, email FROM users WHERE TRIM(email) = ? COLLATE NOCASE').get(email);
 
         // Reponse identique que le compte existe ou non, pour ne jamais reveler
         // si une adresse e-mail est inscrite (enumeration de comptes).
