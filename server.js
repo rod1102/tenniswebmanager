@@ -768,11 +768,11 @@ app.post('/api/mot-de-passe-oublie', (req, res) => {
             const lienReset = SITE_URL + '/reinitialiser-mot-de-passe.html?token=' + token;
             if (resend) {
                 resend.emails.send({
-                    // A remplacer par une adresse sur un domaine verifie dans Resend
-                    // (ex. noreply@tondomaine.fr) une fois le domaine ajoute - en
-                    // attendant, onboarding@resend.dev ne delivre reellement qu'aux
-                    // adresses de test Resend, pas aux vrais coachs.
-                    from: 'Tennis Web Manager <onboarding@resend.dev>',
+                    // Domaine tenniswebmanager.com verifie dans Resend le 2026-09-28
+                    // (avant : onboarding@resend.dev, qui ne delivrait reellement qu'aux
+                    // adresses de test Resend, jamais aux vrais coachs - bug signale par
+                    // l'utilisateur, aucun e-mail de reinitialisation jamais recu).
+                    from: 'Tennis Web Manager <noreply@tenniswebmanager.com>',
                     to: [user.email],
                     subject: 'Réinitialisation de ton mot de passe',
                     html: `
