@@ -1413,6 +1413,102 @@ function automatismesEstimes(playerId, debutSaison, semaineActuelle) {
     return valeurs;
 }
 
+// Semaine absolue a partir de laquelle jeu_etat.budget_creation_accumule existe
+// reellement (fonctionnalite ajoutee le 2026-09-02 - avant, le budget de creation
+// valait toujours 120 pile, l'accumulateur n'existant pas encore). Calibre via
+// semaines_reelles (ancrage reel <-> semaine absolue), jamais suppose, pour ne
+// jamais faire gonfler a tort un budget reconstruit sur une periode ou la regle
+// n'existait pas.
+function semaineLancementAccumulateur() {
+    const row = db.prepare("SELECT MAX(semaine) AS s FROM semaines_reelles WHERE debut_reel <= '2026-09-02T00:00:00.000Z'").get();
+    return (row && row.s) || 1;
+}
+
+// Reconstruit la valeur qu'avait REELEMENT jeu_etat.budget_creation_accumule au
+// debut d'une semaine passee - meme formule exacte que executerAvancementSemaine
+// (moulinette a l'entree en Pre-saison, +70% de la moyenne des XP credites la
+// semaine precedente aux joueurs reels actifs sur une transition tournoi->tournoi),
+// rejouee ici a partir de journal_semaine_joueur (deja accessible en entier en tant
+// qu'admin - un total agrege sur TOUS les joueurs, jamais une valeur privee d'un
+// seul). La colonne live ne donne que la valeur ACTUELLE, jamais son historique -
+// indispensable pour reconstituer le budget de creation d'un joueur inscrit il y a
+// plusieurs semaines. Memoise par semaine (identique pour tout le monde).
+const _cacheBudgetAccumule = new Map();
+function budgetAccumuleALaSemaine(semaineCible) {
+    if (_cacheBudgetAccumule.has(semaineCible)) return _cacheBudgetAccumule.get(semaineCible);
+    let accumulateur = 0;
+    for (let s = semaineLancementAccumulateur(); s < semaineCible; s++) {
+        const phaseActuelle = phaseDeSemaine(s);
+        const phaseSuivante = phaseDeSemaine(s + 1);
+        if (phaseSuivante.type === 'presaison') {
+            accumulateur = moulinetteDeLaValeur(accumulateur);
+        } else if (phaseActuelle.type === 'tournoi' && phaseSuivante.type === 'tournoi') {
+            const lignes = db.prepare(`
+                SELECT jsj.player_id, jsj.xp_credite FROM journal_semaine_joueur jsj
+                JOIN players p ON p.id = jsj.player_id
+                WHERE jsj.semaine = ? AND p.statut = 'valide'
+            `).all(s);
+            const actifs = lignes.filter(function (l) {
+                const dernieres = db.prepare(`
+                    SELECT action_prevue FROM journal_semaine_joueur
+                    WHERE player_id = ? AND semaine <= ? ORDER BY semaine DESC LIMIT ?
+                `).all(l.player_id, s, SEMAINES_INACTIVITE_EXCLUSION);
+                if (dernieres.length < SEMAINES_INACTIVITE_EXCLUSION) return true;
+                return !dernieres.every(function (d) { return d.action_prevue === 'afk'; });
+            });
+            if (actifs.length > 0) {
+                const moyenne = actifs.reduce(function (s2, l) { return s2 + (l.xp_credite || 0); }, 0) / actifs.length;
+                accumulateur += RATIO_BUDGET_RATTRAPAGE * moyenne;
+            }
+        }
+    }
+    _cacheBudgetAccumule.set(semaineCible, accumulateur);
+    return accumulateur;
+}
+
+// Estimation des 8 competences techniques d'un joueur qui n'est pas le mien, par
+// PALIERS DE 24 (regle simplifiee donnee explicitement par l'utilisateur,
+// 2026-09-28) : point de depart = budget de creation reconstruit (voir
+// budgetAccumuleALaSemaine) a sa semaine d'inscription (premiere ligne trouvee
+// dans journal_semaine_joueur), reparti a parts EGALES sur les 8 competences -
+// seule hypothese neutre possible, la vraie repartition choisie a la creation
+// n'etant jamais publique. Chaque semaine ensuite, dans l'ordre exact du moteur
+// (erosion puis XP) : erosion d'1 point par tranche de 24 deja acquise sur chaque
+// competence (floor(valeur/24), jamais sous 0), puis l'XP reellement credite cette
+// semaine-la (deja public) reparti a parts egales sur les 8 (plafond 100 chacune,
+// hypothese neutre egalement - impossible de savoir ou un coach a vraiment mis son
+// XP). Approximation valable "en moyenne", jamais une vraie valeur individuelle.
+function competencesEstimees(playerId, semaineActuelle) {
+    const premiereSemaine = db.prepare('SELECT MIN(semaine) AS s FROM journal_semaine_joueur WHERE player_id = ?').get(playerId).s;
+    if (!premiereSemaine) return null;
+
+    const phaseInscription = phaseDeSemaine(premiereSemaine);
+    const budgetDepart = phaseInscription.type === 'tournoi'
+        ? BUDGET_POINTS + Math.round(budgetAccumuleALaSemaine(premiereSemaine))
+        : BUDGET_POINTS;
+    const depart = budgetDepart / 8;
+    const valeurs = {};
+    COMPETENCES.forEach(function (c) { valeurs[c] = depart; });
+
+    const xpParSemaine = new Map(
+        db.prepare('SELECT semaine, xp_credite FROM journal_semaine_joueur WHERE player_id = ? AND semaine > ?').all(playerId, premiereSemaine)
+            .map(function (r) { return [r.semaine, r.xp_credite || 0]; })
+    );
+
+    for (let s = premiereSemaine + 1; s <= semaineActuelle; s++) {
+        if (phaseDeSemaine(s - 1).type === 'tournoi') {
+            COMPETENCES.forEach(function (c) { valeurs[c] = Math.max(0, valeurs[c] - Math.floor(valeurs[c] / 24)); });
+        }
+        const part = (xpParSemaine.get(s) || 0) / 8;
+        COMPETENCES.forEach(function (c) { valeurs[c] = Math.min(100, valeurs[c] + part); });
+    }
+
+    const parCompetence = {};
+    COMPETENCES.forEach(function (c) { parCompetence[c] = Math.round(valeurs[c] * 10) / 10; });
+    const total = Math.round(COMPETENCES.reduce(function (s, c) { return s + valeurs[c]; }, 0));
+    return { parCompetence, total, semaineInscription: premiereSemaine };
+}
+
 app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
@@ -1455,7 +1551,10 @@ app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
                 mentalCourant: estMoi ? p.mental_courant : null,
                 automatismes: estMoi
                     ? { dur: p.surface_dur_automatismes, terre: p.surface_terre_automatismes, herbe: p.surface_herbe_automatismes }
-                    : automatismesEstimes(p.id, debutSaison, semaineActuelle)
+                    : automatismesEstimes(p.id, debutSaison, semaineActuelle),
+                competences: estMoi
+                    ? { total: COMPETENCES.reduce(function (s, c) { return s + p[c]; }, 0), parCompetence: null, estime: false }
+                    : (function () { const e = competencesEstimees(p.id, semaineActuelle); return e ? Object.assign({ estime: true }, e) : null; })()
             };
         }).sort(function (a, b) { return b.xpTotalSaison - a.xpTotalSaison; });
 

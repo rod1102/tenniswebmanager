@@ -90,7 +90,7 @@
                             <tr>
                                 <th>#</th><th>Joueur</th><th class="num">Classement live</th>
                                 <th class="num">XP saison</th><th class="num">Tournois</th><th class="num">V</th><th class="num">D</th>
-                                <th>Forme perdue</th><th>Automatismes</th><th class="num">Mental max</th>
+                                <th>Forme perdue</th><th>Automatismes</th><th class="num">Mental max</th><th class="num">Compétences</th>
                             </tr>
                         </thead>
                         <tbody id="scout-tbody"></tbody>
@@ -101,6 +101,7 @@
                     <strong>Forme perdue</strong> : nombre de jeux disputés × un taux par défaut (0,10/jeu) — le style de jeu choisi restant confidentiel, l'écart avec la vraie valeur peut être significatif.
                     <strong>Automatismes</strong> (Dur/Terre/Herbe) : +3 par match de tournoi joué sur cette surface cette semaine-là, −5 les semaines sans match dessus (jamais l'entraînement dédié, non public).
                     <strong>Mental max</strong> : reconstruit à partir du nombre réel de points importants comptés dans le télétexte de chaque match (public), en ignorant un éventuel style « Mental d'acier » (confidentiel).
+                    <strong>Compétences</strong> (total /800) : part du budget de création reconstruit à sa semaine d'inscription (120 + l'accumulateur de rattrapage, lui aussi recalculé semaine par semaine), réparti à parts égales sur les 8 — puis chaque semaine, 1 point perdu par tranche de 24 déjà acquise sur chaque compétence, et l'XP réellement crédité cette semaine-là (public) ajouté à parts égales sur les 8. La vraie répartition choisie par un coach n'étant jamais publique, ce n'est qu'une moyenne plausible.
                 </div>
             </div>
         </div>
@@ -132,7 +133,7 @@
             const response = await fetch('/api/admin/scouting/classement/' + circuitCourant);
             const data = await response.json();
             if (!response.ok) {
-                document.getElementById('scout-tbody').innerHTML = '<tr><td colspan="10" class="match-hint">' + (data.error || 'Erreur.') + '</td></tr>';
+                document.getElementById('scout-tbody').innerHTML = '<tr><td colspan="11" class="match-hint">' + (data.error || 'Erreur.') + '</td></tr>';
                 return;
             }
 
@@ -172,7 +173,7 @@
 
             const tbody = document.getElementById('scout-tbody');
             if (lignes.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="10" class="match-hint">Aucun joueur ne correspond.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11" class="match-hint">Aucun joueur ne correspond.</td></tr>';
                 return;
             }
             tbody.innerHTML = lignes.map(function (j) {
@@ -187,6 +188,12 @@
                 const mental = j.mentalMax !== null
                     ? (j.estMoi ? j.mentalMax : `<span class="scout-estime">${j.mentalMax}</span> <span class="scout-tag-estime">estimé</span>`)
                     : '—';
+                const detailCompetences = j.competences && j.competences.parCompetence
+                    ? Object.keys(j.competences.parCompetence).map(function (c) { return c + ' : ' + j.competences.parCompetence[c]; }).join(' · ')
+                    : (j.competences ? 'détail non calculé pour ton propre joueur (déjà visible sur sa fiche)' : '');
+                const competences = j.competences
+                    ? `<span class="scout-xp-total" title="${detailCompetences}">${j.competences.total}</span>${j.competences.estime ? ' <span class="scout-tag-estime">estimé</span>' : ''}`
+                    : '—';
                 return `
                     <tr class="${j.estMoi ? 'scout-row-moi' : ''}">
                         <td>${rang}</td>
@@ -199,6 +206,7 @@
                         <td>${forme}</td>
                         <td>${auto}</td>
                         <td class="num">${mental}</td>
+                        <td class="num">${competences}</td>
                     </tr>
                 `;
             }).join('');
