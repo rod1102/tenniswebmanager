@@ -18,14 +18,14 @@
         .scout-podium-card.rang-1 { border-top-color: #D4B94A; }
         .scout-podium-card.rang-2 { border-top-color: #B9C2CC; }
         .scout-podium-card.rang-3 { border-top-color: #C68A4A; }
-        .scout-podium-rang { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,0.1); font-weight:800; margin-bottom:10px; }
-        .scout-podium-nom { font-size: 1.1rem; font-weight: 700; margin-bottom: 6px; }
+        .scout-podium-rang { display:inline-flex; align-items:center; justify-content:center; width:28px; height:28px; border-radius:50%; background:rgba(255,255,255,0.1); font-weight:800; margin-bottom:10px; color: #F5F7FA; }
+        .scout-podium-nom { font-size: 1.1rem; font-weight: 700; margin-bottom: 6px; color: #F5F7FA; }
         .scout-podium-xp { font-size: 2rem; font-weight: 800; color: #D4F000; }
         .scout-podium-xp span { font-size: 0.9rem; color: #8B98A5; font-weight: 600; }
         .scout-podium-detail { font-size: 0.75rem; color: #8B98A5; margin-top: 4px; }
-        .scout-moi-card { background: rgba(79, 163, 224, 0.15); border: 1px solid rgba(79, 163, 224, 0.4); border-radius: 14px; padding: 18px; margin-bottom: 24px; }
-        .scout-moi-nom { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #4FA3E0; margin-bottom: 6px; }
-        .scout-moi-rang { font-size: 2rem; font-weight: 800; }
+        .scout-moi-card { background: rgba(212, 240, 0, 0.12); border: 1px solid rgba(212, 240, 0, 0.4); border-radius: 14px; padding: 18px; margin-bottom: 24px; }
+        .scout-moi-nom { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: #D4F000; margin-bottom: 6px; }
+        .scout-moi-rang { font-size: 2rem; font-weight: 800; color: #F5F7FA; }
 
         /* Filtre/recherche au-dessus du tableau. */
         .scout-filtre { max-width: 320px; margin: 0 0 14px; }
@@ -41,7 +41,7 @@
         .scout-table td { padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: middle; color: #F5F7FA; }
         .scout-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
         .scout-table tbody tr:hover { background: rgba(255,255,255,0.06); }
-        .scout-table tr.scout-row-moi { background: rgba(79, 163, 224, 0.14) !important; }
+        .scout-table tr.scout-row-moi { background: rgba(212, 240, 0, 0.12) !important; }
         .scout-table td.nom { font-weight: 600; }
         .scout-xp-total { font-weight: 800; font-size: 0.95rem; cursor: help; border-bottom: 1px dotted #8B98A5; }
         .scout-auto { display: inline-flex; gap: 6px; font-size: 0.76rem; color: #F5F7FA; }
@@ -178,7 +178,9 @@
             }
             tbody.innerHTML = lignes.map(function (j) {
                 const rang = classementCache.indexOf(j) + 1;
-                const detailXp = j.xpParSemaine.map(function (s) { return 'S' + s.semaine + ' : ' + s.xp; }).join(' · ') || 'aucun XP crédité';
+                const detailXp = j.xpParSemaine.map(function (s) {
+                    return 'S' + s.semaine + ' : ' + s.xp + (s.xp === 0 && s.actionLibelle ? ' (' + s.actionLibelle + ')' : '');
+                }).join(' · ') || 'aucun XP crédité';
                 const forme = j.estMoi
                     ? (j.formeActuelle !== null ? j.formeActuelle : '—')
                     : (j.formePerdueEstimee !== null ? '<span class="scout-estime">−' + j.formePerdueEstimee + '</span> <span class="scout-tag-estime">estimé</span>' : '—');

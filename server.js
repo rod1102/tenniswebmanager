@@ -1321,7 +1321,7 @@ app.get('/api/admin/diagnostic-planning/:playerId', (req, res) => {
 // null pour la Pre-saison/S0, bug signale par l'utilisateur, 2026-09-28).
 function xpParSemaineSaison(playerId, debutSaison, semaineActuelle) {
     return db.prepare(`
-        SELECT semaine, xp_credite FROM journal_semaine_joueur
+        SELECT semaine, xp_credite, action_prevue, tournoi_nom FROM journal_semaine_joueur
         WHERE player_id = ? AND semaine > ? AND semaine <= ? ORDER BY semaine
     `).all(playerId, debutSaison, semaineActuelle);
 }
@@ -1387,27 +1387,57 @@ function mentalMaxEstime(playerId, debutSaison, semaineActuelle) {
 // d'Australie affiche a 0 partout). On etale donc chaque match sur TOUTES les
 // semaines couvertes par la duree reelle du tournoi (CALENDRIER_TOURNOIS.duree).
 function automatismesEstimes(playerId, debutSaison, semaineActuelle) {
+    // parSemaine : semaine -> { surface: nombre de matchs joues cette semaine-la }.
+    // Le +3 s'applique PAR MATCH (regle explicite de l'utilisateur), pas par semaine :
+    // un tournoi 1 semaine a 5-6 tours doit compter jusqu'a 5-6 fois +3, pas 1 seule fois.
     const parSemaine = new Map();
-    function marquer(semaine, surface) {
-        if (semaine <= debutSaison || semaine > semaineActuelle) return;
-        if (!parSemaine.has(semaine)) parSemaine.set(semaine, new Set());
-        parSemaine.get(semaine).add(surface);
+    function ajouter(semaine, surface, nombre) {
+        if (semaine <= debutSaison || semaine > semaineActuelle || nombre <= 0) return;
+        if (!parSemaine.has(semaine)) parSemaine.set(semaine, {});
+        const bucket = parSemaine.get(semaine);
+        bucket[surface] = (bucket[surface] || 0) + nombre;
     }
+
+    // Compte les vrais matchs (pas DISTINCT sur semaine/surface, qui ecrasait a tort
+    // tous les tours d'un meme tournoi joues la meme semaine en une seule occurrence).
+    const parTournoi = new Map();
     db.prepare(`
-        SELECT DISTINCT m.semaine, m.surface, t.calendrier_id FROM matchs m
+        SELECT m.tournoi_id, m.semaine, m.surface, t.calendrier_id FROM matchs m
         JOIN tournois t ON t.id = m.tournoi_id
         WHERE m.player_id = ? AND m.tournoi_id IS NOT NULL AND m.semaine > ? AND m.semaine <= ?
     `).all(playerId, debutSaison, semaineActuelle).forEach(function (r) {
-        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === r.calendrier_id; });
+        if (!parTournoi.has(r.tournoi_id)) {
+            parTournoi.set(r.tournoi_id, { semaine: r.semaine, surface: r.surface, calendrier_id: r.calendrier_id, nombre: 0 });
+        }
+        parTournoi.get(r.tournoi_id).nombre++;
+    });
+
+    parTournoi.forEach(function (info) {
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === info.calendrier_id; });
         const duree = entree ? entree.duree : 1;
-        for (let d = 0; d < duree; d++) marquer(r.semaine + d, r.surface);
+        if (duree <= 1) {
+            ajouter(info.semaine, info.surface, info.nombre);
+        } else {
+            // matchs.semaine porte toujours la semaine de DEBUT du tournoi, meme pour
+            // les tours joues en 2e semaine (bug deja corrige une fois pour la marque
+            // "joue"/"pas joue" - ici il faut en plus repartir le VRAI nombre de tours).
+            // Le moteur (CRENEAUX_TOUR_2_SEMAINES_S1/_S2) joue toujours les tours 1-3 en
+            // semaine 1 puis les suivants en semaine 2, donc le parcours sequentiel d'un
+            // joueur se decoupe forcement pareil : les 3 premiers tours en semaine 1, le
+            // reste en semaine 2.
+            const semaine1 = Math.min(info.nombre, 3);
+            const semaine2 = info.nombre - semaine1;
+            ajouter(info.semaine, info.surface, semaine1);
+            ajouter(info.semaine + 1, info.surface, semaine2);
+        }
     });
 
     const valeurs = { dur: 0, terre: 0, herbe: 0 };
     for (let s = debutSaison + 1; s <= semaineActuelle; s++) {
-        const jouees = parSemaine.get(s) || new Set();
+        const jouees = parSemaine.get(s) || {};
         SURFACES.forEach(function (surf) {
-            valeurs[surf] = jouees.has(surf) ? Math.min(30, valeurs[surf] + 3) : Math.max(0, valeurs[surf] - 5);
+            const n = jouees[surf] || 0;
+            valeurs[surf] = n > 0 ? Math.min(30, valeurs[surf] + 3 * n) : Math.max(0, valeurs[surf] - 5);
         });
     }
     return valeurs;
@@ -1541,7 +1571,17 @@ app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
                 id: p.id, nom: p.prenom + ' ' + p.nom, estMoi,
                 classementLive: rangs.get('joueur:' + p.id) || null,
                 xpTotalSaison: xpTotal,
-                xpParSemaine: xpSemaines.map(function (l) { return { semaine: positionSemaineAffichee(l.semaine), xp: l.xp_credite }; }),
+                // action : 'repos'/'generique'/'afk'/'tournoi'/... - le journal hebdomadaire
+                // n'est jamais expose a un autre coach dans le jeu normal, mais cet outil est
+                // reserve a l'admin et deja construit sur ce meme journal (XP), demande
+                // explicite de l'utilisateur, 2026-09-28 ("comment savoir quand y'a un repos").
+                xpParSemaine: xpSemaines.map(function (l) {
+                    return {
+                        semaine: positionSemaineAffichee(l.semaine), xp: l.xp_credite,
+                        action: l.action_prevue,
+                        actionLibelle: l.action_prevue === 'tournoi' ? 'Tournoi : ' + l.tournoi_nom : (LABELS_ACTION_COURTS[l.action_prevue] || l.action_prevue || '?')
+                    };
+                }),
                 tournois, victoires, defaites,
                 formePerdueEstimee,
                 // Exact uniquement pour ses propres joueurs - estime (jamais lu tel quel)
