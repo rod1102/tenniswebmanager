@@ -143,7 +143,7 @@
                 const rangMoi = data.classement.indexOf(moi) + 1;
                 moiContainer.innerHTML = `
                     <div class="scout-moi-card">
-                        <div class="scout-moi-nom">${formaterNom(moi.nom)}</div>
+                        <div class="scout-moi-nom"><a href="scouting-joueur.html?id=${moi.id}" style="color:inherit;">${formaterNom(moi.nom)} →</a></div>
                         <div class="scout-moi-rang">${rangMoi}<span style="font-size:1rem; color:#8B98A5;">e sur ${data.classement.length}</span> · ${moi.xpTotalSaison} XP</div>
                     </div>
                 `;
@@ -205,7 +205,7 @@
                 return `
                     <tr class="${j.estMoi ? 'scout-row-moi' : ''}">
                         <td>${rang}</td>
-                        <td class="nom">${formaterNom(j.nom)}</td>
+                        <td class="nom">${j.estMoi ? `<a href="scouting-joueur.html?id=${j.id}">${formaterNom(j.nom)}</a>` : formaterNom(j.nom)}</td>
                         <td class="num">${j.classementLive || '—'}</td>
                         <td class="num"><span class="scout-xp-total" title="${detailXp}">${j.xpTotalSaison}</span></td>
                         <td class="num">${j.tournois}</td>

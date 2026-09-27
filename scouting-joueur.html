@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="ball.png">
+    <link rel="apple-touch-icon" href="ball.png">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Fiche joueur — Scouting — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20260927b">
+    <style>
+        .sj-header { display:flex; align-items:center; gap:14px; margin-bottom:20px; flex-wrap:wrap; }
+        .sj-header .flag-icon { width:32px; height:24px; border-radius:3px; }
+        .sj-header h1 { font-size:1.8rem; margin:0; }
+        .sj-header .sj-rang { color:#8B98A5; font-size:0.95rem; }
+
+        .sj-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:14px; margin-bottom:24px; }
+        .sj-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 14px 16px; }
+        .sj-card-label { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em; color:#8B98A5; font-weight:700; margin-bottom:6px; }
+        .sj-card-valeur { font-size:1.5rem; font-weight:800; color:#F5F7FA; }
+        .sj-card-valeur small { font-size:0.9rem; font-weight:600; color:#8B98A5; }
+
+        .sj-table-wrap { overflow-x:auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; margin-bottom:28px; }
+        .sj-table { width:100%; border-collapse:collapse; font-size:0.84rem; }
+        .sj-table th {
+            text-align:left; padding:10px 12px; color:#8B98A5; font-weight:700; font-size:0.7rem;
+            text-transform:uppercase; letter-spacing:0.04em; white-space:nowrap;
+            background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.14);
+        }
+        .sj-table th.num, .sj-table td.num { text-align:right; }
+        .sj-table td { padding:9px 12px; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align:middle; color:#F5F7FA; white-space:nowrap; }
+        .sj-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+        .sj-table tbody tr:hover { background: rgba(255,255,255,0.06); }
+        .sj-victoire { color:#5FBF7A; font-weight:700; }
+        .sj-defaite { color:#D46A6A; font-weight:700; }
+        .sj-fleche { color:#8B98A5; margin:0 4px; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="scouting.html">Scouting</a>
+                        <a href="accueil.html">Accueil</a>
+                        <a href="admin.html">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <div id="acces-refuse" class="match-hint" style="display:none; text-align:center;">Cette page est réservée à l'administrateur, et uniquement pour tes propres joueurs.</div>
+
+            <div id="contenu" style="display:none;">
+                <div class="sj-header">
+                    <img id="sj-drapeau" class="flag-icon" src="" alt="" style="display:none;">
+                    <div>
+                        <h1 id="sj-nom">—</h1>
+                        <div class="sj-rang" id="sj-rang"></div>
+                    </div>
+                </div>
+
+                <div class="sj-cards" id="sj-cards"></div>
+
+                <div class="stats-header">Compétences <span id="sj-competences-total" style="color:#8B98A5; font-weight:600;"></span></div>
+                <div id="sj-competences" style="margin-bottom:24px;"></div>
+
+                <div class="stats-header">Historique hebdomadaire</div>
+                <div class="sj-table-wrap">
+                    <table class="sj-table">
+                        <thead>
+                            <tr>
+                                <th>Semaine</th><th>Action</th><th class="num">XP</th>
+                                <th class="num">Forme</th><th class="num">Mental</th><th class="num">Mental max</th>
+                                <th class="num">Auto D</th><th class="num">Auto T</th><th class="num">Auto H</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sj-historique-tbody"></tbody>
+                    </table>
+                </div>
+
+                <div class="stats-header">Historique des matchs</div>
+                <div class="sj-table-wrap">
+                    <table class="sj-table">
+                        <thead>
+                            <tr>
+                                <th>Semaine</th><th>Tournoi</th><th>Tour</th><th>Surface</th><th>Adversaire</th><th>Score</th><th>Résultat</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sj-matchs-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userId = localStorage.getItem('currentUserId');
+        if (!userId) window.location.href = 'connexion.html';
+
+        const params = new URLSearchParams(window.location.search);
+        const playerId = params.get('id');
+
+        const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+        const COMPETENCES_LABELS = {
+            service: 'Service', retour: 'Retour', coup_droit_revers: 'Coup droit / Revers',
+            effet: 'Effet', volee: 'Volée', deplacement: 'Déplacement', puissance: 'Puissance', resistance: 'Résistance'
+        };
+
+        function classeCompetence(valeur) {
+            if (valeur <= 24) return 'competence-vert';
+            if (valeur <= 49) return 'competence-jaune';
+            if (valeur <= 74) return 'competence-orange';
+            if (valeur <= 99) return 'competence-rouge';
+            return 'competence-noir';
+        }
+        function ligneCompetence(label, valeur) {
+            return `<div class="bar-row"><span class="bar-label">${label}</span><div class="bar-track"><div class="bar-fill ${classeCompetence(valeur)}" style="width:${Math.min(100, valeur)}%;"></div></div><span class="bar-value">${Math.round(valeur * 10) / 10}</span></div>`;
+        }
+
+        function formaterNom(nomComplet) {
+            return nomComplet.replace(/\s+/g, ' ').trim();
+        }
+        function flagImg(code) {
+            if (!code) return '';
+            return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
+        }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (!response.ok || data.user.role !== 'admin') {
+                document.getElementById('acces-refuse').style.display = 'block';
+                return false;
+            }
+            return true;
+        }
+
+        function carte(label, valeur) {
+            return `<div class="sj-card"><div class="sj-card-label">${label}</div><div class="sj-card-valeur">${valeur}</div></div>`;
+        }
+
+        async function charger() {
+            if (!playerId) {
+                document.getElementById('acces-refuse').textContent = 'Aucun joueur précisé.';
+                document.getElementById('acces-refuse').style.display = 'block';
+                return;
+            }
+            const response = await fetch('/api/admin/scouting/joueur/' + playerId);
+            const data = await response.json();
+            if (!response.ok) {
+                document.getElementById('acces-refuse').textContent = data.error || 'Erreur.';
+                document.getElementById('acces-refuse').style.display = 'block';
+                return;
+            }
+            document.getElementById('contenu').style.display = 'block';
+
+            const j = data.joueur;
+            document.getElementById('sj-nom').textContent = formaterNom(j.nom);
+            document.getElementById('sj-rang').textContent = (j.classementLive ? j.classementLive + 'e au classement Live · ' : '') + (j.type === 'joueuse' ? 'WTA' : 'ATP');
+            if (j.drapeau) {
+                const img = document.getElementById('sj-drapeau');
+                img.src = 'https://flagcdn.com/48x36/' + j.drapeau + '.png';
+                img.style.display = 'block';
+            }
+
+            const LABELS_CONDITION = { en_forme: 'En forme', fatigue: 'Fatigué', diminue: 'Diminué', blesse: 'Blessé' };
+            document.getElementById('sj-cards').innerHTML = [
+                carte('Forme', j.forme),
+                carte('Mental actuel', j.mentalCourant),
+                carte('Mental max', j.mentalMax),
+                carte('Usure', j.usure),
+                carte('Énergie', j.energie),
+                carte('Condition', LABELS_CONDITION[j.condition] || j.condition),
+                carte('Automatismes', `D${j.automatismes.dur} T${j.automatismes.terre} H${j.automatismes.herbe}`),
+                carte('Érosion cumulée', '−' + data.erosionTotale)
+            ].join('');
+
+            const totalCompetences = COMPETENCES_LABELS && Object.keys(COMPETENCES_LABELS).reduce(function (s, c) { return s + j.competences[c]; }, 0);
+            document.getElementById('sj-competences-total').textContent = '(total ' + Math.round(totalCompetences) + ' / 800)';
+            document.getElementById('sj-competences').innerHTML = Object.keys(COMPETENCES_LABELS)
+                .map(function (c) { return ligneCompetence(COMPETENCES_LABELS[c], j.competences[c]); }).join('');
+
+            document.getElementById('sj-historique-tbody').innerHTML = data.historique.slice().reverse().map(function (h) {
+                return `
+                    <tr>
+                        <td>S${h.semaine === null ? '—' : h.semaine}</td>
+                        <td>${h.actionLibelle}</td>
+                        <td class="num">${h.xp}</td>
+                        <td class="num">${h.forme.avant ?? '—'} <span class="sj-fleche">→</span> ${h.forme.apres ?? '—'}</td>
+                        <td class="num">${h.mentalCourant.avant ?? '—'} <span class="sj-fleche">→</span> ${h.mentalCourant.apres ?? '—'}</td>
+                        <td class="num">${h.mentalMax.avant ?? '—'} <span class="sj-fleche">→</span> ${h.mentalMax.apres ?? '—'}</td>
+                        <td class="num">${h.automatismes.dur.avant ?? '—'} <span class="sj-fleche">→</span> ${h.automatismes.dur.apres ?? '—'}</td>
+                        <td class="num">${h.automatismes.terre.avant ?? '—'} <span class="sj-fleche">→</span> ${h.automatismes.terre.apres ?? '—'}</td>
+                        <td class="num">${h.automatismes.herbe.avant ?? '—'} <span class="sj-fleche">→</span> ${h.automatismes.herbe.apres ?? '—'}</td>
+                    </tr>
+                `;
+            }).join('') || '<tr><td colspan="9" class="match-hint">Aucun historique.</td></tr>';
+
+            document.getElementById('sj-matchs-tbody').innerHTML = data.matchs.slice().reverse().map(function (m) {
+                return `
+                    <tr>
+                        <td>S${m.semaine === null ? '—' : m.semaine}</td>
+                        <td>${m.tournoi}</td>
+                        <td>${m.tour}</td>
+                        <td>${LABELS_SURFACE[m.surface] || m.surface}</td>
+                        <td>${flagImg(m.adversaireDrapeau)} ${formaterNom(m.adversaireNom)}</td>
+                        <td>${m.score}</td>
+                        <td class="${m.victoire ? 'sj-victoire' : 'sj-defaite'}">${m.victoire ? 'Victoire' : 'Défaite'}</td>
+                    </tr>
+                `;
+            }).join('') || '<tr><td colspan="7" class="match-hint">Aucun match.</td></tr>';
+        }
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
+            localStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin().then(function (ok) { if (ok) charger(); });
+    </script>
+    <script src="retour.js?v=20260829"></script>
+    <script src="theme-saison.js?v=20260831"></script>
+</body>
+</html>

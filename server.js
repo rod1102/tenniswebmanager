@@ -1685,6 +1685,92 @@ app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
     }
 });
 
+// Fiche detaillee Scouting (admin) : match par match / semaine par semaine, mais
+// RESERVEE aux propres joueurs de l'admin (demande explicite de l'utilisateur -
+// meme en tant qu'admin, on ne se donne pas ce niveau de detail sur un joueur qui
+// n'est pas le sien, cf. classement Scouting ci-dessus qui reste, lui, ouvert a
+// tout le monde en estimation). Tout ici est exact (donnees reelles, jamais estimees).
+app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(Number(req.params.playerId));
+        if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+        if (Number(player.user_id) !== Number(req.userId)) {
+            return res.status(403).json({ error: 'Cette fiche detaillee est reservee a tes propres joueurs.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+        const circuit = player.type === 'joueuse' ? 'WTA' : 'ATP';
+        const rangs = calculerRangsLiveGlobal(circuit);
+
+        const historique = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine').all(player.id);
+
+        const matchsBruts = db.prepare(`
+            SELECT matchs.id, matchs.semaine, matchs.surface, matchs.vainqueur, matchs.score, matchs.numero_tour,
+                   tournois.nom AS tournoi_nom, tournois.categorie AS tournoi_categorie,
+                   tj1.player_id AS tj1_player_id, tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite,
+                   tj2.player_id AS tj2_player_id, tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite
+            FROM matchs
+            JOIN tournois ON tournois.id = matchs.tournoi_id
+            LEFT JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id OR tm.match_id_j2 = matchs.id
+            LEFT JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
+            LEFT JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
+            WHERE matchs.player_id = ? AND matchs.tournoi_id IS NOT NULL
+            ORDER BY matchs.id
+        `).all(player.id);
+
+        res.json({
+            success: true,
+            joueur: {
+                id: player.id, nom: player.prenom + ' ' + player.nom, type: player.type,
+                nationalite: player.nationalite, drapeau: drapeau(player.nationalite),
+                classementLive: rangs.get('joueur:' + player.id) || null,
+                forme: player.forme, mentalCourant: player.mental_courant, mentalMax: player.mental_max,
+                usure: player.usure, energie: player.points_energie, condition: player.condition,
+                automatismes: { dur: player.surface_dur_automatismes, terre: player.surface_terre_automatismes, herbe: player.surface_herbe_automatismes },
+                competences: COMPETENCES.reduce(function (o, c) { o[c] = player[c]; return o; }, {})
+            },
+            erosionTotale: erosionExacte(player.id, semaineActuelle),
+            historique: historique.map(function (h) {
+                return {
+                    semaine: positionSemaineAffichee(h.semaine),
+                    action: h.action_prevue,
+                    actionLibelle: h.action_prevue === 'tournoi' ? 'Tournoi : ' + h.tournoi_nom : (LABELS_ACTION_COURTS[h.action_prevue] || h.action_prevue || '?'),
+                    xp: h.xp_credite,
+                    forme: { avant: h.forme_avant, apres: h.forme_apres },
+                    mentalCourant: { avant: h.mental_avant, apres: h.mental_apres },
+                    mentalMax: { avant: h.mental_max_avant, apres: h.mental_max_apres },
+                    condition: { avant: h.condition_avant, apres: h.condition_apres },
+                    automatismes: {
+                        dur: { avant: h.automatismes_dur_avant, apres: h.automatismes_dur_apres },
+                        terre: { avant: h.automatismes_terre_avant, apres: h.automatismes_terre_apres },
+                        herbe: { avant: h.automatismes_herbe_avant, apres: h.automatismes_herbe_apres }
+                    }
+                };
+            }),
+            matchs: matchsBruts.map(function (m) {
+                // meme regle que /api/matchs/:userId (jeSuisTj1) : la seule comparaison
+                // fiable pour determiner qui je suis dans le duel est le player_id (un
+                // lambda/bot n'a jamais de player_id).
+                const jeSuisTj1 = m.tj1_player_id === player.id;
+                const adversaireNom = jeSuisTj1 ? m.tj2_nom : m.tj1_nom;
+                const adversaireNationalite = jeSuisTj1 ? m.tj2_nationalite : m.tj1_nationalite;
+                return {
+                    semaine: positionSemaineAffichee(m.semaine), tournoi: m.tournoi_nom, tour: m.numero_tour,
+                    surface: m.surface, victoire: m.vainqueur === 'joueur', score: m.score,
+                    adversaireNom: adversaireNom || '?', adversaireDrapeau: drapeau(adversaireNationalite)
+                };
+            })
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Diagnostic (admin) du "dernier carre" (4 joueurs ayant le plus progresse) d'un
 // tournoi a elimination directe, avec leur niveau de jeu sur la surface du tournoi -
 // le niveau est normalement confidentiel (jamais expose a un autre coach), cette route
