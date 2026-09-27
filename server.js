@@ -1379,14 +1379,28 @@ function mentalMaxEstime(playerId, debutSaison, semaineActuelle) {
 // suppose un entrainement de surface non public ; jamais +6 "Reperage", style
 // confidentiel), -5 les semaines sans match sur cette surface. Part de 0 (valeur
 // de creation, remise a ce niveau chaque Pre-saison). Plafonne 0-30 comme en jeu.
+// IMPORTANT : matchs.semaine porte TOUJOURS la semaine de DEBUT du tournoi, meme
+// pour un tour joue durant sa 2e semaine (Grand Chelem, M1000 96 places) - sans
+// corriger ca, la 2e semaine d'un tel tournoi paraissait "sans match" et perdait
+// 5 au lieu de gagner 3, y compris pour un joueur qui venait de LE REMPORTER (bug
+// signale par l'utilisateur, 2026-09-28, cas de David Heinzo vainqueur de l'Open
+// d'Australie affiche a 0 partout). On etale donc chaque match sur TOUTES les
+// semaines couvertes par la duree reelle du tournoi (CALENDRIER_TOURNOIS.duree).
 function automatismesEstimes(playerId, debutSaison, semaineActuelle) {
     const parSemaine = new Map();
+    function marquer(semaine, surface) {
+        if (semaine <= debutSaison || semaine > semaineActuelle) return;
+        if (!parSemaine.has(semaine)) parSemaine.set(semaine, new Set());
+        parSemaine.get(semaine).add(surface);
+    }
     db.prepare(`
-        SELECT DISTINCT semaine, surface FROM matchs
-        WHERE player_id = ? AND tournoi_id IS NOT NULL AND semaine > ? AND semaine <= ?
+        SELECT DISTINCT m.semaine, m.surface, t.calendrier_id FROM matchs m
+        JOIN tournois t ON t.id = m.tournoi_id
+        WHERE m.player_id = ? AND m.tournoi_id IS NOT NULL AND m.semaine > ? AND m.semaine <= ?
     `).all(playerId, debutSaison, semaineActuelle).forEach(function (r) {
-        if (!parSemaine.has(r.semaine)) parSemaine.set(r.semaine, new Set());
-        parSemaine.get(r.semaine).add(r.surface);
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === r.calendrier_id; });
+        const duree = entree ? entree.duree : 1;
+        for (let d = 0; d < duree; d++) marquer(r.semaine + d, r.surface);
     });
 
     const valeurs = { dur: 0, terre: 0, herbe: 0 };
