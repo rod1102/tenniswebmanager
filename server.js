@@ -1347,30 +1347,74 @@ function jeuxTotalDuScore(score) {
 // fin de Grand Chelem (evenements_globaux, -2/3 de l'exces au-dela de 100),
 // appliquee a TOUT le monde a la meme semaine, donc elle aussi publique. Part
 // d'une base de 100 (valeur de creation, remise a ce niveau chaque Pre-saison).
-function mentalMaxEstime(playerId, debutSaison, semaineActuelle) {
-    const matchs = db.prepare(`
-        SELECT semaine, evenements FROM matchs
-        WHERE player_id = ? AND tournoi_id IS NOT NULL AND semaine > ? AND semaine <= ?
-        ORDER BY semaine, id
+// Mental max ET mental courant ESTIMES ensemble (le second a besoin du premier au
+// fil de l'eau, pas seulement au final : un "repos" restaure le mental courant au
+// niveau du mental max DU MOMENT - cf. executerAvancementSemaine, ordre.action ===
+// 'repos' -> mentalCourant = player.mental_max). Perte de mental courant par match
+// = bareme reel PERTE_MENTAL_COURANT(categorie du tournoi, tour atteint), lu
+// directement sur matchs.numero_tour (public, deja affiche sur toute fiche de
+// tournoi) - jamais une approximation la ou la vraie donnee est disponible.
+// Meme repartition semaine 1/semaine 2 que automatismesEstimes pour les tournois
+// 2 semaines (matchs.semaine porte toujours la semaine de DEBUT) : les 3 premiers
+// tours joues en semaine 1, le reste en semaine 2 (deroulement sequentiel reel du
+// moteur, CRENEAUX_TOUR_2_SEMAINES_S1/_S2).
+function mentalEstime(playerId, debutSaison, semaineActuelle) {
+    const lignes = db.prepare(`
+        SELECT m.id, m.tournoi_id, m.semaine, m.numero_tour, m.evenements, t.categorie, t.calendrier_id
+        FROM matchs m JOIN tournois t ON t.id = m.tournoi_id
+        WHERE m.player_id = ? AND m.tournoi_id IS NOT NULL AND m.semaine > ? AND m.semaine <= ?
+        ORDER BY m.tournoi_id, m.id
     `).all(playerId, debutSaison, semaineActuelle);
-    const pointsParSemaine = new Map();
-    matchs.forEach(function (m) {
-        let ev = [];
-        try { ev = JSON.parse(m.evenements) || []; } catch (e) { ev = []; }
-        const n = ev.filter(function (e) { return e && e.type === 'point_important'; }).length;
-        pointsParSemaine.set(m.semaine, (pointsParSemaine.get(m.semaine) || 0) + n);
+
+    const parTournoi = new Map();
+    lignes.forEach(function (l) {
+        if (!parTournoi.has(l.tournoi_id)) parTournoi.set(l.tournoi_id, []);
+        parTournoi.get(l.tournoi_id).push(l);
     });
+
+    const parSemaine = new Map();
+    function bucket(semaine) {
+        if (!parSemaine.has(semaine)) parSemaine.set(semaine, { points: 0, perte: 0 });
+        return parSemaine.get(semaine);
+    }
+    parTournoi.forEach(function (matchsTournoi) {
+        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === matchsTournoi[0].calendrier_id; });
+        const duree = entree ? entree.duree : 1;
+        matchsTournoi.forEach(function (m, index) {
+            const semaineReelle = (duree > 1 && index >= 3) ? m.semaine + 1 : m.semaine;
+            if (semaineReelle <= debutSaison || semaineReelle > semaineActuelle) return;
+            let ev = [];
+            try { ev = JSON.parse(m.evenements) || []; } catch (e) { ev = []; }
+            const n = ev.filter(function (e) { return e && e.type === 'point_important'; }).length;
+            const b = bucket(semaineReelle);
+            b.points += n;
+            b.perte += perteMentalCourant(m.categorie, m.numero_tour);
+        });
+    });
+
     const reductionsParSemaine = new Set(
         db.prepare('SELECT DISTINCT semaine FROM evenements_globaux WHERE semaine > ? AND semaine <= ?').all(debutSaison, semaineActuelle)
             .map(function (r) { return r.semaine; })
     );
+    const reposParSemaine = new Set(
+        db.prepare("SELECT DISTINCT semaine FROM journal_semaine_joueur WHERE player_id = ? AND action_prevue = 'repos' AND semaine > ? AND semaine <= ?")
+            .all(playerId, debutSaison, semaineActuelle).map(function (r) { return r.semaine; })
+    );
 
-    let mentalMax = 100;
+    let mentalMax = 100, mentalCourant = 100;
     for (let s = debutSaison + 1; s <= semaineActuelle; s++) {
-        if (pointsParSemaine.has(s)) mentalMax += pointsParSemaine.get(s) * 0.1;
+        const b = parSemaine.get(s);
+        if (b) {
+            mentalMax += b.points * 0.1;
+            mentalCourant = Math.max(0, mentalCourant - b.perte);
+        }
         if (reductionsParSemaine.has(s) && mentalMax > 100) mentalMax -= (mentalMax - 100) * (2 / 3);
+        if (reposParSemaine.has(s)) mentalCourant = mentalMax;
     }
-    return Math.round(mentalMax * 10) / 10;
+    return {
+        mentalMax: Math.round(mentalMax * 10) / 10,
+        mentalCourant: Math.round(mentalCourant * 10) / 10
+    };
 }
 
 // Automatismes ESTIMES (dur/terre/herbe) pour un joueur qui n'est pas le mien :
@@ -1566,6 +1610,7 @@ app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
             // Forme perdue ESTIMEE (taux "normal" par defaut, le style choisi etant
             // confidentiel pour un adversaire) - jamais lue depuis players.forme.
             const formePerdueEstimee = estMoi ? null : Math.round(matchsSaison.reduce(function (s, m) { return s + jeuxTotalDuScore(m.score) * 0.10; }, 0) * 10) / 10;
+            const mentalEstimation = estMoi ? null : mentalEstime(p.id, debutSaison, semaineActuelle);
 
             return {
                 id: p.id, nom: p.prenom + ' ' + p.nom, estMoi,
@@ -1587,8 +1632,8 @@ app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
                 // Exact uniquement pour ses propres joueurs - estime (jamais lu tel quel)
                 // pour tout autre joueur, voir commentaire en tete de section.
                 formeActuelle: estMoi ? p.forme : null,
-                mentalMax: estMoi ? p.mental_max : mentalMaxEstime(p.id, debutSaison, semaineActuelle),
-                mentalCourant: estMoi ? p.mental_courant : null,
+                mentalMax: estMoi ? p.mental_max : mentalEstimation.mentalMax,
+                mentalCourant: estMoi ? p.mental_courant : mentalEstimation.mentalCourant,
                 automatismes: estMoi
                     ? { dur: p.surface_dur_automatismes, terre: p.surface_terre_automatismes, herbe: p.surface_herbe_automatismes }
                     : automatismesEstimes(p.id, debutSaison, semaineActuelle),
