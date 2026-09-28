@@ -45,6 +45,8 @@
         .sim-table tr.sim-row-verrou td { color: #8B98A5; font-style: italic; }
         .sim-table tr.sim-row-passe { background: rgba(255,255,255,0.03); }
         .sim-table tr.sim-row-passe td { color: #C5CDD6; }
+        .sim-table tr.sim-row-mental-cut { background: rgba(212, 74, 74, 0.14) !important; }
+        .sim-table tr.sim-row-mental-cut td:first-child { box-shadow: inset 3px 0 0 #D44A4A; }
         .sim-select {
             background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F5F7FA;
             border-radius: 6px; padding: 4px 6px; font-size: 0.8rem; max-width: 220px; color-scheme: dark;
@@ -80,11 +82,15 @@
                 <div class="sim-note">
                     <strong>Simulation, pas une prédiction.</strong> Certaines valeurs sont calculées avec les vraies règles du jeu (XP par tour atteint, perte de mental courant par tour, érosion hebdomadaire des compétences, automatismes, formule de moulinette). D'autres sont <strong>forcément des hypothèses</strong>, car un match futur n'a pas encore de résultat réel : ~20 jeux et ~8 points importants par match joué (perte de forme et gain de mental max), aucun style de jeu simulé (taux par défaut), et par défaut l'XP gagnée répartie à parts égales sur les 8 compétences — choisis une compétence dans la colonne "Compétence visée" pour lui donner toute l'XP de cette semaine-là à la place. Part de ton état réel actuel, projette jusqu'à la fin de la saison en cours.
                     <br><br>
-                    Les colonnes <strong>XP total</strong> et <strong>Érosion semaine</strong> du tableau utilisent une règle d'érosion différente de celle des barres "Compétences projetées" ci-dessous : 1 point perdu par tranche de 24 déjà acquise sur chaque compétence (plutôt que −4 % arrondi), pour rester cohérent avec le reste de l'outil Scouting.
+                    Les lignes en <strong style="color:#D46A6A;">rouge</strong> (🔻) marquent les semaines où le mental max de tous les joueurs réels perd les 2/3 de son excès au-delà de 100 (à l'issue de Miami, Wimbledon et l'US Open — règle du jeu, déjà prise en compte dans la projection).
+                    <br><br>
+                    Les semaines déjà jouées de la saison (S1 à aujourd'hui) sont affichées en lecture seule, avec les vraies données exactes. Le bouton <strong>Sauvegarder</strong> conserve ton plan pour les semaines à venir — sans lui, tout se perd en quittant la page.
                 </div>
 
                 <div class="sim-actions">
+                    <button class="cta cta-primary" id="sim-sauvegarder-btn" style="padding:10px 16px; font-size:0.8rem;">Sauvegarder</button>
                     <button class="cta cta-secondary" id="sim-reset-btn" style="padding:10px 16px; font-size:0.8rem;">Réinitialiser (tout en Entraînement générique)</button>
+                    <span id="sim-sauvegarde-statut" class="match-hint" style="align-self:center;"></span>
                 </div>
 
                 <div class="sim-cards" id="sim-cards"></div>
@@ -167,7 +173,8 @@
         let semainesData = [];
         let historiquePasse = [];
         let xpCumuleSaisonInitial = 0;
-        // choix[semaine] = { action: 'repos'|'generique'|'surface_dur'|'surface_terre'|'surface_herbe'|'coaching_mental'|'tournoi:<id>', tourIndex: number|null }
+        let positionsReductionMental = [];
+        // choix[semaine] = { action: 'repos'|'generique'|'surface_dur'|'surface_terre'|'surface_herbe'|'coaching_mental'|'tournoi:<id>', tourIndex: number|null, competenceCible: string|null }
         let choix = {};
 
         function carte(label, valeur, classe) {
@@ -196,6 +203,16 @@
                 // tous les 4 tours - S5/S9/.../S49, meme regle que le moteur reel,
                 // inconditionnelle (s'applique meme une semaine verrouillee).
                 if (s.position >= 5 && (s.position - 5) % 4 === 0) energie = Math.min(100, energie + 5);
+
+                // A l'issue de Miami/Wimbledon/US Open, le mental max de TOUS les
+                // joueurs reels perd les 2/3 de son exces au-dela de 100 (PDF) -
+                // evenement global, inconditionnel (independant de l'action choisie
+                // cette semaine-la), positions fournies par le serveur.
+                if (positionsReductionMental.indexOf(s.position) !== -1 && mentalMax > 100) {
+                    const exces = mentalMax - 100;
+                    mentalMax = Math.round((mentalMax - exces * (2 / 3)) * 10) / 10;
+                    mentalCourant = Math.min(mentalCourant, mentalMax);
+                }
 
                 // Semaine "verrouillee" (2e semaine d'un tournoi 2 semaines deja compte sur
                 // la semaine de debut) : seule l'erosion s'applique, aucun nouvel effet.
@@ -359,10 +376,11 @@
             tbody.innerHTML = rendreLignesPassees() + semainesData.map(function (s, i) {
                 const c = choix[s.semaine] || { action: 'generique' };
                 const d = resultat.detail[i];
+                const classeMentalCut = positionsReductionMental.indexOf(s.position) !== -1 ? ' sim-row-mental-cut' : '';
 
                 if (c.action === 'verrou') {
                     return `
-                        <tr class="sim-row-verrou">
+                        <tr class="sim-row-verrou${classeMentalCut}">
                             <td>S${s.position}</td>
                             <td colspan="3">Suite du tournoi (2e semaine, verrouillée)</td>
                             <td class="num">0</td>
@@ -383,8 +401,8 @@
                     : '';
 
                 return `
-                    <tr>
-                        <td>S${s.position}</td>
+                    <tr class="${classeMentalCut.trim()}">
+                        <td>S${s.position}${classeMentalCut ? ' <span title="Mental max rabote de 2/3 de son exces au-dela de 100 (Miami/Wimbledon/US Open)">🔻</span>' : ''}</td>
                         <td>
                             <select class="sim-select sim-action-select" data-semaine="${s.semaine}">
                                 ${optionsAction(s)}
@@ -494,10 +512,48 @@
             semainesData = data.semaines;
             historiquePasse = data.historiquePasse;
             xpCumuleSaisonInitial = data.xpCumuleSaison;
-            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null, competenceCible: null }; });
+            positionsReductionMental = data.positionsReductionMental || [];
+
+            // Plan sauvegarde precedemment (bouton "Sauvegarder") : reapplique semaine
+            // par semaine, seulement pour les semaines encore presentes dans la fenetre
+            // actuelle (une semaine du plan qui a deja ete jouee entre-temps disparait
+            // naturellement, plus besoin de la nettoyer).
+            const planSauvegarde = data.planSauvegarde || {};
+            semainesData.forEach(function (s) {
+                const sauve = planSauvegarde[s.semaine];
+                choix[s.semaine] = sauve
+                    ? { action: sauve.action, tourIndex: sauve.tourIndex, competenceCible: sauve.competenceCible || null }
+                    : { action: 'generique', tourIndex: null, competenceCible: null };
+            });
 
             rendreTableau();
         }
+
+        async function sauvegarderPlan() {
+            const statut = document.getElementById('sim-sauvegarde-statut');
+            statut.textContent = 'Sauvegarde…';
+            statut.style.color = '';
+            try {
+                const response = await fetch('/api/admin/scouting/simulation-data/' + playerId + '/sauvegarder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ plan: choix })
+                });
+                const data = await response.json();
+                if (!response.ok) {
+                    statut.textContent = data.error || 'Erreur de sauvegarde.';
+                    statut.style.color = '#D46A6A';
+                    return;
+                }
+                statut.textContent = 'Sauvegardé ✓';
+                statut.style.color = '#5FBF7A';
+                setTimeout(function () { statut.textContent = ''; }, 4000);
+            } catch (e) {
+                statut.textContent = 'Erreur de sauvegarde.';
+                statut.style.color = '#D46A6A';
+            }
+        }
+        document.getElementById('sim-sauvegarder-btn').addEventListener('click', sauvegarderPlan);
 
         document.getElementById('sim-reset-btn').addEventListener('click', function () {
             semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null, competenceCible: null }; });

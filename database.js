@@ -606,6 +606,18 @@ db.exec(`
     )
 `);
 
+// Plan sauvegarde de l'outil perso "Simulation de saison" (Scouting, admin) - un
+// seul brouillon par joueur, ecrase a chaque sauvegarde explicite (bouton dedie,
+// demande explicite de l'utilisateur : le plan se perdait des qu'il quittait la
+// page). "plan" = JSON de l'objet choix (semaine -> {action, tourIndex, competenceCible}).
+db.exec(`
+    CREATE TABLE IF NOT EXISTS simulations_scouting (
+        player_id INTEGER PRIMARY KEY,
+        plan TEXT NOT NULL,
+        date_maj TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+`);
+
 const migrations = [
     "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'coach'",
     "ALTER TABLE players ADD COLUMN statut TEXT DEFAULT 'en_attente'",

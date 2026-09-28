@@ -1987,6 +1987,23 @@ app.get('/api/admin/scouting/simulation-data/:playerId', (req, res) => {
             semaines.push({ semaine: s, position: phase.positionSemaine, tournois: tournoisSemaine });
         }
 
+        // Semaines ou le mental max de TOUS les joueurs reels perd les 2/3 de son exces
+        // au-dela de 100 (PDF, a l'issue de Miami/Wimbledon/US Open - cf.
+        // EVENEMENTS_REDUCTION_MENTAL) : signalees au client pour les mettre en evidence
+        // ET pour appliquer la meme reduction dans la projection (jusqu'ici absente de
+        // la simulation, qui pouvait donc surestimer le mental max projete). Positions
+        // dans la saison (comme s.position), pas des semaines absolues.
+        const positionsReductionMental = ['miami', 'wimbledon', 'us-open'].map(function (nom) {
+            const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.circuit === circuit && t.id === circuit.toLowerCase() + '-' + nom; });
+            return entree ? entree.semaine_debut + entree.duree - 1 : null;
+        }).filter(function (p) { return p !== null; });
+
+        const ligneSauvegarde = db.prepare('SELECT plan FROM simulations_scouting WHERE player_id = ?').get(player.id);
+        let planSauvegarde = null;
+        if (ligneSauvegarde) {
+            try { planSauvegarde = JSON.parse(ligneSauvegarde.plan); } catch (e) { planSauvegarde = null; }
+        }
+
         res.json({
             success: true,
             joueur: {
@@ -2001,8 +2018,38 @@ app.get('/api/admin/scouting/simulation-data/:playerId', (req, res) => {
             derniereSemainePlanifiable,
             historiquePasse,
             xpCumuleSaison,
-            semaines
+            semaines,
+            positionsReductionMental,
+            planSauvegarde
         });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
+// Sauvegarde/ecrase le plan en cours d'edition de la Simulation de saison (bouton
+// dedie) - un seul brouillon par joueur. Demande explicite de l'utilisateur : la
+// planification d'une saison entiere se perdait des qu'il quittait la page.
+app.post('/api/admin/scouting/simulation-data/:playerId/sauvegarder', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const player = db.prepare('SELECT id, user_id FROM players WHERE id = ?').get(Number(req.params.playerId));
+        if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+        if (Number(player.user_id) !== Number(req.userId)) {
+            return res.status(403).json({ error: 'Cette simulation est reservee a tes propres joueurs.' });
+        }
+        const plan = req.body.plan;
+        if (!plan || typeof plan !== 'object') {
+            return res.status(400).json({ error: 'Plan invalide.' });
+        }
+        db.prepare(`
+            INSERT INTO simulations_scouting (player_id, plan, date_maj) VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(player_id) DO UPDATE SET plan = excluded.plan, date_maj = CURRENT_TIMESTAMP
+        `).run(player.id, JSON.stringify(plan));
+        res.json({ success: true });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
