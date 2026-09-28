@@ -43,8 +43,12 @@
         .sim-table td.num { text-align:right; font-variant-numeric: tabular-nums; }
         .sim-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
         .sim-table tr.sim-row-verrou td { color: #8B98A5; font-style: italic; }
-        .sim-select { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F5F7FA; border-radius: 6px; padding: 4px 6px; font-size: 0.8rem; max-width: 220px; }
+        .sim-select {
+            background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F5F7FA;
+            border-radius: 6px; padding: 4px 6px; font-size: 0.8rem; max-width: 220px; color-scheme: dark;
+        }
         .sim-select:disabled { opacity: 0.5; }
+        .sim-select option { background-color: #0E141B; color: #F5F7FA; }
         .sim-actions { display:flex; gap:10px; margin-bottom:18px; }
     </style>
 </head>
