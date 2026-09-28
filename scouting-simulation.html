@@ -43,6 +43,8 @@
         .sim-table td.num { text-align:right; font-variant-numeric: tabular-nums; }
         .sim-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
         .sim-table tr.sim-row-verrou td { color: #8B98A5; font-style: italic; }
+        .sim-table tr.sim-row-passe { background: rgba(255,255,255,0.03); }
+        .sim-table tr.sim-row-passe td { color: #C5CDD6; }
         .sim-select {
             background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F5F7FA;
             border-radius: 6px; padding: 4px 6px; font-size: 0.8rem; max-width: 220px; color-scheme: dark;
@@ -158,6 +160,8 @@
 
         let etatInitial = null;
         let semainesData = [];
+        let historiquePasse = [];
+        let xpCumuleSaisonInitial = 0;
         // choix[semaine] = { action: 'repos'|'generique'|'surface_dur'|'surface_terre'|'surface_herbe'|'coaching_mental'|'tournoi:<id>', tourIndex: number|null }
         let choix = {};
 
@@ -167,20 +171,17 @@
 
         // Rejoue la simulation entiere a partir de l'etat REEL actuel du joueur, semaine
         // par semaine, en appliquant "choix". Retourne l'etat final + le detail par
-        // semaine (utilise pour la colonne XP semaine/cumule).
+        // semaine (utilise pour la colonne XP semaine/cumule). "XP total"/"Erosion
+        // semaine" utilisent la MEME regle exacte -4%/floor que les barres "Competences
+        // projetees" (pas d'approximation par palier de 24 : c'est son propre joueur,
+        // les valeurs de depart sont exactes, aucune raison d'approximer l'erosion elle-
+        // meme - seuls les resultats de MATCHS futurs, inconnus, restent des hypotheses).
         function simuler() {
             let forme = etatInitial.forme, mentalCourant = etatInitial.mentalCourant, mentalMax = etatInitial.mentalMax;
             let usure = etatInitial.usure, condition = etatInitial.condition, energie = etatInitial.energie;
             const automatismes = Object.assign({}, etatInitial.automatismes);
             const competences = Object.assign({}, etatInitial.competences);
-            // "XP total" : suivi PARALLELE des competences avec l'autre regle d'erosion
-            // deja utilisee ailleurs dans Scouting pour un joueur estime (1 point perdu
-            // par tranche de 24 deja acquise sur chaque competence, plutot que -4%) -
-            // demande explicite de l'utilisateur pour ces 2 colonnes precises, distincte
-            // de la regle exacte -4%/floor qui reste utilisee pour les barres de
-            // Competences projetees plus bas.
-            const competencesTiered = Object.assign({}, etatInitial.competences);
-            let xpCumule = 0;
+            let xpCumule = xpCumuleSaisonInitial;
             const detail = [];
 
             semainesData.forEach(function (s) {
@@ -194,30 +195,28 @@
                 // Semaine "verrouillee" (2e semaine d'un tournoi 2 semaines deja compte sur
                 // la semaine de debut) : seule l'erosion s'applique, aucun nouvel effet.
                 if (c.action === 'verrou') {
-                    COMPETENCES.forEach(function (comp) { competences[comp] = Math.max(0, competences[comp] - Math.floor(competences[comp] * 0.04)); });
-                    let perteTiereeSemaine = 0;
+                    let erosionSemaine = 0;
                     COMPETENCES.forEach(function (comp) {
-                        const perte = Math.floor(competencesTiered[comp] / 24);
-                        perteTiereeSemaine += perte;
-                        competencesTiered[comp] = Math.max(0, competencesTiered[comp] - perte);
+                        const perte = Math.floor(competences[comp] * 0.04);
+                        erosionSemaine += perte;
+                        competences[comp] = Math.max(0, competences[comp] - perte);
                     });
                     SURFACES.forEach(function (surf) { automatismes[surf] = Math.max(0, automatismes[surf] - 5); });
                     detail.push({
                         semaine: s.semaine, xp: 0, xpCumule, energie,
-                        xpTotalTiere: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competencesTiered[comp]; }, 0)),
-                        erosionSemaine: perteTiereeSemaine
+                        xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
+                        erosionSemaine: erosionSemaine
                     });
                     return;
                 }
 
                 // Erosion hebdomadaire (vraie formule -4%/floor, s'applique a chaque semaine
                 // de tournoi qu'on quitte - toutes les semaines simulees ici en sont).
-                COMPETENCES.forEach(function (comp) { competences[comp] = Math.max(0, competences[comp] - Math.floor(competences[comp] * 0.04)); });
-                let perteTiereeSemaine = 0;
+                let erosionSemaine = 0;
                 COMPETENCES.forEach(function (comp) {
-                    const perte = Math.floor(competencesTiered[comp] / 24);
-                    perteTiereeSemaine += perte;
-                    competencesTiered[comp] = Math.max(0, competencesTiered[comp] - perte);
+                    const perte = Math.floor(competences[comp] * 0.04);
+                    erosionSemaine += perte;
+                    competences[comp] = Math.max(0, competences[comp] - perte);
                 });
 
                 let xpSemaine = 0;
@@ -273,21 +272,17 @@
 
                 // Repartition de l'XP gagnee cette semaine a parts egales sur les 8
                 // competences (hypothese - la vraie repartition est un choix du coach,
-                // jamais simule ici) - appliquee aux deux suivis en parallele (regle
-                // exacte -4% et regle par palier de 24).
+                // jamais simule ici).
                 if (xpSemaine > 0) {
                     const part = xpSemaine / 8;
-                    COMPETENCES.forEach(function (comp) {
-                        competences[comp] = Math.min(100, competences[comp] + part);
-                        competencesTiered[comp] = Math.min(100, competencesTiered[comp] + part);
-                    });
+                    COMPETENCES.forEach(function (comp) { competences[comp] = Math.min(100, competences[comp] + part); });
                 }
 
                 xpCumule += xpSemaine;
                 detail.push({
                     semaine: s.semaine, xp: xpSemaine, xpCumule, energie,
-                    xpTotalTiere: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competencesTiered[comp]; }, 0)),
-                    erosionSemaine: perteTiereeSemaine
+                    xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
+                    erosionSemaine: erosionSemaine
                 });
             });
 
@@ -313,10 +308,28 @@
             return html;
         }
 
+        // Semaines DEJA JOUEES de la saison en cours (S1 a aujourd'hui) : lecture seule,
+        // donnees reelles exactes (pas de select, rien a choisir - c'est du passe).
+        function rendreLignesPassees() {
+            return historiquePasse.map(function (h) {
+                return `
+                    <tr class="sim-row-passe">
+                        <td>S${h.position === null ? '—' : h.position}</td>
+                        <td colspan="2">${h.actionLibelle}</td>
+                        <td class="num">${h.xp}</td>
+                        <td class="num">${h.xpCumule}</td>
+                        <td class="num">${h.energie}</td>
+                        <td class="num">${h.xpTotal}</td>
+                        <td class="num">−${h.erosionSemaine}</td>
+                    </tr>
+                `;
+            }).join('');
+        }
+
         function rendreTableau() {
             const resultat = simuler();
             const tbody = document.getElementById('sim-tbody');
-            tbody.innerHTML = semainesData.map(function (s, i) {
+            tbody.innerHTML = rendreLignesPassees() + semainesData.map(function (s, i) {
                 const c = choix[s.semaine] || { action: 'generique' };
                 const d = resultat.detail[i];
 
@@ -328,7 +341,7 @@
                             <td class="num">0</td>
                             <td class="num">${d.xpCumule}</td>
                             <td class="num">${d.energie}</td>
-                            <td class="num">${d.xpTotalTiere}</td>
+                            <td class="num">${d.xpTotal}</td>
                             <td class="num">−${d.erosionSemaine}</td>
                         </tr>
                     `;
@@ -358,7 +371,7 @@
                         <td class="num">${d.xp}</td>
                         <td class="num">${d.xpCumule}</td>
                         <td class="num">${d.energie}</td>
-                        <td class="num">${d.xpTotalTiere}</td>
+                        <td class="num">${d.xpTotal}</td>
                         <td class="num">−${d.erosionSemaine}</td>
                     </tr>
                 `;
@@ -448,6 +461,8 @@
 
             etatInitial = data.joueur;
             semainesData = data.semaines;
+            historiquePasse = data.historiquePasse;
+            xpCumuleSaisonInitial = data.xpCumuleSaison;
             semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null }; });
 
             rendreTableau();

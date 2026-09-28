@@ -1611,6 +1611,40 @@ function erosionExacte(playerId, semaineActuelle) {
     return total;
 }
 
+// Historique hebdomadaire (journal_semaine_joueur) d'UN joueur, avec la colonne
+// "*_apres" corrigee - cf. commentaire detaille dans /api/admin/scouting/joueur/
+// ci-dessous, qui utilisait cette logique en ligne avant qu'elle ne soit factorisee
+// ici pour etre reutilisee aussi par la Simulation de saison (semaines deja jouees
+// de la saison en cours, affichees avant les semaines simulees).
+const CHAMPS_AVANT_APRES = [
+    'forme', 'mental', 'mental_max', 'usure', 'energie', 'condition',
+    'automatismes_dur', 'automatismes_terre', 'automatismes_herbe'
+].concat(COMPETENCES);
+function historiqueCorrigeDuJoueur(player) {
+    const historique = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine').all(player.id);
+    const valeurLive = {
+        forme: player.forme, mental: player.mental_courant, mental_max: player.mental_max,
+        usure: player.usure, energie: player.points_energie, condition: player.condition,
+        automatismes_dur: player.surface_dur_automatismes, automatismes_terre: player.surface_terre_automatismes,
+        automatismes_herbe: player.surface_herbe_automatismes
+    };
+    COMPETENCES.forEach(function (c) { valeurLive[c] = player[c]; });
+    return historique.map(function (h, i) {
+        const suivant = historique[i + 1];
+        const corrige = Object.assign({}, h);
+        CHAMPS_AVANT_APRES.forEach(function (champ) {
+            const cleAvant = champ + '_avant';
+            const cleApres = champ + '_apres';
+            if (suivant && suivant[cleAvant] !== null && suivant[cleAvant] !== undefined) {
+                corrige[cleApres] = suivant[cleAvant];
+            } else {
+                corrige[cleApres] = valeurLive[champ];
+            }
+        });
+        return corrige;
+    });
+}
+
 // Alertes kine (matchs.kine_intervenu, pose a la degradation REELLE de condition -
 // narre publiquement dans le teletexte de tout match de tournoi, jamais une donnee
 // confidentielle) : nombre recu dans la saison en cours, et depuis le dernier repos
@@ -1727,50 +1761,11 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
         const circuit = player.type === 'joueuse' ? 'WTA' : 'ATP';
         const rangs = calculerRangsLiveGlobal(circuit);
 
-        const historique = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine').all(player.id);
-
         const kine = alertesKine(player.id, debutSaison);
 
-        // La colonne "*_apres" de journal_semaine_joueur est capturee AU MOMENT DE LA
-        // TRANSITION de semaine (erosion + planification), donc AVANT que les matchs de
-        // tournoi de cette semaine-la ne soient reellement joues (simulation differee,
-        // tour par tour, tout au long de la semaine - cf. executerAvancementTour). Un
-        // joueur engage en tournoi n'a meme aucun "ordre" de planification cette
-        // semaine-la (voir executerAvancementSemaine), donc son "*_apres" stocke egale
-        // son "*_avant", meme s'il a ensuite joue et gagne/perdu forme/mental/automatismes
-        // en match - bug signale par l'utilisateur (avant=apres injustifie, semaine avec
-        // matchs joues). L'etat REEL de fin de semaine se lit en realite sur le "*_avant"
-        // de la ligne SUIVANTE (capturee juste avant la transition suivante, donc apres
-        // que tous les matchs de la semaine consideree aient ete simules), ou sur l'etat
-        // EN DIRECT du joueur (deja charge dans "player") pour la toute derniere semaine
-        // connue, qui n'a pas encore de ligne suivante. Corrige ainsi plutot que de
-        // re-simuler chaque match un par un (aucun risque d'oublier un cas particulier -
-        // Coupe Davis, poules, kine... - puisqu'on relit un etat deja reellement ecrit).
-        const CHAMPS_AVANT_APRES = [
-            'forme', 'mental', 'mental_max', 'usure', 'energie', 'condition',
-            'automatismes_dur', 'automatismes_terre', 'automatismes_herbe'
-        ].concat(COMPETENCES);
-        const VALEUR_LIVE = {
-            forme: player.forme, mental: player.mental_courant, mental_max: player.mental_max,
-            usure: player.usure, energie: player.points_energie, condition: player.condition,
-            automatismes_dur: player.surface_dur_automatismes, automatismes_terre: player.surface_terre_automatismes,
-            automatismes_herbe: player.surface_herbe_automatismes
-        };
-        COMPETENCES.forEach(function (c) { VALEUR_LIVE[c] = player[c]; });
-        const historiqueCorrige = historique.map(function (h, i) {
-            const suivant = historique[i + 1];
-            const corrige = Object.assign({}, h);
-            CHAMPS_AVANT_APRES.forEach(function (champ) {
-                const cleAvant = champ + '_avant';
-                const cleApres = champ + '_apres';
-                if (suivant && suivant[cleAvant] !== null && suivant[cleAvant] !== undefined) {
-                    corrige[cleApres] = suivant[cleAvant];
-                } else {
-                    corrige[cleApres] = VALEUR_LIVE[champ];
-                }
-            });
-            return corrige;
-        });
+        // "*_apres" corrige (bug avant=apres injustifie sur une semaine avec matchs
+        // joues) - cf. commentaire detaille sur historiqueCorrigeDuJoueur.
+        const historiqueCorrige = historiqueCorrigeDuJoueur(player);
 
         // Courbes Niveau / Points importants par surface, semaine par semaine - meme
         // formule exacte que le moteur (niveauNormal, COEFFICIENTS_SURFACE ; niveau
@@ -1945,8 +1940,36 @@ app.get('/api/admin/scouting/simulation-data/:playerId', (req, res) => {
 
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         const semaineActuelle = etat.semaine_actuelle;
+        const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+        const debutSaison = semaineActuelle - positionSaisonBrute + 2;
         const circuit = player.type === 'joueuse' ? 'WTA' : 'ATP';
         const derniereSemainePlanifiable = finSaisonAbsolue(semaineActuelle);
+
+        // Semaines DEJA JOUEES de la saison en cours (S1 a maintenant), affichees en
+        // lecture seule avant les semaines simulees - demande explicite de l'utilisateur
+        // pour voir la progression depuis le vrai debut de saison, pas seulement a
+        // partir d'aujourd'hui. Tout est exact (donnees reelles), meme regle d'erosion
+        // -4%/floor que le reste de l'outil (pas d'approximation necessaire ici, les
+        // valeurs par semaine sont deja connues).
+        let xpCumuleSaison = 0;
+        const historiquePasse = historiqueCorrigeDuJoueur(player)
+            .filter(function (h) { return h.semaine > debutSaison && h.semaine <= semaineActuelle; })
+            .map(function (h) {
+                xpCumuleSaison += h.xp_credite || 0;
+                let erosionSemaine = 0;
+                if (phaseDeSemaine(h.semaine - 1).type === 'tournoi') {
+                    COMPETENCES.forEach(function (c) {
+                        const val = h[c + '_avant'];
+                        if (val !== null && val !== undefined) erosionSemaine += Math.floor(val * 0.04);
+                    });
+                }
+                const xpTotal = Math.round(COMPETENCES.reduce(function (s, c) { return s + (h[c + '_apres'] || 0); }, 0));
+                return {
+                    semaine: h.semaine, position: positionSemaineAffichee(h.semaine),
+                    actionLibelle: h.action_prevue === 'tournoi' ? 'Tournoi : ' + h.tournoi_nom : (LABELS_ACTION_COURTS[h.action_prevue] || h.action_prevue || '?'),
+                    xp: h.xp_credite, xpCumule: xpCumuleSaison, energie: h.energie_apres, xpTotal, erosionSemaine
+                };
+            });
 
         const semaines = [];
         for (let s = semaineActuelle + 1; s <= derniereSemainePlanifiable; s++) {
@@ -1976,6 +1999,8 @@ app.get('/api/admin/scouting/simulation-data/:playerId', (req, res) => {
             },
             semaineActuelle,
             derniereSemainePlanifiable,
+            historiquePasse,
+            xpCumuleSaison,
             semaines
         });
     } catch (err) {
