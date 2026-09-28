@@ -36,6 +36,26 @@
         .sj-victoire { color:#5FBF7A; font-weight:700; }
         .sj-defaite { color:#D46A6A; font-weight:700; }
         .sj-fleche { color:#8B98A5; margin:0 4px; }
+
+        .sj-graphs { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:28px; }
+        @media (max-width: 900px) { .sj-graphs { grid-template-columns:1fr; } }
+        .sj-graph-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 16px; position:relative; }
+        .sj-graph-titre { font-size:0.85rem; font-weight:700; color:#F5F7FA; margin-bottom:10px; }
+        .sj-graph-svg { width:100%; height:auto; display:block; overflow:visible; }
+        .sj-graph-legende { display:flex; gap:16px; margin-top:10px; flex-wrap:wrap; }
+        .sj-graph-legende-item { display:flex; align-items:center; gap:6px; font-size:0.76rem; color:#8B98A5; }
+        .sj-graph-legende-cle { width:14px; height:2px; border-radius:1px; display:inline-block; }
+        .sj-graph-vide { color:#8B98A5; font-size:0.85rem; text-align:center; padding:40px 0; }
+        .sj-graph-tooltip {
+            position:absolute; pointer-events:none; background:#0E141B; border:1px solid rgba(255,255,255,0.16);
+            border-radius:8px; padding:8px 10px; font-size:0.76rem; color:#F5F7FA; white-space:nowrap;
+            box-shadow:0 4px 16px rgba(0,0,0,0.4); opacity:0; transition:opacity 0.08s; z-index:5;
+        }
+        .sj-graph-tooltip-semaine { color:#8B98A5; font-weight:700; margin-bottom:5px; font-size:0.68rem; text-transform:uppercase; letter-spacing:0.04em; }
+        .sj-graph-tooltip-ligne { display:flex; align-items:center; gap:6px; margin-top:3px; }
+        .sj-graph-tooltip-cle { width:10px; height:2px; border-radius:1px; display:inline-block; flex-shrink:0; }
+        .sj-graph-tooltip-valeur { font-weight:800; }
+        .sj-graph-tooltip-label { color:#8B98A5; }
     </style>
 </head>
 <body>
@@ -69,6 +89,18 @@
 
                 <div class="stats-header">Compétences <span id="sj-competences-total" style="color:#8B98A5; font-weight:600;"></span></div>
                 <div id="sj-competences" style="margin-bottom:24px;"></div>
+
+                <div class="stats-header">Courbes par surface</div>
+                <div class="sj-graphs">
+                    <div class="sj-graph-card">
+                        <div class="sj-graph-titre">Niveau</div>
+                        <div id="sj-graph-niveau"></div>
+                    </div>
+                    <div class="sj-graph-card">
+                        <div class="sj-graph-titre">Points importants</div>
+                        <div id="sj-graph-mental"></div>
+                    </div>
+                </div>
 
                 <div class="stats-header">Historique hebdomadaire</div>
                 <div class="sj-table-wrap">
@@ -140,6 +172,143 @@
             return `<img class="flag-icon" src="https://flagcdn.com/24x18/${code}.png" alt="">`;
         }
 
+        // Memes couleurs que les barres d'automatismes ailleurs sur le site
+        // (.bar-fill.automatisme-*) : bleu/terre/vert, identite fixe par surface.
+        const SURFACES_GRAPH = ['dur', 'terre', 'herbe'];
+        const SURFACES_COULEURS = { dur: '#5FA8E8', terre: '#E08A4B', herbe: '#5CC57F' };
+        const SURFACES_NOMS = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+
+        // Graphique ligne en SVG pur (pas de librairie, coherent avec le reste du site)
+        // pour les courbes Niveau / Points importants par surface. data = tableau de
+        // { semaine, dur, terre, herbe } dans l'ordre chronologique. Crosshair + infobulle
+        // au survol montrant les 3 valeurs de la semaine visee.
+        function construireGraphique(conteneur, data) {
+            if (!data || data.length === 0) {
+                conteneur.innerHTML = '<div class="sj-graph-vide">Pas encore de données.</div>';
+                return;
+            }
+
+            const largeur = 640, hauteur = 260;
+            const marge = { haut: 14, bas: 26, gauche: 40, droite: 12 };
+            const largeurUtile = largeur - marge.gauche - marge.droite;
+            const hauteurUtile = hauteur - marge.haut - marge.bas;
+
+            const toutesValeurs = [];
+            data.forEach(function (p) { SURFACES_GRAPH.forEach(function (s) { toutesValeurs.push(p[s]); }); });
+            const minVal = Math.min.apply(null, toutesValeurs);
+            const maxVal = Math.max.apply(null, toutesValeurs);
+            const coussin = Math.max(2, (maxVal - minVal) * 0.1);
+            const yMin = Math.floor(minVal - coussin);
+            const yMax = Math.ceil(maxVal + coussin);
+
+            function x(i) { return data.length <= 1 ? marge.gauche + largeurUtile / 2 : marge.gauche + (i / (data.length - 1)) * largeurUtile; }
+            function y(v) { return marge.haut + hauteurUtile - ((v - yMin) / (yMax - yMin || 1)) * hauteurUtile; }
+
+            function chemin(cle) {
+                return data.map(function (p, i) { return (i === 0 ? 'M' : 'L') + x(i).toFixed(1) + ',' + y(p[cle]).toFixed(1); }).join(' ');
+            }
+
+            // Gridlines Y (4 paliers), hairline, recessives.
+            let gridSvg = '';
+            const nbPaliers = 4;
+            for (let k = 0; k <= nbPaliers; k++) {
+                const v = yMin + (k / nbPaliers) * (yMax - yMin);
+                const yy = y(v);
+                gridSvg += `<line x1="${marge.gauche}" y1="${yy.toFixed(1)}" x2="${largeur - marge.droite}" y2="${yy.toFixed(1)}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>`;
+                gridSvg += `<text x="${(marge.gauche - 8).toFixed(1)}" y="${(yy + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="#8B98A5">${Math.round(v)}</text>`;
+            }
+
+            // Ticks X : premiere/derniere semaine + un point intermediaire (evite le
+            // fouillis sur un long historique).
+            let ticksXSvg = '';
+            const indexTicks = data.length === 1 ? [0] : (data.length === 2 ? [0, 1] : [0, Math.round((data.length - 1) / 2), data.length - 1]);
+            indexTicks.forEach(function (i) {
+                ticksXSvg += `<text x="${x(i).toFixed(1)}" y="${hauteur - 6}" text-anchor="middle" font-size="9" fill="#8B98A5">S${data[i].semaine === null ? '—' : data[i].semaine}</text>`;
+            });
+
+            const lignesSvg = SURFACES_GRAPH.map(function (s) {
+                return `<path d="${chemin(s)}" fill="none" stroke="${SURFACES_COULEURS[s]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+            }).join('');
+
+            // Points de fin (dernier point de chaque courbe), avec anneau surface pour
+            // rester lisibles quand deux courbes se croisent.
+            const dernierIndex = data.length - 1;
+            const pointsFinSvg = SURFACES_GRAPH.map(function (s) {
+                return `<circle cx="${x(dernierIndex).toFixed(1)}" cy="${y(data[dernierIndex][s]).toFixed(1)}" r="4" fill="${SURFACES_COULEURS[s]}" stroke="#151B23" stroke-width="2"/>`;
+            }).join('');
+
+            const idSvg = 'svg-' + Math.random().toString(36).slice(2);
+            conteneur.innerHTML = `
+                <svg class="sj-graph-svg" id="${idSvg}" viewBox="0 0 ${largeur} ${hauteur}">
+                    ${gridSvg}
+                    ${lignesSvg}
+                    ${pointsFinSvg}
+                    ${ticksXSvg}
+                    <line class="sj-graph-crosshair" x1="0" y1="${marge.haut}" x2="0" y2="${marge.haut + hauteurUtile}" stroke="rgba(255,255,255,0.35)" stroke-width="1" style="opacity:0;"/>
+                    <rect class="sj-graph-overlay" x="${marge.gauche}" y="0" width="${largeurUtile}" height="${hauteur}" fill="transparent" style="cursor:crosshair;"/>
+                </svg>
+                <div class="sj-graph-tooltip"></div>
+                <div class="sj-graph-legende">
+                    ${SURFACES_GRAPH.map(function (s) {
+                        return `<span class="sj-graph-legende-item"><span class="sj-graph-legende-cle" style="background:${SURFACES_COULEURS[s]};"></span>${SURFACES_NOMS[s]}</span>`;
+                    }).join('')}
+                </div>
+            `;
+
+            const svg = conteneur.querySelector('svg');
+            const overlay = conteneur.querySelector('.sj-graph-overlay');
+            const crosshair = conteneur.querySelector('.sj-graph-crosshair');
+            const tooltip = conteneur.querySelector('.sj-graph-tooltip');
+
+            function survol(clientX, clientY) {
+                const rect = svg.getBoundingClientRect();
+                const xViewBox = (clientX - rect.left) / rect.width * largeur;
+                let i = data.length <= 1 ? 0 : Math.round((xViewBox - marge.gauche) / largeurUtile * (data.length - 1));
+                i = Math.max(0, Math.min(data.length - 1, i));
+
+                crosshair.setAttribute('x1', x(i).toFixed(1));
+                crosshair.setAttribute('x2', x(i).toFixed(1));
+                crosshair.style.opacity = '1';
+
+                const p = data[i];
+                tooltip.innerHTML = '';
+                const titre = document.createElement('div');
+                titre.className = 'sj-graph-tooltip-semaine';
+                titre.textContent = 'Semaine ' + (p.semaine === null ? '—' : p.semaine);
+                tooltip.appendChild(titre);
+                SURFACES_GRAPH.forEach(function (s) {
+                    const ligne = document.createElement('div');
+                    ligne.className = 'sj-graph-tooltip-ligne';
+                    const cle = document.createElement('span');
+                    cle.className = 'sj-graph-tooltip-cle';
+                    cle.style.background = SURFACES_COULEURS[s];
+                    const valeur = document.createElement('span');
+                    valeur.className = 'sj-graph-tooltip-valeur';
+                    valeur.textContent = p[s];
+                    const label = document.createElement('span');
+                    label.className = 'sj-graph-tooltip-label';
+                    label.textContent = SURFACES_NOMS[s];
+                    ligne.appendChild(cle);
+                    ligne.appendChild(valeur);
+                    ligne.appendChild(label);
+                    tooltip.appendChild(ligne);
+                });
+
+                const rectConteneur = conteneur.getBoundingClientRect();
+                let left = clientX - rectConteneur.left + 14;
+                if (left + 150 > rectConteneur.width) left = clientX - rectConteneur.left - 150;
+                tooltip.style.left = left + 'px';
+                tooltip.style.top = (clientY - rectConteneur.top - 40) + 'px';
+                tooltip.style.opacity = '1';
+            }
+
+            overlay.addEventListener('pointermove', function (e) { survol(e.clientX, e.clientY); });
+            overlay.addEventListener('pointerleave', function () {
+                crosshair.style.opacity = '0';
+                tooltip.style.opacity = '0';
+            });
+        }
+
         async function verifierAdmin() {
             const response = await fetch('/api/utilisateur/' + userId);
             const data = await response.json();
@@ -194,6 +363,9 @@
             document.getElementById('sj-competences-total').textContent = '(total ' + Math.round(totalCompetences) + ' / 800)';
             document.getElementById('sj-competences').innerHTML = Object.keys(COMPETENCES_LABELS)
                 .map(function (c) { return ligneCompetence(COMPETENCES_LABELS[c], j.competences[c]); }).join('');
+
+            construireGraphique(document.getElementById('sj-graph-niveau'), data.courbes.niveau);
+            construireGraphique(document.getElementById('sj-graph-mental'), data.courbes.pointsImportants);
 
             document.getElementById('sj-historique-tbody').innerHTML = data.historique.slice().reverse().map(function (h) {
                 return `

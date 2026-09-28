@@ -1708,6 +1708,28 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
 
         const historique = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine').all(player.id);
 
+        // Courbes Niveau / Points importants par surface, semaine par semaine - meme
+        // formule exacte que le moteur (niveauNormal, COEFFICIENTS_SURFACE ; niveau
+        // "points importants" = niveau normal - forme + mental courant, cf. CLAUDE.md),
+        // rejouee a partir des vraies valeurs "apres" deja enregistrees chaque semaine
+        // (jamais une estimation, c'est son propre joueur).
+        const courbes = { niveau: [], pointsImportants: [] };
+        historique.forEach(function (h) {
+            const semaineAffichee = positionSemaineAffichee(h.semaine);
+            const pointNiveau = { semaine: semaineAffichee };
+            const pointMental = { semaine: semaineAffichee };
+            SURFACES.forEach(function (surf) {
+                const coefs = COEFFICIENTS_SURFACE[surf];
+                let total = 0;
+                COMPETENCES.forEach(function (c) { total += (h[c + '_apres'] || 0) * coefs[c]; });
+                total += (h.forme_apres || 0) + (h.energie_apres || 0) + (h['automatismes_' + surf + '_apres'] || 0);
+                pointNiveau[surf] = Math.round(total * 10) / 10;
+                pointMental[surf] = Math.round((total - (h.forme_apres || 0) + (h.mental_apres || 0)) * 10) / 10;
+            });
+            courbes.niveau.push(pointNiveau);
+            courbes.pointsImportants.push(pointMental);
+        });
+
         const matchsBruts = db.prepare(`
             SELECT matchs.id, matchs.tournoi_id, matchs.semaine, matchs.surface, matchs.vainqueur, matchs.score, matchs.numero_tour,
                    tournois.nom AS tournoi_nom, tournois.categorie AS tournoi_categorie,
@@ -1755,6 +1777,7 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
                 competences: COMPETENCES.reduce(function (o, c) { o[c] = player[c]; return o; }, {})
             },
             erosionTotale: erosionExacte(player.id, semaineActuelle),
+            courbes,
             historique: historique.map(function (h) {
                 return {
                     semaine: positionSemaineAffichee(h.semaine),
