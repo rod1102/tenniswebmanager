@@ -77,6 +77,8 @@
 
                 <div class="sim-note">
                     <strong>Simulation, pas une prédiction.</strong> Certaines valeurs sont calculées avec les vraies règles du jeu (XP par tour atteint, perte de mental courant par tour, érosion hebdomadaire des compétences, automatismes, formule de moulinette). D'autres sont <strong>forcément des hypothèses</strong>, car un match futur n'a pas encore de résultat réel : ~20 jeux et ~8 points importants par match joué (perte de forme et gain de mental max), aucun style de jeu simulé (taux par défaut), et l'XP gagnée répartie à parts égales sur les 8 compétences (en jeu, le choix t'appartient). Part de ton état réel actuel, projette jusqu'à la fin de la saison en cours.
+                    <br><br>
+                    Les colonnes <strong>XP total</strong> et <strong>Érosion semaine</strong> du tableau utilisent une règle d'érosion différente de celle des barres "Compétences projetées" ci-dessous : 1 point perdu par tranche de 24 déjà acquise sur chaque compétence (plutôt que −4 % arrondi), pour rester cohérent avec le reste de l'outil Scouting.
                 </div>
 
                 <div class="sim-actions">
@@ -94,6 +96,7 @@
                         <thead>
                             <tr>
                                 <th>Semaine</th><th>Action</th><th>Tour visé</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
+                                <th class="num">Énergie</th><th class="num">XP total</th><th class="num">Érosion semaine</th>
                             </tr>
                         </thead>
                         <tbody id="sim-tbody"></tbody>
@@ -167,27 +170,55 @@
         // semaine (utilise pour la colonne XP semaine/cumule).
         function simuler() {
             let forme = etatInitial.forme, mentalCourant = etatInitial.mentalCourant, mentalMax = etatInitial.mentalMax;
-            let usure = etatInitial.usure, condition = etatInitial.condition;
+            let usure = etatInitial.usure, condition = etatInitial.condition, energie = etatInitial.energie;
             const automatismes = Object.assign({}, etatInitial.automatismes);
             const competences = Object.assign({}, etatInitial.competences);
+            // "XP total" : suivi PARALLELE des competences avec l'autre regle d'erosion
+            // deja utilisee ailleurs dans Scouting pour un joueur estime (1 point perdu
+            // par tranche de 24 deja acquise sur chaque competence, plutot que -4%) -
+            // demande explicite de l'utilisateur pour ces 2 colonnes precises, distincte
+            // de la regle exacte -4%/floor qui reste utilisee pour les barres de
+            // Competences projetees plus bas.
+            const competencesTiered = Object.assign({}, etatInitial.competences);
             let xpCumule = 0;
             const detail = [];
 
             semainesData.forEach(function (s) {
                 const c = choix[s.semaine] || { action: 'generique' };
 
+                // Regeneration d'energie : +5 (plafonne 100) a l'entree de la S5 puis
+                // tous les 4 tours - S5/S9/.../S49, meme regle que le moteur reel,
+                // inconditionnelle (s'applique meme une semaine verrouillee).
+                if (s.position >= 5 && (s.position - 5) % 4 === 0) energie = Math.min(100, energie + 5);
+
                 // Semaine "verrouillee" (2e semaine d'un tournoi 2 semaines deja compte sur
                 // la semaine de debut) : seule l'erosion s'applique, aucun nouvel effet.
                 if (c.action === 'verrou') {
                     COMPETENCES.forEach(function (comp) { competences[comp] = Math.max(0, competences[comp] - Math.floor(competences[comp] * 0.04)); });
+                    let perteTiereeSemaine = 0;
+                    COMPETENCES.forEach(function (comp) {
+                        const perte = Math.floor(competencesTiered[comp] / 24);
+                        perteTiereeSemaine += perte;
+                        competencesTiered[comp] = Math.max(0, competencesTiered[comp] - perte);
+                    });
                     SURFACES.forEach(function (surf) { automatismes[surf] = Math.max(0, automatismes[surf] - 5); });
-                    detail.push({ semaine: s.semaine, xp: 0, xpCumule });
+                    detail.push({
+                        semaine: s.semaine, xp: 0, xpCumule, energie,
+                        xpTotalTiere: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competencesTiered[comp]; }, 0)),
+                        erosionSemaine: perteTiereeSemaine
+                    });
                     return;
                 }
 
                 // Erosion hebdomadaire (vraie formule -4%/floor, s'applique a chaque semaine
                 // de tournoi qu'on quitte - toutes les semaines simulees ici en sont).
                 COMPETENCES.forEach(function (comp) { competences[comp] = Math.max(0, competences[comp] - Math.floor(competences[comp] * 0.04)); });
+                let perteTiereeSemaine = 0;
+                COMPETENCES.forEach(function (comp) {
+                    const perte = Math.floor(competencesTiered[comp] / 24);
+                    perteTiereeSemaine += perte;
+                    competencesTiered[comp] = Math.max(0, competencesTiered[comp] - perte);
+                });
 
                 let xpSemaine = 0;
                 let surfaceProtegee = null;
@@ -229,6 +260,8 @@
                         mentalMax = Math.round((mentalMax + mentalMaxGagne) * 10) / 10;
 
                         usure += matchsJoues;
+                        // Cout fixe de 1 PE par participation (mise d'energie non simulee ici).
+                        energie = Math.max(0, energie - 1);
                     }
                 }
 
@@ -240,21 +273,29 @@
 
                 // Repartition de l'XP gagnee cette semaine a parts egales sur les 8
                 // competences (hypothese - la vraie repartition est un choix du coach,
-                // jamais simule ici).
+                // jamais simule ici) - appliquee aux deux suivis en parallele (regle
+                // exacte -4% et regle par palier de 24).
                 if (xpSemaine > 0) {
                     const part = xpSemaine / 8;
-                    COMPETENCES.forEach(function (comp) { competences[comp] = Math.min(100, competences[comp] + part); });
+                    COMPETENCES.forEach(function (comp) {
+                        competences[comp] = Math.min(100, competences[comp] + part);
+                        competencesTiered[comp] = Math.min(100, competencesTiered[comp] + part);
+                    });
                 }
 
                 xpCumule += xpSemaine;
-                detail.push({ semaine: s.semaine, xp: xpSemaine, xpCumule });
+                detail.push({
+                    semaine: s.semaine, xp: xpSemaine, xpCumule, energie,
+                    xpTotalTiere: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competencesTiered[comp]; }, 0)),
+                    erosionSemaine: perteTiereeSemaine
+                });
             });
 
             const xpTotaleCompetences = COMPETENCES.reduce(function (s, c) { return s + competences[c]; }, 0);
             const cible = ((xpTotaleCompetences - 200) / 2.5) + 120;
             const moulinetteArrondie = (xpTotaleCompetences > 0 && cible < xpTotaleCompetences) ? Math.floor(cible) : Math.round(xpTotaleCompetences);
 
-            return { forme, mentalCourant, mentalMax, usure, condition, automatismes, competences, xpCumule, detail, moulinetteArrondie, xpTotaleCompetences };
+            return { forme, mentalCourant, mentalMax, usure, condition, energie, automatismes, competences, xpCumule, detail, moulinetteArrondie, xpTotaleCompetences };
         }
 
         function optionsAction(s) {
@@ -286,6 +327,9 @@
                             <td colspan="2">Suite du tournoi (2e semaine, verrouillée)</td>
                             <td class="num">0</td>
                             <td class="num">${d.xpCumule}</td>
+                            <td class="num">${d.energie}</td>
+                            <td class="num">${d.xpTotalTiere}</td>
+                            <td class="num">−${d.erosionSemaine}</td>
                         </tr>
                     `;
                 }
@@ -313,6 +357,9 @@
                         </td>
                         <td class="num">${d.xp}</td>
                         <td class="num">${d.xpCumule}</td>
+                        <td class="num">${d.energie}</td>
+                        <td class="num">${d.xpTotalTiere}</td>
+                        <td class="num">−${d.erosionSemaine}</td>
                     </tr>
                 `;
             }).join('');
@@ -370,6 +417,7 @@
                 carte('Mental actuel', resultat.mentalCourant),
                 carte('Mental max', resultat.mentalMax),
                 carte('Usure', resultat.usure),
+                carte('Énergie', resultat.energie),
                 carte('Condition', LABELS_CONDITION[resultat.condition] || resultat.condition),
                 carte('Automatismes', `D${Math.round(resultat.automatismes.dur)} T${Math.round(resultat.automatismes.terre)} H${Math.round(resultat.automatismes.herbe)}`),
                 carte('Moulinette projetée', resultat.moulinetteArrondie, 'sim-card-moulinette')
