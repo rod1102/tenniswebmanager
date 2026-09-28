@@ -385,20 +385,28 @@
 
             let deplacerHtml = '';
             if (player.points_dispositions_a_deplacer > 0) {
-                function optionsDispo(selectionnee) {
-                    return Object.keys(DISPOSITIONS_LABELS).map(function (cle) {
+                // "Vers" n'affiche jamais la categorie choisie en "De" (impossible de
+                // deplacer un point vers sa propre categorie, deja rejete par le serveur) -
+                // evite l'alerte confuse d'un coach qui clique "Deplacer" sans toucher aux
+                // listes, les deux ayant sinon la meme premiere option par defaut. Pour ne
+                // rien deplacer du tout, il suffit de ne pas toucher a ce panneau (ou de
+                // cliquer Annuler si un brouillon existe deja) - jamais besoin de choisir
+                // la meme categorie des deux cotes.
+                function optionsDispo(selectionnee, exclure) {
+                    return Object.keys(DISPOSITIONS_LABELS).filter(function (cle) { return cle !== exclure; }).map(function (cle) {
                         return `<option value="${cle}" ${selectionnee === cle ? 'selected' : ''}>${DISPOSITIONS_LABELS[cle]}</option>`;
                     }).join('');
                 }
+                const depuisDefaut = brouillonDeplacement ? brouillonDeplacement.depuis : Object.keys(DISPOSITIONS_LABELS)[0];
                 deplacerHtml = `
                     <div class="xp-pool-panel">
                         <div class="xp-pool-title">Déplacement de disposition disponible : <span>${player.points_dispositions_a_deplacer}</span></div>
-                        <div class="planning-alerte-texte${brouillonDeplacement ? ' planning-alerte-texte-ok' : ''}" style="margin-bottom:8px;">Déplace 1 point déjà acquis d'une catégorie vers une autre (bonus Coaching mental) — à faire cette semaine, sinon perdu à la prochaine avancée de semaine. ${brouillonDeplacement ? 'Brouillon enregistré, modifiable ou annulable tant que la semaine n\'a pas avancé.' : 'Rien n\'est définitif tant que la semaine n\'a pas avancé.'}</div>
+                        <div class="planning-alerte-texte${brouillonDeplacement ? ' planning-alerte-texte-ok' : ''}" style="margin-bottom:8px;">Déplace 1 point déjà acquis d'une catégorie vers une autre (bonus Coaching mental) — à faire cette semaine, sinon perdu à la prochaine avancée de semaine. Pour ne rien déplacer, laisse simplement ce panneau tel quel${brouillonDeplacement ? ', ou clique Annuler' : ''}. ${brouillonDeplacement ? 'Brouillon enregistré, modifiable ou annulable tant que la semaine n\'a pas avancé.' : 'Rien n\'est définitif tant que la semaine n\'a pas avancé.'}</div>
                         <div class="training-row">
                             <span class="match-hint">De</span>
-                            <select class="dispo-deplacer-depuis">${optionsDispo(brouillonDeplacement ? brouillonDeplacement.depuis : null)}</select>
+                            <select class="dispo-deplacer-depuis">${optionsDispo(depuisDefaut, null)}</select>
                             <span class="match-hint">Vers</span>
-                            <select class="dispo-deplacer-vers">${optionsDispo(brouillonDeplacement ? brouillonDeplacement.vers : null)}</select>
+                            <select class="dispo-deplacer-vers">${optionsDispo(brouillonDeplacement ? brouillonDeplacement.vers : null, depuisDefaut)}</select>
                             <button class="cta cta-primary dispo-deplacer-btn" style="padding:10px 16px; font-size:0.8rem;">${brouillonDeplacement ? 'Mettre à jour' : 'Déplacer'}</button>
                             ${brouillonDeplacement ? '<button class="cta cta-secondary dispo-deplacer-annuler-btn" style="padding:10px 16px; font-size:0.8rem;">Annuler</button>' : ''}
                         </div>
@@ -607,6 +615,21 @@
                         return;
                     }
                     chargerOnglets();
+                });
+            }
+
+            const dispoDeplacerDepuisSelect = document.querySelector('.dispo-deplacer-depuis');
+            const dispoDeplacerVersSelect = document.querySelector('.dispo-deplacer-vers');
+            if (dispoDeplacerDepuisSelect && dispoDeplacerVersSelect) {
+                // Retire de "Vers" la categorie choisie en "De" (jamais deux fois la
+                // meme), en conservant le choix "Vers" en cours s'il reste valide.
+                dispoDeplacerDepuisSelect.addEventListener('change', function () {
+                    const versActuel = dispoDeplacerVersSelect.value;
+                    dispoDeplacerVersSelect.innerHTML = Object.keys(DISPOSITIONS_LABELS)
+                        .filter(function (cle) { return cle !== dispoDeplacerDepuisSelect.value; })
+                        .map(function (cle) {
+                            return `<option value="${cle}" ${versActuel === cle ? 'selected' : ''}>${DISPOSITIONS_LABELS[cle]}</option>`;
+                        }).join('');
                 });
             }
 
