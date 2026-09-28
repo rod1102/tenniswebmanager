@@ -43,7 +43,7 @@
         .sj-graph-svg { width:100%; height:auto; display:block; overflow:visible; }
         .sj-graph-legende { display:flex; gap:16px; margin-top:10px; flex-wrap:wrap; }
         .sj-graph-legende-item { display:flex; align-items:center; gap:6px; font-size:0.76rem; color:#8B98A5; }
-        .sj-graph-legende-cle { width:14px; height:2px; border-radius:1px; display:inline-block; }
+        .sj-graph-legende-cle { display:inline-block; flex-shrink:0; }
         .sj-graph-vide { color:#8B98A5; font-size:0.85rem; text-align:center; padding:40px 0; }
         .sj-graph-tooltip {
             position:absolute; pointer-events:none; background:#0E141B; border:1px solid rgba(255,255,255,0.16);
@@ -176,6 +176,13 @@
         const SURFACES_GRAPH = ['dur', 'terre', 'herbe'];
         const SURFACES_COULEURS = { dur: '#5FA8E8', terre: '#E08A4B', herbe: '#5CC57F' };
         const SURFACES_NOMS = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+        // Style de trait distinct par surface EN PLUS de la couleur : quand deux
+        // competences sont identiques d'un bout a l'autre (frequent avec une repartition
+        // symetrique en debut de carriere), deux surfaces peuvent avoir exactement le
+        // meme niveau chaque semaine - la courbe la plus recente masquait totalement
+        // l'autre. Le trait plein/tirete/pointille reste visible meme en superposition
+        // parfaite (cas signale par l'utilisateur sur Magnus Jorgensen, terre = herbe).
+        const SURFACES_TRAITS = { dur: 'none', terre: '9,5', herbe: '2,4' };
 
         // Graphique ligne en SVG pur (pas de librairie, coherent avec le reste du site)
         // pour les courbes Niveau / Points importants par surface. data = tableau de
@@ -226,7 +233,8 @@
             });
 
             const lignesSvg = SURFACES_GRAPH.map(function (s) {
-                return `<path d="${chemin(s)}" fill="none" stroke="${SURFACES_COULEURS[s]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+                const dash = SURFACES_TRAITS[s] !== 'none' ? ` stroke-dasharray="${SURFACES_TRAITS[s]}"` : '';
+                return `<path d="${chemin(s)}" fill="none" stroke="${SURFACES_COULEURS[s]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"${dash}/>`;
             }).join('');
 
             // Points de fin (dernier point de chaque courbe), avec anneau surface pour
@@ -249,7 +257,8 @@
                 <div class="sj-graph-tooltip"></div>
                 <div class="sj-graph-legende">
                     ${SURFACES_GRAPH.map(function (s) {
-                        return `<span class="sj-graph-legende-item"><span class="sj-graph-legende-cle" style="background:${SURFACES_COULEURS[s]};"></span>${SURFACES_NOMS[s]}</span>`;
+                        const dashLegende = SURFACES_TRAITS[s] !== 'none' ? ` stroke-dasharray="${SURFACES_TRAITS[s]}"` : '';
+                        return `<span class="sj-graph-legende-item"><svg class="sj-graph-legende-cle" width="16" height="4" viewBox="0 0 16 4"><line x1="0" y1="2" x2="16" y2="2" stroke="${SURFACES_COULEURS[s]}" stroke-width="2"${dashLegende}/></svg>${SURFACES_NOMS[s]}</span>`;
                     }).join('')}
                 </div>
             `;
