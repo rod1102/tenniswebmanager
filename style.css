@@ -844,6 +844,16 @@ h1 {
     padding: 8px 0;
 }
 
+.planning-tournoi-lien {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.planning-tournoi-lien:hover {
+    color: #FFFFFF;
+}
+
 .planning-week-hint {
     font-size: 0.64rem;
     color: #8B98A5;

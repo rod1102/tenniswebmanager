@@ -3081,7 +3081,7 @@ app.get('/api/planification/:playerId', (req, res) => {
         // Semaines ou le joueur est reellement inscrit a un tournoi : la planification
         // (repos/entrainement) n'a pas sa place la, le tournoi occupe deja la semaine.
         const tournois = db.prepare(`
-            SELECT tournois.semaine, tournois.nom
+            SELECT tournois.semaine, tournois.nom, tournois.calendrier_id
             FROM tournois
             JOIN tournoi_joueurs ON tournoi_joueurs.tournoi_id = tournois.id
             WHERE tournois.semaine BETWEEN ? AND ?

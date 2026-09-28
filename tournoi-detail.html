@@ -181,6 +181,11 @@
             });
         });
 
+        // Lien direct vers un onglet precis (ex. &onglet=tableau depuis la
+        // programmation des 5 semaines de joueur.html).
+        const ongletDemande = document.querySelector('.tab-btn[data-tab="' + params.get('onglet') + '"]');
+        if (ongletDemande) ongletDemande.click();
+
         async function inscrire() {
             const bouton = document.getElementById('inscription-btn');
             bouton.disabled = true;

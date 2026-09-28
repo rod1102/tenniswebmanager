@@ -309,7 +309,7 @@
             dataPlan.ordres.forEach(function (o) { ordresExistants[o.semaine] = o.action; });
 
             const tournoisExistants = {};
-            dataPlan.tournois.forEach(function (t) { tournoisExistants[t.semaine] = t.nom; });
+            dataPlan.tournois.forEach(function (t) { tournoisExistants[t.semaine] = t; });
 
             // 2e semaine d'un tournoi 2 semaines (Grand Chelem/M1000 96 places) : pas
             // verrouillee (elimination possible en semaine 1), juste signalee pour
@@ -426,7 +426,7 @@
                     weeksHtml += `
                         <div class="planning-week-card planning-week-tournoi">
                             <label>${labelSemaine}</label>
-                            <div class="planning-tournoi-lock">Tournoi : ${tournoisExistants[s]}</div>
+                            <div class="planning-tournoi-lock">Tournoi : <a class="planning-tournoi-lien" href="tournoi-detail.html?calendrierId=${tournoisExistants[s].calendrier_id}&semaine=${s}&playerId=${player.id}&onglet=tableau">${tournoisExistants[s].nom}</a></div>
                         </div>
                     `;
                     continue;
