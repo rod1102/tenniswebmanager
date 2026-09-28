@@ -318,6 +318,13 @@
                                 if (nouvelleValeur > 24) depassementBrut += nouvelleValeur - 24;
                                 competences[comp] = Math.min(24, nouvelleValeur);
                             });
+                        } else {
+                            // Plus AUCUNE competence sous 24 : toute l'XP de la semaine est
+                            // du surplus (pas juste un exces partiel) - sans ca, elle
+                            // disparaissait silencieusement, sans meme le warning ⚠️ (bug
+                            // signale par l'utilisateur : les competences restaient bloquees
+                            // pile a 24 des que toutes l'atteignaient).
+                            depassementBrut = xpSemaine;
                         }
                         if (depassementBrut > 0 && c.surplusCible && COMPETENCES.indexOf(c.surplusCible) !== -1) {
                             competences[c.surplusCible] = Math.min(100, competences[c.surplusCible] + depassementBrut);
