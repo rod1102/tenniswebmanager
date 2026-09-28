@@ -125,6 +125,11 @@
 
         // ---------- Constantes de regle (dupliquees du serveur, cf. server.js) ----------
         const XP_QUALIFICATION_SEMAINE2 = 7;
+        // Tournoi 2 semaines : les tours 1 a 3 se jouent en semaine 1 (cf.
+        // CRENEAUX_TOUR_2_SEMAINES_S1 cote serveur) - la 2e semaine n'est occupee que si
+        // le joueur atteint le 4e tour (tourIndex >= 3), et le bonus de qualification
+        // n'est verse qu'a ce moment-la (vainqueur du 3e tour).
+        const TOURS_SEMAINE_1 = 3;
         const XP_TOURNOI = { 5: [10, 10, 10, 9, 9], 6: [10, 10, 11, 10, 9, 9], 7: [10, 10, 11, 10, 10, 9, 9] };
         const PERTE_MENTAL_COURANT = {
             slam: { premiers: 1.5, quarts: 2.5, demies: 4, finale: 6 },
@@ -244,7 +249,7 @@
 
                         const table = XP_TOURNOI[tournoi.nbTours];
                         xpSemaine = table ? (table[tourIndex] || 0) : 0;
-                        if (tournoi.nbTours === 7 && tourIndex >= 2) xpSemaine += XP_QUALIFICATION_SEMAINE2;
+                        if (tournoi.nbTours === 7 && tourIndex >= TOURS_SEMAINE_1) xpSemaine += XP_QUALIFICATION_SEMAINE2;
 
                         automatismes[tournoi.surface] = Math.min(30, automatismes[tournoi.surface] + 3 * matchsJoues);
 
@@ -330,6 +335,24 @@
             }).join('');
         }
 
+        // Tournoi 2 semaines : la semaine suivante n'est verrouillee que si le tour vise
+        // depasse la semaine 1 (8e de finale ou mieux). Eliminé avant, elle redevient
+        // une semaine normale, planifiable comme les autres.
+        function majVerrouSemaine2(semaineInfo) {
+            const semaineSuivante = semainesData[semainesData.indexOf(semaineInfo) + 1];
+            if (!semaineSuivante) return;
+            const c = choix[semaineInfo.semaine];
+            const tId = c.action.indexOf('tournoi:') === 0 ? c.action.replace('tournoi:', '') : null;
+            const tournoi = tId ? semaineInfo.tournois.find(function (t) { return t.id === tId; }) : null;
+            if (tournoi && tournoi.duree === 2 && Number(c.tourIndex) >= TOURS_SEMAINE_1) {
+                choix[semaineSuivante.semaine] = { action: 'verrou', tourIndex: null };
+            } else if (choix[semaineSuivante.semaine] && choix[semaineSuivante.semaine].action === 'verrou') {
+                // Etait verrouillee par un ancien choix qu'on vient de changer -
+                // liberee, repart sur la valeur par defaut.
+                choix[semaineSuivante.semaine] = { action: 'generique', tourIndex: null, competenceCible: null };
+            }
+        }
+
         function rendreTableau() {
             const resultat = simuler();
             const tbody = document.getElementById('sim-tbody');
@@ -404,29 +427,16 @@
                     const semaineInfo = semainesData.find(function (x) { return x.semaine === s; });
                     const competenceCibleAvant = choix[s] ? choix[s].competenceCible : null;
                     choix[s] = { action: action, tourIndex: action.indexOf('tournoi:') === 0 ? 0 : null, competenceCible: competenceCibleAvant || null };
-
-                    // Tournoi 2 semaines : verrouille automatiquement la semaine suivante.
-                    const indexSemaine = semainesData.indexOf(semaineInfo);
-                    const semaineSuivante = semainesData[indexSemaine + 1];
-                    if (semaineSuivante) {
-                        const tId = action.indexOf('tournoi:') === 0 ? action.replace('tournoi:', '') : null;
-                        const tournoi = tId ? semaineInfo.tournois.find(function (t) { return t.id === tId; }) : null;
-                        if (tournoi && tournoi.duree === 2) {
-                            choix[semaineSuivante.semaine] = { action: 'verrou', tourIndex: null };
-                        } else if (choix[semaineSuivante.semaine] && choix[semaineSuivante.semaine].action === 'verrou') {
-                            // Etait verrouillee par un ancien choix qu'on vient de changer -
-                            // liberee, repart sur la valeur par defaut.
-                            choix[semaineSuivante.semaine] = { action: 'generique', tourIndex: null, competenceCible: null };
-                        }
-                    }
+                    majVerrouSemaine2(semaineInfo);
                     rendreTableau();
-                    rendreResume(resultat);
+                    rendreResume(simuler());
                 });
             });
             document.querySelectorAll('.sim-tour-select').forEach(function (sel) {
                 sel.addEventListener('change', function () {
                     const s = Number(sel.dataset.semaine);
                     choix[s].tourIndex = Number(sel.value);
+                    majVerrouSemaine2(semainesData.find(function (x) { return x.semaine === s; }));
                     rendreTableau();
                     rendreResume(simuler());
                 });
