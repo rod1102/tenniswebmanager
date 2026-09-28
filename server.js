@@ -1611,6 +1611,23 @@ function erosionExacte(playerId, semaineActuelle) {
     return total;
 }
 
+// Alertes kine (matchs.kine_intervenu, pose a la degradation REELLE de condition -
+// narre publiquement dans le teletexte de tout match de tournoi, jamais une donnee
+// confidentielle) : nombre recu dans la saison en cours, et depuis le dernier repos
+// (jamais avant le debut de la saison, qui remet de toute facon la condition a "en
+// forme" - un repos d'une saison precedente n'a plus de sens comme point de depart).
+// Toujours EXACT, pour n'importe quel joueur (jamais une estimation, cf. commentaire
+// ci-dessus sur la nature publique de cette donnee).
+function alertesKine(playerId, debutSaison) {
+    const dernierRepos = db.prepare("SELECT MAX(semaine) AS s FROM journal_semaine_joueur WHERE player_id = ? AND action_prevue = 'repos'").get(playerId).s;
+    const depuisRepos = Math.max(dernierRepos || 0, debutSaison);
+    const semaines = db.prepare('SELECT semaine FROM matchs WHERE player_id = ? AND kine_intervenu = 1').all(playerId).map(function (r) { return r.semaine; });
+    return {
+        saison: semaines.filter(function (s) { return s > debutSaison; }).length,
+        depuisRepos: semaines.filter(function (s) { return s > depuisRepos; }).length
+    };
+}
+
 app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
@@ -1639,6 +1656,7 @@ app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
             // confidentiel pour un adversaire) - jamais lue depuis players.forme.
             const formePerdueEstimee = estMoi ? null : Math.round(matchsSaison.reduce(function (s, m) { return s + jeuxTotalDuScore(m.score) * 0.10; }, 0) * 10) / 10;
             const mentalEstimation = estMoi ? null : mentalEstime(p.id, debutSaison, semaineActuelle);
+            const kine = alertesKine(p.id, debutSaison);
 
             return {
                 id: p.id, nom: p.prenom + ' ' + p.nom, estMoi,
@@ -1657,6 +1675,7 @@ app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
                 }),
                 tournois, victoires, defaites,
                 formePerdueEstimee,
+                alertesKineSaison: kine.saison, alertesKineDepuisRepos: kine.depuisRepos,
                 // Exact uniquement pour ses propres joueurs - estime (jamais lu tel quel)
                 // pour tout autre joueur, voir commentaire en tete de section.
                 formeActuelle: estMoi ? p.forme : null,
@@ -1710,17 +1729,7 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
 
         const historique = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine').all(player.id);
 
-        // Alertes kine : nombre de matchs (tournoi ET Coupe Davis/BJK Cup) ou la condition
-        // s'est reellement degradee ce match-la (matchs.kine_intervenu, deja pose par
-        // appliquerEtatPostMatch). "Depuis le dernier repos" ne remonte jamais avant le
-        // debut de la saison en cours : la bascule de Pre-saison remet de toute facon la
-        // condition a "en forme" (equivalent a un repos), donc un repos d'une saison
-        // precedente n'a plus de sens comme point de depart.
-        const dernierRepos = db.prepare("SELECT MAX(semaine) AS s FROM journal_semaine_joueur WHERE player_id = ? AND action_prevue = 'repos'").get(player.id).s;
-        const depuisRepos = Math.max(dernierRepos || 0, debutSaison);
-        const semainesAlertesKine = db.prepare('SELECT semaine FROM matchs WHERE player_id = ? AND kine_intervenu = 1').all(player.id).map(function (r) { return r.semaine; });
-        const alertesKineSaison = semainesAlertesKine.filter(function (s) { return s > debutSaison; }).length;
-        const alertesKineDepuisRepos = semainesAlertesKine.filter(function (s) { return s > depuisRepos; }).length;
+        const kine = alertesKine(player.id, debutSaison);
 
         // La colonne "*_apres" de journal_semaine_joueur est capturee AU MOMENT DE LA
         // TRANSITION de semaine (erosion + planification), donc AVANT que les matchs de
@@ -1858,8 +1867,8 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
                 competences: COMPETENCES.reduce(function (o, c) { o[c] = player[c]; return o; }, {})
             },
             erosionTotale: erosionExacte(player.id, semaineActuelle),
-            alertesKineSaison,
-            alertesKineDepuisRepos,
+            alertesKineSaison: kine.saison,
+            alertesKineDepuisRepos: kine.depuisRepos,
             courbes,
             historique: historiqueCorrige.map(function (h) {
                 return {

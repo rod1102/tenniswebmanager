@@ -43,6 +43,8 @@
         .scout-table tbody tr:hover { background: rgba(255,255,255,0.06); }
         .scout-table tr.scout-row-moi { background: rgba(212, 240, 0, 0.12) !important; }
         .scout-table td.nom { font-weight: 600; }
+        .scout-table td.nom a { color: #F5F7FA; text-decoration: underline; text-underline-offset: 2px; }
+        .scout-table td.nom a:visited { color: #F5F7FA; }
         .scout-xp-total { font-weight: 800; font-size: 0.95rem; cursor: help; border-bottom: 1px dotted #8B98A5; }
         .scout-auto { display: inline-flex; gap: 6px; font-size: 0.76rem; color: #F5F7FA; }
         .scout-auto b { color: #F5F7FA; }
@@ -91,6 +93,7 @@
                                 <th>#</th><th>Joueur</th><th class="num">Classement live</th>
                                 <th class="num">XP saison</th><th class="num">Tournois</th><th class="num">V</th><th class="num">D</th>
                                 <th>Forme perdue</th><th>Automatismes</th><th class="num">Mental max</th><th class="num">Mental actuel</th><th class="num">Compétences</th><th class="num">Érosion</th>
+                                <th class="num">Alertes kiné (saison)</th><th class="num">Alertes kiné (depuis repos)</th>
                             </tr>
                         </thead>
                         <tbody id="scout-tbody"></tbody>
@@ -133,7 +136,7 @@
             const response = await fetch('/api/admin/scouting/classement/' + circuitCourant);
             const data = await response.json();
             if (!response.ok) {
-                document.getElementById('scout-tbody').innerHTML = '<tr><td colspan="13" class="match-hint">' + (data.error || 'Erreur.') + '</td></tr>';
+                document.getElementById('scout-tbody').innerHTML = '<tr><td colspan="15" class="match-hint">' + (data.error || 'Erreur.') + '</td></tr>';
                 return;
             }
 
@@ -173,7 +176,7 @@
 
             const tbody = document.getElementById('scout-tbody');
             if (lignes.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="13" class="match-hint">Aucun joueur ne correspond.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="15" class="match-hint">Aucun joueur ne correspond.</td></tr>';
                 return;
             }
             tbody.innerHTML = lignes.map(function (j) {
@@ -217,6 +220,8 @@
                         <td class="num">${mentalCourant}</td>
                         <td class="num">${competences}</td>
                         <td class="num">${erosion}</td>
+                        <td class="num">${j.alertesKineSaison}</td>
+                        <td class="num">${j.alertesKineDepuisRepos}</td>
                     </tr>
                 `;
             }).join('');
