@@ -1709,7 +1709,7 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
         const historique = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine').all(player.id);
 
         const matchsBruts = db.prepare(`
-            SELECT matchs.id, matchs.semaine, matchs.surface, matchs.vainqueur, matchs.score, matchs.numero_tour,
+            SELECT matchs.id, matchs.tournoi_id, matchs.semaine, matchs.surface, matchs.vainqueur, matchs.score, matchs.numero_tour,
                    tournois.nom AS tournoi_nom, tournois.categorie AS tournoi_categorie,
                    tj1.player_id AS tj1_player_id, tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite,
                    tj2.player_id AS tj2_player_id, tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite
@@ -1721,6 +1721,27 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
             WHERE matchs.player_id = ? AND matchs.tournoi_id IS NOT NULL
             ORDER BY matchs.id
         `).all(player.id);
+
+        // Style de jeu utilise a CHAQUE match, reconstitue depuis
+        // tournoi_joueurs.style_choisi (tableau choisi a l'avance, un style par tour -
+        // cf. /api/tournois/styles) : le Nieme match deja joue par le joueur dans un
+        // tournoi correspond a l'index N (0-based) de ce tableau, meme logique que
+        // styleDuTourCourant utilisee par le moteur pour le PROCHAIN tour. Toujours
+        // exact (jamais confidentiel pour ses propres joueurs).
+        const stylesParTournoi = new Map();
+        const compteurParTournoi = new Map();
+        function styleDuMatch(tournoiId) {
+            if (!stylesParTournoi.has(tournoiId)) {
+                const ligne = db.prepare('SELECT style_choisi FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoiId, player.id);
+                let styles = [];
+                try { styles = ligne && ligne.style_choisi ? JSON.parse(ligne.style_choisi) : []; } catch (e) { styles = []; }
+                stylesParTournoi.set(tournoiId, styles);
+                compteurParTournoi.set(tournoiId, 0);
+            }
+            const index = compteurParTournoi.get(tournoiId);
+            compteurParTournoi.set(tournoiId, index + 1);
+            return stylesParTournoi.get(tournoiId)[index] || null;
+        }
 
         res.json({
             success: true,
@@ -1761,7 +1782,8 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
                 return {
                     semaine: positionSemaineAffichee(m.semaine), tournoi: m.tournoi_nom, tour: m.numero_tour,
                     surface: m.surface, victoire: m.vainqueur === 'joueur', score: m.score,
-                    adversaireNom: adversaireNom || '?', adversaireDrapeau: drapeau(adversaireNationalite)
+                    adversaireNom: adversaireNom || '?', adversaireDrapeau: drapeau(adversaireNationalite),
+                    style: styleDuMatch(m.tournoi_id)
                 };
             })
         });

@@ -89,7 +89,7 @@
                     <table class="sj-table">
                         <thead>
                             <tr>
-                                <th>Semaine</th><th>Tournoi</th><th>Tour</th><th>Surface</th><th>Adversaire</th><th>Score</th><th>Résultat</th>
+                                <th>Semaine</th><th>Tournoi</th><th>Tour</th><th>Surface</th><th>Adversaire</th><th>Score</th><th>Résultat</th><th>Style</th>
                             </tr>
                         </thead>
                         <tbody id="sj-matchs-tbody"></tbody>
@@ -107,6 +107,15 @@
         const playerId = params.get('id');
 
         const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+        const STYLES_JEU_LABELS = {
+            aucun: 'Aucun',
+            sprinter: 'Sprinter',
+            prudence: 'Prudence',
+            en_avant: 'En Avant',
+            marathonien: 'Marathonien',
+            mental_acier: 'Mental d\'acier',
+            reperage: 'Repérage'
+        };
         const COMPETENCES_LABELS = {
             service: 'Service', retour: 'Retour', coup_droit_revers: 'Coup droit / Revers',
             effet: 'Effet', volee: 'Volée', deplacement: 'Déplacement', puissance: 'Puissance', resistance: 'Résistance'
@@ -212,9 +221,10 @@
                         <td>${flagImg(m.adversaireDrapeau)} ${formaterNom(m.adversaireNom)}</td>
                         <td>${m.score}</td>
                         <td class="${m.victoire ? 'sj-victoire' : 'sj-defaite'}">${m.victoire ? 'Victoire' : 'Défaite'}</td>
+                        <td>${m.style ? (STYLES_JEU_LABELS[m.style] || m.style) : '—'}</td>
                     </tr>
                 `;
-            }).join('') || '<tr><td colspan="7" class="match-hint">Aucun match.</td></tr>';
+            }).join('') || '<tr><td colspan="8" class="match-hint">Aucun match.</td></tr>';
         }
 
         document.getElementById('logout-btn').addEventListener('click', function (e) {
