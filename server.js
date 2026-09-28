@@ -1993,9 +1993,14 @@ app.get('/api/admin/scouting/simulation-data/:playerId', (req, res) => {
         // ET pour appliquer la meme reduction dans la projection (jusqu'ici absente de
         // la simulation, qui pouvait donc surestimer le mental max projete). Positions
         // dans la saison (comme s.position), pas des semaines absolues.
+        // +duree (pas -1) : l'evenement se produit REELLEMENT pendant la 2e semaine du
+        // tournoi (semaine_debut + duree - 1), mais cette semaine-la est une ligne
+        // "Suite du tournoi (verrouillee)" qui n'affiche aucun etat - la marque visuelle
+        // est donc placee sur la PREMIERE semaine suivante ou l'effet est effectivement
+        // visible (demande explicite de l'utilisateur, "la ou l'effet est visible").
         const positionsReductionMental = ['miami', 'wimbledon', 'us-open'].map(function (nom) {
             const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.circuit === circuit && t.id === circuit.toLowerCase() + '-' + nom; });
-            return entree ? entree.semaine_debut + entree.duree - 1 : null;
+            return entree ? entree.semaine_debut + entree.duree : null;
         }).filter(function (p) { return p !== null; });
 
         const ligneSauvegarde = db.prepare('SELECT plan FROM simulations_scouting WHERE player_id = ?').get(player.id);
