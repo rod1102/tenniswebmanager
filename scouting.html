@@ -31,21 +31,27 @@
         .scout-filtre { max-width: 320px; margin: 0 0 14px; }
 
         .scout-table-wrap { overflow-x: auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; }
-        .scout-table { width: 100%; border-collapse: collapse; font-size: 0.86rem; }
+        .scout-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; }
         .scout-table th {
-            text-align: left; padding: 12px 14px; color: #8B98A5; font-weight: 700; font-size: 0.72rem;
-            text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap;
+            text-align: left; padding: 8px 8px; color: #8B98A5; font-weight: 700; font-size: 0.64rem;
+            text-transform: uppercase; letter-spacing: 0.03em; white-space: nowrap;
             background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.14);
+            border-right: 1px solid rgba(255,255,255,0.08);
         }
+        .scout-table th:last-child { border-right: none; }
         .scout-table th.num, .scout-table td.num { text-align: right; }
-        .scout-table td { padding: 11px 14px; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: middle; color: #F5F7FA; }
+        .scout-table td {
+            padding: 7px 8px; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align: middle; color: #F5F7FA;
+            border-right: 1px solid rgba(255,255,255,0.05);
+        }
+        .scout-table td:last-child { border-right: none; }
         .scout-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
         .scout-table tbody tr:hover { background: rgba(255,255,255,0.06); }
         .scout-table tr.scout-row-moi { background: rgba(212, 240, 0, 0.12) !important; }
-        .scout-table td.nom { font-weight: 600; }
+        .scout-table td.nom { font-weight: 600; white-space: nowrap; }
         .scout-table td.nom a { color: #F5F7FA; text-decoration: underline; text-underline-offset: 2px; }
         .scout-table td.nom a:visited { color: #F5F7FA; }
-        .scout-xp-total { font-weight: 800; font-size: 0.95rem; cursor: help; border-bottom: 1px dotted #8B98A5; }
+        .scout-xp-total { font-weight: 800; font-size: 0.85rem; cursor: help; border-bottom: 1px dotted #8B98A5; }
         .scout-auto { display: inline-flex; gap: 6px; font-size: 0.76rem; color: #F5F7FA; }
         .scout-auto b { color: #F5F7FA; }
         .scout-estime { color: #F5F7FA; }
@@ -90,10 +96,10 @@
                     <table class="scout-table">
                         <thead>
                             <tr>
-                                <th>#</th><th>Joueur</th><th class="num">Classement live</th>
+                                <th>#</th><th>Joueur</th><th class="num">Class. live</th>
                                 <th class="num">XP saison</th><th class="num">Tournois</th><th class="num">V</th><th class="num">D</th>
-                                <th>Forme perdue</th><th>Automatismes</th><th class="num">Mental max</th><th class="num">Mental actuel</th><th class="num">Compétences</th><th class="num">Érosion</th>
-                                <th class="num">Alertes kiné (saison)</th><th class="num">Alertes kiné (depuis repos)</th>
+                                <th>Forme perdue</th><th>Automatismes</th><th class="num">Mental max</th><th class="num">Mental</th><th class="num">Compét.</th><th class="num">Érosion</th>
+                                <th class="num">Kiné saison</th><th class="num">Kiné/repos</th>
                             </tr>
                         </thead>
                         <tbody id="scout-tbody"></tbody>
