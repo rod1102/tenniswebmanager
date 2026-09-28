@@ -1735,7 +1735,7 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
         });
 
         const matchsBruts = db.prepare(`
-            SELECT matchs.id, matchs.tournoi_id, matchs.semaine, matchs.surface, matchs.vainqueur, matchs.score, matchs.numero_tour,
+            SELECT matchs.id, matchs.tournoi_id, matchs.semaine, matchs.surface, matchs.vainqueur, matchs.score, matchs.numero_tour, matchs.evenements,
                    tournois.nom AS tournoi_nom, tournois.categorie AS tournoi_categorie,
                    tj1.player_id AS tj1_player_id, tj1.nom AS tj1_nom, tj1.nationalite AS tj1_nationalite,
                    tj2.player_id AS tj2_player_id, tj2.nom AS tj2_nom, tj2.nationalite AS tj2_nationalite
@@ -1747,6 +1747,28 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
             WHERE matchs.player_id = ? AND matchs.tournoi_id IS NOT NULL
             ORDER BY matchs.id
         `).all(player.id);
+
+        // Style de l'ADVERSAIRE a ce match precis (uniquement pour detecter "Marathonien",
+        // qui majore de 50% la perte de forme de son adversaire, regle PDF) - reconstruit
+        // depuis SON PROPRE style_choisi, indexe par le nombre de ses vrais matchs deja
+        // joues dans ce tournoi avant celui-ci (meme convention que styleDuMatch, cf.
+        // appliquerEtatPostMatch qui passe exactement ce style comme styleAdversaire pour
+        // un adversaire reel - jamais pour un bot/rival, qui n'a pas de style_choisi).
+        // N'expose jamais le style complet d'un autre coach ailleurs que ce diagnostic
+        // interne au calcul de la forme perdue de SON PROPRE joueur.
+        const stylesAdversaireCache = new Map();
+        function styleAdversaireDuMatch(tournoiId, adversairePlayerId, monMatchId) {
+            if (!adversairePlayerId) return null;
+            const cle = tournoiId + ':' + adversairePlayerId;
+            if (!stylesAdversaireCache.has(cle)) {
+                const ligne = db.prepare('SELECT style_choisi FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoiId, adversairePlayerId);
+                let styles = [];
+                try { styles = ligne && ligne.style_choisi ? JSON.parse(ligne.style_choisi) : []; } catch (e) { styles = []; }
+                stylesAdversaireCache.set(cle, styles);
+            }
+            const index = db.prepare('SELECT COUNT(*) AS n FROM matchs WHERE tournoi_id = ? AND player_id = ? AND id < ?').get(tournoiId, adversairePlayerId, monMatchId).n;
+            return stylesAdversaireCache.get(cle)[index] || null;
+        }
 
         // Style de jeu utilise a CHAQUE match, reconstitue depuis
         // tournoi_joueurs.style_choisi (tableau choisi a l'avance, un style par tour -
@@ -1806,11 +1828,26 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
                 const jeSuisTj1 = m.tj1_player_id === player.id;
                 const adversaireNom = jeSuisTj1 ? m.tj2_nom : m.tj1_nom;
                 const adversaireNationalite = jeSuisTj1 ? m.tj2_nationalite : m.tj1_nationalite;
+                const adversairePlayerId = jeSuisTj1 ? m.tj2_player_id : m.tj1_player_id;
+
+                const monStyle = styleDuMatch(m.tournoi_id);
+                const adversaireStyle = styleAdversaireDuMatch(m.tournoi_id, adversairePlayerId, m.id);
+                const totalJeux = jeuxTotalDuScore(m.score);
+                const tauxPerteForme = (monStyle === 'prudence' ? 0.08 : (monStyle === 'en_avant' ? 0.12 : 0.10)) * (adversaireStyle === 'marathonien' ? 1.5 : 1);
+                const formePerdue = Math.round(totalJeux * tauxPerteForme * 10) / 10;
+
+                let evenements = [];
+                try { evenements = m.evenements ? JSON.parse(m.evenements) : []; } catch (e) { evenements = []; }
+                const pointsImportants = evenements.filter(function (e) { return e && e.type === 'point_important'; }).length;
+                const tauxGainMentalMax = monStyle === 'mental_acier' ? 0.15 : 0.1;
+                const mentalMaxGagne = Math.round(pointsImportants * tauxGainMentalMax * 10) / 10;
+
                 return {
                     semaine: positionSemaineAffichee(m.semaine), tournoi: m.tournoi_nom, tour: m.numero_tour,
                     surface: m.surface, victoire: m.vainqueur === 'joueur', score: m.score,
                     adversaireNom: adversaireNom || '?', adversaireDrapeau: drapeau(adversaireNationalite),
-                    style: styleDuMatch(m.tournoi_id)
+                    style: monStyle, formePerdue, mentalMaxGagne,
+                    adversaireMarathonien: adversaireStyle === 'marathonien'
                 };
             })
         });

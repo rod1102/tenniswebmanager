@@ -121,6 +121,7 @@
                         <thead>
                             <tr>
                                 <th>Semaine</th><th>Tournoi</th><th>Tour</th><th>Surface</th><th>Adversaire</th><th>Score</th><th>Résultat</th><th>Style</th>
+                                <th class="num">Forme perdue</th><th class="num">Mental max gagné</th>
                             </tr>
                         </thead>
                         <tbody id="sj-matchs-tbody"></tbody>
@@ -398,13 +399,15 @@
                         <td>${m.tournoi}</td>
                         <td>${m.tour}</td>
                         <td>${LABELS_SURFACE[m.surface] || m.surface}</td>
-                        <td>${flagImg(m.adversaireDrapeau)} ${formaterNom(m.adversaireNom)}</td>
+                        <td>${flagImg(m.adversaireDrapeau)} ${formaterNom(m.adversaireNom)}${m.adversaireMarathonien ? ' <span title="Adversaire en Marathonien ce match — perte de forme majorée de 50 %">⚠️</span>' : ''}</td>
                         <td>${m.score}</td>
                         <td class="${m.victoire ? 'sj-victoire' : 'sj-defaite'}">${m.victoire ? 'Victoire' : 'Défaite'}</td>
                         <td>${m.style ? (STYLES_JEU_LABELS[m.style] || m.style) : '—'}</td>
+                        <td class="num">${m.formePerdue !== null && m.formePerdue !== undefined ? '−' + m.formePerdue : '—'}</td>
+                        <td class="num">${m.mentalMaxGagne !== null && m.mentalMaxGagne !== undefined ? '+' + m.mentalMaxGagne : '—'}</td>
                     </tr>
                 `;
-            }).join('') || '<tr><td colspan="8" class="match-hint">Aucun match.</td></tr>';
+            }).join('') || '<tr><td colspan="10" class="match-hint">Aucun match.</td></tr>';
         }
 
         document.getElementById('logout-btn').addEventListener('click', function (e) {
