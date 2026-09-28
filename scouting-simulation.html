@@ -243,6 +243,7 @@
 
                 let xpSemaine = 0;
                 let surfaceProtegee = null;
+                let depassement24 = 0;
 
                 if (c.action === 'repos') {
                     forme = formeMax(usure);
@@ -295,19 +296,25 @@
                 // Repartition de l'XP gagnee cette semaine, selon la colonne "Competence
                 // visee" :
                 // - une competence precise choisie -> toute l'XP va dessus ;
-                // - "Completer jusqu'a 24" -> repartie a parts egales UNIQUEMENT sur les
-                //   competences pas encore a 24, plafonnee a 24 chacune (rien si toutes y
-                //   sont deja) ;
-                // - "Choix pas encore fait" (par defaut) -> XP non distribuee, PERDUE,
-                //   comme la vraie regle du jeu (l'XP d'entrainement ne se garde pas en
-                //   reserve indefiniment) - xpCumule (XP totale gagnee) continue quand
-                //   meme d'augmenter, seul xpTotal (somme des competences) n'en profite pas.
+                // - "Completer jusqu'a 24" -> repartie en nombres ENTIERS (jamais de
+                //   decimale du style 20.3) UNIQUEMENT sur les competences pas encore a
+                //   24 : part de base = Math.floor(xp / nb de cibles), le reste (division
+                //   non exacte) distribue point par point aux premieres cibles pour ne
+                //   rien perdre inutilement a ce stade. Si la part d'une competence la
+                //   ferait depasser 24, elle est plafonnee et l'exces est compte dans
+                //   depassement24 (signale a l'utilisateur, colonne XP semaine).
                 if (xpSemaine > 0) {
                     if (c.competenceCible === 'completer_24') {
                         const cibles = COMPETENCES.filter(function (comp) { return competences[comp] < 24; });
                         if (cibles.length > 0) {
-                            const part = xpSemaine / cibles.length;
-                            cibles.forEach(function (comp) { competences[comp] = Math.min(24, competences[comp] + part); });
+                            const partBase = Math.floor(xpSemaine / cibles.length);
+                            const reste = xpSemaine - partBase * cibles.length;
+                            cibles.forEach(function (comp, idx) {
+                                const part = partBase + (idx < reste ? 1 : 0);
+                                const nouvelleValeur = competences[comp] + part;
+                                if (nouvelleValeur > 24) depassement24 += nouvelleValeur - 24;
+                                competences[comp] = Math.min(24, nouvelleValeur);
+                            });
                         }
                     } else if (c.competenceCible && COMPETENCES.indexOf(c.competenceCible) !== -1) {
                         competences[c.competenceCible] = Math.min(100, competences[c.competenceCible] + xpSemaine);
@@ -319,7 +326,7 @@
                 detail.push({
                     semaine: s.semaine, xp: xpSemaine, xpCumule, energie,
                     xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
-                    erosionSemaine: erosionSemaine
+                    erosionSemaine: erosionSemaine, depassement24: depassement24
                 });
             });
 
@@ -433,7 +440,7 @@
                                 }).join('')}
                             </select>
                         </td>
-                        <td class="num">${d.xp}</td>
+                        <td class="num">${d.xp}${d.depassement24 ? ` <span title="${d.depassement24} point(s) perdu(s) : compétence(s) déjà à 24 ou trop proche">⚠️−${d.depassement24}</span>` : ''}</td>
                         <td class="num">${d.xpCumule}</td>
                         <td class="num">${d.energie}</td>
                         <td class="num">${d.xpTotal}</td>
