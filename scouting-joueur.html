@@ -82,6 +82,7 @@
                         <h1 id="sj-nom">—</h1>
                         <div class="sj-rang" id="sj-rang"></div>
                     </div>
+                    <a id="sj-lien-simulation" class="cta cta-secondary" style="margin-left:auto; padding:10px 16px; font-size:0.8rem;" href="#">Simulation de saison →</a>
                 </div>
 
                 <div class="sj-cards" id="sj-cards"></div>
@@ -355,6 +356,7 @@
                 img.src = 'https://flagcdn.com/48x36/' + j.drapeau + '.png';
                 img.style.display = 'block';
             }
+            document.getElementById('sj-lien-simulation').href = 'scouting-simulation.html?id=' + playerId;
 
             const LABELS_CONDITION = { en_forme: 'En forme', fatigue: 'Fatigué', diminue: 'Diminué', blesse: 'Blessé' };
             document.getElementById('sj-cards').innerHTML = [

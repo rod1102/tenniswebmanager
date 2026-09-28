@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="ball.png">
+    <link rel="apple-touch-icon" href="ball.png">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Simulation — Scouting — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20260927b">
+    <style>
+        .sim-header { display:flex; align-items:center; gap:14px; margin-bottom:14px; flex-wrap:wrap; justify-content:space-between; }
+        .sim-header h1 { font-size:1.8rem; margin:0; }
+        .sim-note {
+            background: rgba(232, 161, 60, 0.1); border: 1px solid rgba(232, 161, 60, 0.35); border-radius: 12px;
+            padding: 14px 16px; font-size: 0.82rem; color: #F5F7FA; margin-bottom: 22px; line-height: 1.6;
+        }
+        .sim-note strong { color: #E8A13C; }
+
+        .sim-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:14px; margin-bottom:24px; }
+        .sim-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 14px 16px; }
+        .sim-card-label { font-size:0.7rem; text-transform:uppercase; letter-spacing:0.04em; color:#8B98A5; font-weight:700; margin-bottom:6px; }
+        .sim-card-valeur { font-size:1.4rem; font-weight:800; color:#F5F7FA; }
+        .sim-card.sim-card-moulinette { border-color: rgba(212, 240, 0, 0.4); background: rgba(212, 240, 0, 0.08); }
+        .sim-card.sim-card-moulinette .sim-card-valeur { color: #D4F000; }
+
+        .sim-table-wrap { overflow-x:auto; border: 1px solid rgba(255,255,255,0.1); border-radius: 12px; margin-bottom:24px; }
+        .sim-table { width:100%; border-collapse:collapse; font-size:0.82rem; }
+        .sim-table th {
+            text-align:left; padding:8px 10px; color:#8B98A5; font-weight:700; font-size:0.66rem;
+            text-transform:uppercase; letter-spacing:0.03em; white-space:nowrap;
+            background: rgba(255,255,255,0.05); border-bottom: 1px solid rgba(255,255,255,0.14);
+            border-right: 1px solid rgba(255,255,255,0.08);
+        }
+        .sim-table th:last-child { border-right: none; }
+        .sim-table td {
+            padding:6px 10px; border-bottom: 1px solid rgba(255,255,255,0.06); vertical-align:middle; color:#F5F7FA;
+            border-right: 1px solid rgba(255,255,255,0.05);
+        }
+        .sim-table td:last-child { border-right: none; }
+        .sim-table td.num { text-align:right; font-variant-numeric: tabular-nums; }
+        .sim-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+        .sim-table tr.sim-row-verrou td { color: #8B98A5; font-style: italic; }
+        .sim-select { background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F5F7FA; border-radius: 6px; padding: 4px 6px; font-size: 0.8rem; max-width: 220px; }
+        .sim-select:disabled { opacity: 0.5; }
+        .sim-actions { display:flex; gap:10px; margin-bottom:18px; }
+    </style>
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="scouting.html">Scouting</a>
+                        <a href="accueil.html">Accueil</a>
+                        <a href="admin.html">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <div id="acces-refuse" class="match-hint" style="display:none; text-align:center;">Cette page est réservée à l'administrateur, et uniquement pour tes propres joueurs.</div>
+
+            <div id="contenu" style="display:none;">
+                <div class="sim-header">
+                    <h1 id="sim-nom">—</h1>
+                </div>
+
+                <div class="sim-note">
+                    <strong>Simulation, pas une prédiction.</strong> Certaines valeurs sont calculées avec les vraies règles du jeu (XP par tour atteint, perte de mental courant par tour, érosion hebdomadaire des compétences, automatismes, formule de moulinette). D'autres sont <strong>forcément des hypothèses</strong>, car un match futur n'a pas encore de résultat réel : ~20 jeux et ~8 points importants par match joué (perte de forme et gain de mental max), aucun style de jeu simulé (taux par défaut), et l'XP gagnée répartie à parts égales sur les 8 compétences (en jeu, le choix t'appartient). Part de ton état réel actuel, projette jusqu'à la fin de la saison en cours.
+                </div>
+
+                <div class="sim-actions">
+                    <button class="cta cta-secondary" id="sim-reset-btn" style="padding:10px 16px; font-size:0.8rem;">Réinitialiser (tout en Entraînement générique)</button>
+                </div>
+
+                <div class="sim-cards" id="sim-cards"></div>
+
+                <div class="stats-header">Compétences projetées</div>
+                <div id="sim-competences" style="margin-bottom:24px;"></div>
+
+                <div class="stats-header">Planification semaine par semaine</div>
+                <div class="sim-table-wrap">
+                    <table class="sim-table">
+                        <thead>
+                            <tr>
+                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
+                            </tr>
+                        </thead>
+                        <tbody id="sim-tbody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userId = localStorage.getItem('currentUserId');
+        if (!userId) window.location.href = 'connexion.html';
+
+        const params = new URLSearchParams(window.location.search);
+        const playerId = params.get('id');
+
+        const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
+        const COMPETENCES_LABELS = {
+            service: 'Service', retour: 'Retour', coup_droit_revers: 'Coup droit / Revers',
+            effet: 'Effet', volee: 'Volée', deplacement: 'Déplacement', puissance: 'Puissance', resistance: 'Résistance'
+        };
+        const SURFACES = ['dur', 'terre', 'herbe'];
+        const LABELS_SURFACE = { dur: 'Dur', terre: 'Terre battue', herbe: 'Herbe' };
+
+        // ---------- Constantes de regle (dupliquees du serveur, cf. server.js) ----------
+        const XP_QUALIFICATION_SEMAINE2 = 7;
+        const XP_TOURNOI = { 5: [10, 10, 10, 9, 9], 6: [10, 10, 11, 10, 9, 9], 7: [10, 10, 11, 10, 10, 9, 9] };
+        const PERTE_MENTAL_COURANT = {
+            slam: { premiers: 1.5, quarts: 2.5, demies: 4, finale: 6 },
+            1000: { premiers: 1, quarts: 1.5, demies: 2, finale: 3 },
+            finals: { premiers: 1, quarts: 1.5, demies: 2, finale: 3 },
+            500: { premiers: 0.5, quarts: 1, demies: 1.5, finale: 2 },
+            250: { premiers: 0.5, quarts: 1, demies: 1, finale: 1.5 }
+        };
+        function perteMentalCourant(categorie, label) {
+            const bareme = PERTE_MENTAL_COURANT[categorie] || PERTE_MENTAL_COURANT[250];
+            if (label === 'Finale') return bareme.finale;
+            if (label === '1/2 finale' || label === 'Demi-finale') return bareme.demies;
+            if (label === '1/4 finale') return bareme.quarts;
+            return bareme.premiers;
+        }
+        function formeMax(usure) { return Math.min(100, (100 - usure / 10) + 3); }
+        // Hypotheses (match futur = resultat inconnu) : moyenne raisonnable de jeux et
+        // de points importants par match reellement joue.
+        const JEUX_MOYENS_PAR_MATCH = 20;
+        const POINTS_IMPORTANTS_MOYENS_PAR_MATCH = 8;
+
+        function formaterNom(nomComplet) { return nomComplet.replace(/\s+/g, ' ').trim(); }
+
+        async function verifierAdmin() {
+            const response = await fetch('/api/utilisateur/' + userId);
+            const data = await response.json();
+            if (!response.ok || data.user.role !== 'admin') {
+                document.getElementById('acces-refuse').style.display = 'block';
+                return false;
+            }
+            return true;
+        }
+
+        let etatInitial = null;
+        let semainesData = [];
+        // choix[semaine] = { action: 'repos'|'generique'|'surface_dur'|'surface_terre'|'surface_herbe'|'coaching_mental'|'tournoi:<id>', tourIndex: number|null }
+        let choix = {};
+
+        function carte(label, valeur, classe) {
+            return `<div class="sim-card ${classe || ''}"><div class="sim-card-label">${label}</div><div class="sim-card-valeur">${valeur}</div></div>`;
+        }
+
+        // Rejoue la simulation entiere a partir de l'etat REEL actuel du joueur, semaine
+        // par semaine, en appliquant "choix". Retourne l'etat final + le detail par
+        // semaine (utilise pour la colonne XP semaine/cumule).
+        function simuler() {
+            let forme = etatInitial.forme, mentalCourant = etatInitial.mentalCourant, mentalMax = etatInitial.mentalMax;
+            let usure = etatInitial.usure, condition = etatInitial.condition;
+            const automatismes = Object.assign({}, etatInitial.automatismes);
+            const competences = Object.assign({}, etatInitial.competences);
+            let xpCumule = 0;
+            const detail = [];
+
+            semainesData.forEach(function (s) {
+                const c = choix[s.semaine] || { action: 'generique' };
+
+                // Semaine "verrouillee" (2e semaine d'un tournoi 2 semaines deja compte sur
+                // la semaine de debut) : seule l'erosion s'applique, aucun nouvel effet.
+                if (c.action === 'verrou') {
+                    COMPETENCES.forEach(function (comp) { competences[comp] = Math.max(0, competences[comp] - Math.floor(competences[comp] * 0.04)); });
+                    SURFACES.forEach(function (surf) { automatismes[surf] = Math.max(0, automatismes[surf] - 5); });
+                    detail.push({ semaine: s.semaine, xp: 0, xpCumule });
+                    return;
+                }
+
+                // Erosion hebdomadaire (vraie formule -4%/floor, s'applique a chaque semaine
+                // de tournoi qu'on quitte - toutes les semaines simulees ici en sont).
+                COMPETENCES.forEach(function (comp) { competences[comp] = Math.max(0, competences[comp] - Math.floor(competences[comp] * 0.04)); });
+
+                let xpSemaine = 0;
+                let surfaceProtegee = null;
+
+                if (c.action === 'repos') {
+                    forme = formeMax(usure);
+                    mentalCourant = mentalMax;
+                    condition = 'en_forme';
+                } else if (c.action === 'generique') {
+                    xpSemaine = 8;
+                } else if (c.action.indexOf('surface_') === 0) {
+                    const surf = c.action.replace('surface_', '');
+                    surfaceProtegee = surf;
+                    automatismes[surf] = automatismes[surf] > 15 ? 30 : Math.min(30, automatismes[surf] + 15);
+                } else if (c.action === 'coaching_mental') {
+                    xpSemaine = 0;
+                } else if (c.action.indexOf('tournoi:') === 0) {
+                    const tId = c.action.replace('tournoi:', '');
+                    const tournoi = s.tournois.find(function (t) { return t.id === tId; });
+                    if (tournoi && c.tourIndex !== null && c.tourIndex !== undefined) {
+                        const tourIndex = Number(c.tourIndex);
+                        const matchsJoues = tourIndex + 1;
+                        surfaceProtegee = tournoi.surface;
+
+                        const table = XP_TOURNOI[tournoi.nbTours];
+                        xpSemaine = table ? (table[tourIndex] || 0) : 0;
+                        if (tournoi.nbTours === 7 && tourIndex >= 2) xpSemaine += XP_QUALIFICATION_SEMAINE2;
+
+                        automatismes[tournoi.surface] = Math.min(30, automatismes[tournoi.surface] + 3 * matchsJoues);
+
+                        let perteMental = 0;
+                        for (let r = 0; r <= tourIndex; r++) perteMental += perteMentalCourant(tournoi.categorie, tournoi.labelsTours[r]);
+                        mentalCourant = Math.max(0, Math.round((mentalCourant - perteMental) * 10) / 10);
+
+                        const formePerdue = matchsJoues * JEUX_MOYENS_PAR_MATCH * 0.10;
+                        forme = Math.max(0, Math.round((forme - formePerdue) * 10) / 10);
+
+                        const mentalMaxGagne = matchsJoues * POINTS_IMPORTANTS_MOYENS_PAR_MATCH * 0.1;
+                        mentalMax = Math.round((mentalMax + mentalMaxGagne) * 10) / 10;
+
+                        usure += matchsJoues;
+                    }
+                }
+
+                // Decroissance des automatismes : -5 sur les surfaces ni jouees ni
+                // entrainees cette semaine (protection identique au moteur reel).
+                SURFACES.forEach(function (surf) {
+                    if (surf !== surfaceProtegee) automatismes[surf] = Math.max(0, automatismes[surf] - 5);
+                });
+
+                // Repartition de l'XP gagnee cette semaine a parts egales sur les 8
+                // competences (hypothese - la vraie repartition est un choix du coach,
+                // jamais simule ici).
+                if (xpSemaine > 0) {
+                    const part = xpSemaine / 8;
+                    COMPETENCES.forEach(function (comp) { competences[comp] = Math.min(100, competences[comp] + part); });
+                }
+
+                xpCumule += xpSemaine;
+                detail.push({ semaine: s.semaine, xp: xpSemaine, xpCumule });
+            });
+
+            const xpTotaleCompetences = COMPETENCES.reduce(function (s, c) { return s + competences[c]; }, 0);
+            const cible = ((xpTotaleCompetences - 200) / 2.5) + 120;
+            const moulinetteArrondie = (xpTotaleCompetences > 0 && cible < xpTotaleCompetences) ? Math.floor(cible) : Math.round(xpTotaleCompetences);
+
+            return { forme, mentalCourant, mentalMax, usure, condition, automatismes, competences, xpCumule, detail, moulinetteArrondie, xpTotaleCompetences };
+        }
+
+        function optionsAction(s) {
+            let html = `
+                <option value="repos">Repos</option>
+                <option value="generique">Entraînement générique</option>
+                <option value="surface_dur">Entraînement surface Dur</option>
+                <option value="surface_terre">Entraînement surface Terre battue</option>
+                <option value="surface_herbe">Entraînement surface Herbe</option>
+                <option value="coaching_mental">Coaching mental</option>
+            `;
+            s.tournois.forEach(function (t) {
+                html += `<option value="tournoi:${t.id}">Tournoi : ${t.nom}</option>`;
+            });
+            return html;
+        }
+
+        function rendreTableau() {
+            const resultat = simuler();
+            const tbody = document.getElementById('sim-tbody');
+            tbody.innerHTML = semainesData.map(function (s, i) {
+                const c = choix[s.semaine] || { action: 'generique' };
+                const d = resultat.detail[i];
+
+                if (c.action === 'verrou') {
+                    return `
+                        <tr class="sim-row-verrou">
+                            <td>S${s.position}</td>
+                            <td colspan="2">Suite du tournoi (2e semaine, verrouillée)</td>
+                            <td class="num">0</td>
+                            <td class="num">${d.xpCumule}</td>
+                        </tr>
+                    `;
+                }
+
+                const estTournoi = c.action.indexOf('tournoi:') === 0;
+                const tournoiChoisi = estTournoi ? s.tournois.find(function (t) { return t.id === c.action.replace('tournoi:', ''); }) : null;
+                const optionsTour = tournoiChoisi
+                    ? tournoiChoisi.labelsTours.map(function (label, idx) {
+                        return `<option value="${idx}" ${Number(c.tourIndex) === idx ? 'selected' : ''}>${label}</option>`;
+                    }).join('')
+                    : '';
+
+                return `
+                    <tr>
+                        <td>S${s.position}</td>
+                        <td>
+                            <select class="sim-select sim-action-select" data-semaine="${s.semaine}">
+                                ${optionsAction(s)}
+                            </select>
+                        </td>
+                        <td>
+                            <select class="sim-select sim-tour-select" data-semaine="${s.semaine}" ${estTournoi ? '' : 'disabled'}>
+                                ${estTournoi ? optionsTour : '<option>—</option>'}
+                            </select>
+                        </td>
+                        <td class="num">${d.xp}</td>
+                        <td class="num">${d.xpCumule}</td>
+                    </tr>
+                `;
+            }).join('');
+
+            // Reselectionne la bonne action dans chaque <select> (innerHTML ne garde pas
+            // l'etat "selected" des options generees dynamiquement de la meme facon qu'un
+            // attribut statique pour <select> lui-meme, seulement pour ses <option>).
+            document.querySelectorAll('.sim-action-select').forEach(function (sel) {
+                const s = Number(sel.dataset.semaine);
+                sel.value = (choix[s] || { action: 'generique' }).action;
+            });
+
+            document.querySelectorAll('.sim-action-select').forEach(function (sel) {
+                sel.addEventListener('change', function () {
+                    const s = Number(sel.dataset.semaine);
+                    const action = sel.value;
+                    const semaineInfo = semainesData.find(function (x) { return x.semaine === s; });
+                    choix[s] = { action: action, tourIndex: action.indexOf('tournoi:') === 0 ? 0 : null };
+
+                    // Tournoi 2 semaines : verrouille automatiquement la semaine suivante.
+                    const indexSemaine = semainesData.indexOf(semaineInfo);
+                    const semaineSuivante = semainesData[indexSemaine + 1];
+                    if (semaineSuivante) {
+                        const tId = action.indexOf('tournoi:') === 0 ? action.replace('tournoi:', '') : null;
+                        const tournoi = tId ? semaineInfo.tournois.find(function (t) { return t.id === tId; }) : null;
+                        if (tournoi && tournoi.duree === 2) {
+                            choix[semaineSuivante.semaine] = { action: 'verrou', tourIndex: null };
+                        } else if (choix[semaineSuivante.semaine] && choix[semaineSuivante.semaine].action === 'verrou') {
+                            // Etait verrouillee par un ancien choix qu'on vient de changer -
+                            // liberee, repart sur la valeur par defaut.
+                            choix[semaineSuivante.semaine] = { action: 'generique', tourIndex: null };
+                        }
+                    }
+                    rendreTableau();
+                    rendreResume(resultat);
+                });
+            });
+            document.querySelectorAll('.sim-tour-select').forEach(function (sel) {
+                sel.addEventListener('change', function () {
+                    const s = Number(sel.dataset.semaine);
+                    choix[s].tourIndex = Number(sel.value);
+                    rendreTableau();
+                    rendreResume(simuler());
+                });
+            });
+
+            rendreResume(resultat);
+        }
+
+        const LABELS_CONDITION = { en_forme: 'En forme', fatigue: 'Fatigué', diminue: 'Diminué', blesse: 'Blessé' };
+        function rendreResume(resultat) {
+            document.getElementById('sim-cards').innerHTML = [
+                carte('XP cumulé projeté', resultat.xpCumule),
+                carte('Forme', resultat.forme),
+                carte('Mental actuel', resultat.mentalCourant),
+                carte('Mental max', resultat.mentalMax),
+                carte('Usure', resultat.usure),
+                carte('Condition', LABELS_CONDITION[resultat.condition] || resultat.condition),
+                carte('Automatismes', `D${Math.round(resultat.automatismes.dur)} T${Math.round(resultat.automatismes.terre)} H${Math.round(resultat.automatismes.herbe)}`),
+                carte('Moulinette projetée', resultat.moulinetteArrondie, 'sim-card-moulinette')
+            ].join('');
+
+            document.getElementById('sim-competences').innerHTML = COMPETENCES.map(function (c) {
+                const valeur = resultat.competences[c];
+                const classe = valeur <= 24 ? 'competence-vert' : valeur <= 49 ? 'competence-jaune' : valeur <= 74 ? 'competence-orange' : valeur <= 99 ? 'competence-rouge' : 'competence-noir';
+                return `<div class="bar-row"><span class="bar-label">${COMPETENCES_LABELS[c]}</span><div class="bar-track"><div class="bar-fill ${classe}" style="width:${Math.min(100, valeur)}%;"></div></div><span class="bar-value">${Math.round(valeur * 10) / 10}</span></div>`;
+            }).join('');
+        }
+
+        async function charger() {
+            if (!playerId) {
+                document.getElementById('acces-refuse').textContent = 'Aucun joueur précisé.';
+                document.getElementById('acces-refuse').style.display = 'block';
+                return;
+            }
+            const response = await fetch('/api/admin/scouting/simulation-data/' + playerId);
+            const data = await response.json();
+            if (!response.ok) {
+                document.getElementById('acces-refuse').textContent = data.error || 'Erreur.';
+                document.getElementById('acces-refuse').style.display = 'block';
+                return;
+            }
+            document.getElementById('contenu').style.display = 'block';
+            document.getElementById('sim-nom').textContent = 'Simulation — ' + formaterNom(data.joueur.nom);
+
+            etatInitial = data.joueur;
+            semainesData = data.semaines;
+            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null }; });
+
+            rendreTableau();
+        }
+
+        document.getElementById('sim-reset-btn').addEventListener('click', function () {
+            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null }; });
+            rendreTableau();
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
+            localStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        verifierAdmin().then(function (ok) { if (ok) charger(); });
+    </script>
+    <script src="retour.js?v=20260829"></script>
+    <script src="theme-saison.js?v=20260831"></script>
+</body>
+</html>

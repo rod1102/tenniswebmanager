@@ -1923,6 +1923,67 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
     }
 });
 
+// Donnees de reference pour l'outil "Simulation" (admin, uniquement ses propres
+// joueurs) : etat actuel du joueur + calendrier REEL des tournois de son circuit
+// pour chaque semaine restante de la saison en cours (lu directement dans
+// CALENDRIER_TOURNOIS, le vrai gabarit recurrent - les instances de tournois futures
+// n'existent pas encore en base tant que leur semaine de tirage n'est pas arrivee).
+// Le calcul semaine par semaine de la simulation elle-meme se fait cote client (JS),
+// pour rester interactif comme un tableur, a partir de ces donnees + des constantes
+// de regle dupliquees dans la page (meme convention "aucun fichier JS partage" que
+// le reste du site).
+app.get('/api/admin/scouting/simulation-data/:playerId', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const player = db.prepare('SELECT * FROM players WHERE id = ?').get(Number(req.params.playerId));
+        if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+        if (Number(player.user_id) !== Number(req.userId)) {
+            return res.status(403).json({ error: 'Cette simulation est reservee a tes propres joueurs.' });
+        }
+
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const semaineActuelle = etat.semaine_actuelle;
+        const circuit = player.type === 'joueuse' ? 'WTA' : 'ATP';
+        const derniereSemainePlanifiable = finSaisonAbsolue(semaineActuelle);
+
+        const semaines = [];
+        for (let s = semaineActuelle + 1; s <= derniereSemainePlanifiable; s++) {
+            const phase = phaseDeSemaine(s);
+            if (phase.type !== 'tournoi') continue;
+            const tournoisSemaine = CALENDRIER_TOURNOIS.filter(function (t) {
+                return t.circuit === circuit && t.semaine_debut === phase.positionSemaine;
+            }).map(function (t) {
+                const labels = calculerLabelsTours(t.taille_tableau, t.format);
+                return {
+                    id: t.id, nom: t.nom, categorie: String(t.categorie), surface: t.surface,
+                    duree: t.duree, nbTours: labels.length, labelsTours: labels
+                };
+            });
+            semaines.push({ semaine: s, position: phase.positionSemaine, tournois: tournoisSemaine });
+        }
+
+        res.json({
+            success: true,
+            joueur: {
+                id: player.id, nom: player.prenom + ' ' + player.nom, type: player.type, circuit,
+                forme: player.forme, mentalCourant: player.mental_courant, mentalMax: player.mental_max,
+                usure: player.usure, energie: player.points_energie, condition: player.condition,
+                automatismes: { dur: player.surface_dur_automatismes, terre: player.surface_terre_automatismes, herbe: player.surface_herbe_automatismes },
+                competences: COMPETENCES.reduce(function (o, c) { o[c] = player[c]; return o; }, {}),
+                xpEnAttente: player.points_experience
+            },
+            semaineActuelle,
+            derniereSemainePlanifiable,
+            semaines
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Diagnostic (admin) du "dernier carre" (4 joueurs ayant le plus progresse) d'un
 // tournoi a elimination directe, avec leur niveau de jeu sur la surface du tournoi -
 // le niveau est normalement confidentiel (jamais expose a un autre coach), cette route
