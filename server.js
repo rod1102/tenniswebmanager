@@ -1708,13 +1708,54 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
 
         const historique = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine').all(player.id);
 
+        // La colonne "*_apres" de journal_semaine_joueur est capturee AU MOMENT DE LA
+        // TRANSITION de semaine (erosion + planification), donc AVANT que les matchs de
+        // tournoi de cette semaine-la ne soient reellement joues (simulation differee,
+        // tour par tour, tout au long de la semaine - cf. executerAvancementTour). Un
+        // joueur engage en tournoi n'a meme aucun "ordre" de planification cette
+        // semaine-la (voir executerAvancementSemaine), donc son "*_apres" stocke egale
+        // son "*_avant", meme s'il a ensuite joue et gagne/perdu forme/mental/automatismes
+        // en match - bug signale par l'utilisateur (avant=apres injustifie, semaine avec
+        // matchs joues). L'etat REEL de fin de semaine se lit en realite sur le "*_avant"
+        // de la ligne SUIVANTE (capturee juste avant la transition suivante, donc apres
+        // que tous les matchs de la semaine consideree aient ete simules), ou sur l'etat
+        // EN DIRECT du joueur (deja charge dans "player") pour la toute derniere semaine
+        // connue, qui n'a pas encore de ligne suivante. Corrige ainsi plutot que de
+        // re-simuler chaque match un par un (aucun risque d'oublier un cas particulier -
+        // Coupe Davis, poules, kine... - puisqu'on relit un etat deja reellement ecrit).
+        const CHAMPS_AVANT_APRES = [
+            'forme', 'mental', 'mental_max', 'usure', 'energie', 'condition',
+            'automatismes_dur', 'automatismes_terre', 'automatismes_herbe'
+        ].concat(COMPETENCES);
+        const VALEUR_LIVE = {
+            forme: player.forme, mental: player.mental_courant, mental_max: player.mental_max,
+            usure: player.usure, energie: player.points_energie, condition: player.condition,
+            automatismes_dur: player.surface_dur_automatismes, automatismes_terre: player.surface_terre_automatismes,
+            automatismes_herbe: player.surface_herbe_automatismes
+        };
+        COMPETENCES.forEach(function (c) { VALEUR_LIVE[c] = player[c]; });
+        const historiqueCorrige = historique.map(function (h, i) {
+            const suivant = historique[i + 1];
+            const corrige = Object.assign({}, h);
+            CHAMPS_AVANT_APRES.forEach(function (champ) {
+                const cleAvant = champ + '_avant';
+                const cleApres = champ + '_apres';
+                if (suivant && suivant[cleAvant] !== null && suivant[cleAvant] !== undefined) {
+                    corrige[cleApres] = suivant[cleAvant];
+                } else {
+                    corrige[cleApres] = VALEUR_LIVE[champ];
+                }
+            });
+            return corrige;
+        });
+
         // Courbes Niveau / Points importants par surface, semaine par semaine - meme
         // formule exacte que le moteur (niveauNormal, COEFFICIENTS_SURFACE ; niveau
         // "points importants" = niveau normal - forme + mental courant, cf. CLAUDE.md),
-        // rejouee a partir des vraies valeurs "apres" deja enregistrees chaque semaine
-        // (jamais une estimation, c'est son propre joueur).
+        // rejouee a partir de l'etat de fin de semaine corrige ci-dessus (jamais une
+        // estimation, c'est son propre joueur).
         const courbes = { niveau: [], pointsImportants: [] };
-        historique.forEach(function (h) {
+        historiqueCorrige.forEach(function (h) {
             const semaineAffichee = positionSemaineAffichee(h.semaine);
             // Semaine de Pre-saison/Semaine 0 (pas de position affichable, "S--" sinon) :
             // exclue des courbes, qui n'ont de sens que semaine de tournoi par semaine
@@ -1804,7 +1845,7 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
             },
             erosionTotale: erosionExacte(player.id, semaineActuelle),
             courbes,
-            historique: historique.map(function (h) {
+            historique: historiqueCorrige.map(function (h) {
                 return {
                     semaine: positionSemaineAffichee(h.semaine),
                     action: h.action_prevue,
