@@ -1703,10 +1703,24 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
 
         const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
         const semaineActuelle = etat.semaine_actuelle;
+        const positionSaisonBrute = ((semaineActuelle - 1) % LONGUEUR_SAISON) + 1;
+        const debutSaison = semaineActuelle - positionSaisonBrute + 2;
         const circuit = player.type === 'joueuse' ? 'WTA' : 'ATP';
         const rangs = calculerRangsLiveGlobal(circuit);
 
         const historique = db.prepare('SELECT * FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine').all(player.id);
+
+        // Alertes kine : nombre de matchs (tournoi ET Coupe Davis/BJK Cup) ou la condition
+        // s'est reellement degradee ce match-la (matchs.kine_intervenu, deja pose par
+        // appliquerEtatPostMatch). "Depuis le dernier repos" ne remonte jamais avant le
+        // debut de la saison en cours : la bascule de Pre-saison remet de toute facon la
+        // condition a "en forme" (equivalent a un repos), donc un repos d'une saison
+        // precedente n'a plus de sens comme point de depart.
+        const dernierRepos = db.prepare("SELECT MAX(semaine) AS s FROM journal_semaine_joueur WHERE player_id = ? AND action_prevue = 'repos'").get(player.id).s;
+        const depuisRepos = Math.max(dernierRepos || 0, debutSaison);
+        const semainesAlertesKine = db.prepare('SELECT semaine FROM matchs WHERE player_id = ? AND kine_intervenu = 1').all(player.id).map(function (r) { return r.semaine; });
+        const alertesKineSaison = semainesAlertesKine.filter(function (s) { return s > debutSaison; }).length;
+        const alertesKineDepuisRepos = semainesAlertesKine.filter(function (s) { return s > depuisRepos; }).length;
 
         // La colonne "*_apres" de journal_semaine_joueur est capturee AU MOMENT DE LA
         // TRANSITION de semaine (erosion + planification), donc AVANT que les matchs de
@@ -1844,6 +1858,8 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
                 competences: COMPETENCES.reduce(function (o, c) { o[c] = player[c]; return o; }, {})
             },
             erosionTotale: erosionExacte(player.id, semaineActuelle),
+            alertesKineSaison,
+            alertesKineDepuisRepos,
             courbes,
             historique: historiqueCorrige.map(function (h) {
                 return {

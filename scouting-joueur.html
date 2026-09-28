@@ -365,7 +365,9 @@
                 carte('Énergie', j.energie),
                 carte('Condition', LABELS_CONDITION[j.condition] || j.condition),
                 carte('Automatismes', `D${j.automatismes.dur} T${j.automatismes.terre} H${j.automatismes.herbe}`),
-                carte('Érosion cumulée', '−' + data.erosionTotale)
+                carte('Érosion cumulée', '−' + data.erosionTotale),
+                carte('Alertes kiné (saison)', data.alertesKineSaison),
+                carte('Alertes kiné (depuis repos)', data.alertesKineDepuisRepos)
             ].join('');
 
             const totalCompetences = COMPETENCES_LABELS && Object.keys(COMPETENCES_LABELS).reduce(function (s, c) { return s + j.competences[c]; }, 0);
