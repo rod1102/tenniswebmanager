@@ -1716,6 +1716,10 @@ app.get('/api/admin/scouting/joueur/:playerId', (req, res) => {
         const courbes = { niveau: [], pointsImportants: [] };
         historique.forEach(function (h) {
             const semaineAffichee = positionSemaineAffichee(h.semaine);
+            // Semaine de Pre-saison/Semaine 0 (pas de position affichable, "S--" sinon) :
+            // exclue des courbes, qui n'ont de sens que semaine de tournoi par semaine
+            // de tournoi (reste dans le tableau "Historique hebdomadaire", lui, complet).
+            if (semaineAffichee === null) return;
             const pointNiveau = { semaine: semaineAffichee };
             const pointMental = { semaine: semaineAffichee };
             SURFACES.forEach(function (surf) {

@@ -37,10 +37,9 @@
         .sj-defaite { color:#D46A6A; font-weight:700; }
         .sj-fleche { color:#8B98A5; margin:0 4px; }
 
-        .sj-graphs { display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-bottom:28px; }
-        @media (max-width: 900px) { .sj-graphs { grid-template-columns:1fr; } }
-        .sj-graph-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 16px; position:relative; }
-        .sj-graph-titre { font-size:0.85rem; font-weight:700; color:#F5F7FA; margin-bottom:10px; }
+        .sj-graphs { display:grid; grid-template-columns:1fr; gap:18px; margin-bottom:28px; }
+        .sj-graph-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; padding: 20px; position:relative; }
+        .sj-graph-titre { font-size:1rem; font-weight:700; color:#F5F7FA; margin-bottom:14px; }
         .sj-graph-svg { width:100%; height:auto; display:block; overflow:visible; }
         .sj-graph-legende { display:flex; gap:16px; margin-top:10px; flex-wrap:wrap; }
         .sj-graph-legende-item { display:flex; align-items:center; gap:6px; font-size:0.76rem; color:#8B98A5; }
@@ -188,8 +187,8 @@
                 return;
             }
 
-            const largeur = 640, hauteur = 260;
-            const marge = { haut: 14, bas: 26, gauche: 40, droite: 12 };
+            const largeur = 1100, hauteur = 380;
+            const marge = { haut: 16, bas: 30, gauche: 48, droite: 16 };
             const largeurUtile = largeur - marge.gauche - marge.droite;
             const hauteurUtile = hauteur - marge.haut - marge.bas;
 
@@ -215,7 +214,7 @@
                 const v = yMin + (k / nbPaliers) * (yMax - yMin);
                 const yy = y(v);
                 gridSvg += `<line x1="${marge.gauche}" y1="${yy.toFixed(1)}" x2="${largeur - marge.droite}" y2="${yy.toFixed(1)}" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>`;
-                gridSvg += `<text x="${(marge.gauche - 8).toFixed(1)}" y="${(yy + 3).toFixed(1)}" text-anchor="end" font-size="9" fill="#8B98A5">${Math.round(v)}</text>`;
+                gridSvg += `<text x="${(marge.gauche - 8).toFixed(1)}" y="${(yy + 3).toFixed(1)}" text-anchor="end" font-size="12" fill="#8B98A5">${Math.round(v)}</text>`;
             }
 
             // Ticks X : premiere/derniere semaine + un point intermediaire (evite le
@@ -223,7 +222,7 @@
             let ticksXSvg = '';
             const indexTicks = data.length === 1 ? [0] : (data.length === 2 ? [0, 1] : [0, Math.round((data.length - 1) / 2), data.length - 1]);
             indexTicks.forEach(function (i) {
-                ticksXSvg += `<text x="${x(i).toFixed(1)}" y="${hauteur - 6}" text-anchor="middle" font-size="9" fill="#8B98A5">S${data[i].semaine === null ? '—' : data[i].semaine}</text>`;
+                ticksXSvg += `<text x="${x(i).toFixed(1)}" y="${hauteur - 6}" text-anchor="middle" font-size="12" fill="#8B98A5">S${data[i].semaine === null ? '—' : data[i].semaine}</text>`;
             });
 
             const lignesSvg = SURFACES_GRAPH.map(function (s) {
