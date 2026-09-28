@@ -844,8 +844,9 @@ h1 {
     padding: 8px 0;
 }
 
-.planning-tournoi-lien {
-    color: inherit;
+.planning-tournoi-lien,
+.planning-tournoi-lien:visited {
+    color: #D4F000;
     text-decoration: underline;
     text-underline-offset: 2px;
 }
