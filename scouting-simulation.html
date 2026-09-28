@@ -103,7 +103,7 @@
                     <table class="sim-table">
                         <thead>
                             <tr>
-                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th>Compétence visée</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
+                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th>Compétence visée</th><th>Surplus vers</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
                                 <th class="num">Énergie</th><th class="num">XP total</th><th class="num">Érosion semaine</th>
                             </tr>
                         </thead>
@@ -227,7 +227,7 @@
                     detail.push({
                         semaine: s.semaine, xp: 0, xpCumule, energie,
                         xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
-                        erosionSemaine: erosionSemaine
+                        erosionSemaine: erosionSemaine, depassement24: 0, depassementBrut: 0
                     });
                     return;
                 }
@@ -301,8 +301,11 @@
                 //   24 : part de base = Math.floor(xp / nb de cibles), le reste (division
                 //   non exacte) distribue point par point aux premieres cibles pour ne
                 //   rien perdre inutilement a ce stade. Si la part d'une competence la
-                //   ferait depasser 24, elle est plafonnee et l'exces est compte dans
-                //   depassement24 (signale a l'utilisateur, colonne XP semaine).
+                //   ferait depasser 24 (elle etait deja tres proche), l'exces (depassementBrut)
+                //   va vers la competence choisie dans la colonne "Surplus vers" si le
+                //   coach en a designe une pour cette semaine-la, sinon il est perdu
+                //   (depassement24, signale a l'utilisateur).
+                let depassementBrut = 0;
                 if (xpSemaine > 0) {
                     if (c.competenceCible === 'completer_24') {
                         const cibles = COMPETENCES.filter(function (comp) { return competences[comp] < 24; });
@@ -312,9 +315,14 @@
                             cibles.forEach(function (comp, idx) {
                                 const part = partBase + (idx < reste ? 1 : 0);
                                 const nouvelleValeur = competences[comp] + part;
-                                if (nouvelleValeur > 24) depassement24 += nouvelleValeur - 24;
+                                if (nouvelleValeur > 24) depassementBrut += nouvelleValeur - 24;
                                 competences[comp] = Math.min(24, nouvelleValeur);
                             });
+                        }
+                        if (depassementBrut > 0 && c.surplusCible && COMPETENCES.indexOf(c.surplusCible) !== -1) {
+                            competences[c.surplusCible] = Math.min(100, competences[c.surplusCible] + depassementBrut);
+                        } else {
+                            depassement24 = depassementBrut;
                         }
                     } else if (c.competenceCible && COMPETENCES.indexOf(c.competenceCible) !== -1) {
                         competences[c.competenceCible] = Math.min(100, competences[c.competenceCible] + xpSemaine);
@@ -326,7 +334,7 @@
                 detail.push({
                     semaine: s.semaine, xp: xpSemaine, xpCumule, energie,
                     xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
-                    erosionSemaine: erosionSemaine, depassement24: depassement24
+                    erosionSemaine: erosionSemaine, depassement24: depassement24, depassementBrut: depassementBrut
                 });
             });
 
@@ -359,7 +367,7 @@
                 return `
                     <tr class="sim-row-passe">
                         <td>S${h.position === null ? '—' : h.position}</td>
-                        <td colspan="3">${h.actionLibelle}</td>
+                        <td colspan="4">${h.actionLibelle}</td>
                         <td class="num">${h.xp}</td>
                         <td class="num">${h.xpCumule}</td>
                         <td class="num">${h.energie}</td>
@@ -384,7 +392,7 @@
             } else if (choix[semaineSuivante.semaine] && choix[semaineSuivante.semaine].action === 'verrou') {
                 // Etait verrouillee par un ancien choix qu'on vient de changer -
                 // liberee, repart sur la valeur par defaut.
-                choix[semaineSuivante.semaine] = { action: 'generique', tourIndex: null, competenceCible: null };
+                choix[semaineSuivante.semaine] = { action: 'generique', tourIndex: null, competenceCible: null, surplusCible: null };
             }
         }
 
@@ -400,7 +408,7 @@
                     return `
                         <tr class="sim-row-verrou${classeMentalCut}">
                             <td>S${s.position}</td>
-                            <td colspan="3">Suite du tournoi (2e semaine, verrouillée)</td>
+                            <td colspan="4">Suite du tournoi (2e semaine, verrouillée)</td>
                             <td class="num">0</td>
                             <td class="num">${d.xpCumule}</td>
                             <td class="num">${d.energie}</td>
@@ -440,7 +448,15 @@
                                 }).join('')}
                             </select>
                         </td>
-                        <td class="num">${d.xp}${d.depassement24 ? ` <span title="${d.depassement24} point(s) perdu(s) : compétence(s) déjà à 24 ou trop proche">⚠️−${d.depassement24}</span>` : ''}</td>
+                        <td>
+                            <select class="sim-select sim-surplus-select" data-semaine="${s.semaine}" ${d.depassementBrut > 0 ? '' : 'disabled'}>
+                                <option value="">${d.depassementBrut > 0 ? 'Perdu' : '—'}</option>
+                                ${COMPETENCES.map(function (comp) {
+                                    return `<option value="${comp}" ${c.surplusCible === comp ? 'selected' : ''}>${COMPETENCES_LABELS[comp]}</option>`;
+                                }).join('')}
+                            </select>
+                        </td>
+                        <td class="num">${d.xp}${d.depassement24 ? ` <span title="${d.depassement24} point(s) perdu(s) : compétence(s) déjà à 24 ou trop proche, choisis une destination dans 'Surplus vers'">⚠️−${d.depassement24}</span>` : ''}</td>
                         <td class="num">${d.xpCumule}</td>
                         <td class="num">${d.energie}</td>
                         <td class="num">${d.xpTotal}</td>
@@ -463,7 +479,8 @@
                     const action = sel.value;
                     const semaineInfo = semainesData.find(function (x) { return x.semaine === s; });
                     const competenceCibleAvant = choix[s] ? choix[s].competenceCible : null;
-                    choix[s] = { action: action, tourIndex: action.indexOf('tournoi:') === 0 ? 0 : null, competenceCible: competenceCibleAvant || null };
+                    const surplusCibleAvant = choix[s] ? choix[s].surplusCible : null;
+                    choix[s] = { action: action, tourIndex: action.indexOf('tournoi:') === 0 ? 0 : null, competenceCible: competenceCibleAvant || null, surplusCible: surplusCibleAvant || null };
                     majVerrouSemaine2(semaineInfo);
                     rendreTableau();
                     rendreResume(simuler());
@@ -482,6 +499,14 @@
                 sel.addEventListener('change', function () {
                     const s = Number(sel.dataset.semaine);
                     choix[s].competenceCible = sel.value || null;
+                    rendreTableau();
+                    rendreResume(simuler());
+                });
+            });
+            document.querySelectorAll('.sim-surplus-select').forEach(function (sel) {
+                sel.addEventListener('change', function () {
+                    const s = Number(sel.dataset.semaine);
+                    choix[s].surplusCible = sel.value || null;
                     rendreTableau();
                     rendreResume(simuler());
                 });
@@ -541,8 +566,8 @@
             semainesData.forEach(function (s) {
                 const sauve = planSauvegarde[s.semaine];
                 choix[s.semaine] = sauve
-                    ? { action: sauve.action, tourIndex: sauve.tourIndex, competenceCible: sauve.competenceCible || null }
-                    : { action: 'generique', tourIndex: null, competenceCible: null };
+                    ? { action: sauve.action, tourIndex: sauve.tourIndex, competenceCible: sauve.competenceCible || null, surplusCible: sauve.surplusCible || null }
+                    : { action: 'generique', tourIndex: null, competenceCible: null, surplusCible: null };
             });
 
             rendreTableau();
@@ -575,7 +600,7 @@
         document.getElementById('sim-sauvegarder-btn').addEventListener('click', sauvegarderPlan);
 
         document.getElementById('sim-reset-btn').addEventListener('click', function () {
-            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null, competenceCible: null }; });
+            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null, competenceCible: null, surplusCible: null }; });
             rendreTableau();
         });
 
