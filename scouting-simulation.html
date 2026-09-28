@@ -80,7 +80,7 @@
                 </div>
 
                 <div class="sim-note">
-                    <strong>Simulation, pas une prédiction.</strong> Certaines valeurs sont calculées avec les vraies règles du jeu (XP par tour atteint, perte de mental courant par tour, érosion hebdomadaire des compétences, automatismes, formule de moulinette). D'autres sont <strong>forcément des hypothèses</strong>, car un match futur n'a pas encore de résultat réel : ~20 jeux et ~8 points importants par match joué (perte de forme et gain de mental max), aucun style de jeu simulé (taux par défaut), et par défaut l'XP gagnée répartie à parts égales sur les 8 compétences — choisis une compétence dans la colonne "Compétence visée" pour lui donner toute l'XP de cette semaine-là à la place. Part de ton état réel actuel, projette jusqu'à la fin de la saison en cours.
+                    <strong>Simulation, pas une prédiction.</strong> Certaines valeurs sont calculées avec les vraies règles du jeu (XP par tour atteint, perte de mental courant par tour, érosion hebdomadaire des compétences, automatismes, formule de moulinette). D'autres sont <strong>forcément des hypothèses</strong>, car un match futur n'a pas encore de résultat réel : ~20 jeux et ~8 points importants par match joué (perte de forme et gain de mental max), aucun style de jeu simulé (taux par défaut), et l'XP gagnée sans "Compétence visée" choisie est perdue (comme en jeu, elle ne se garde pas en réserve) — choisis une compétence précise pour lui donner toute l'XP de la semaine, ou "Compléter jusqu'à 24" pour la répartir sur celles qui n'ont pas encore atteint 24. Part de ton état réel actuel, projette jusqu'à la fin de la saison en cours.
                     <br><br>
                     Les lignes en <strong style="color:#D46A6A;">rouge</strong> (🔻) marquent les semaines où le mental max de tous les joueurs réels perd les 2/3 de son excès au-delà de 100 (à l'issue de Miami, Wimbledon et l'US Open — règle du jeu, déjà prise en compte dans la projection).
                     <br><br>
@@ -292,16 +292,27 @@
                     if (surf !== surfaceProtegee) automatismes[surf] = Math.max(0, automatismes[surf] - 5);
                 });
 
-                // Repartition de l'XP gagnee cette semaine : sur la competence choisie
-                // (colonne "Competence visee") si le coach en a selectionne une cette
-                // semaine-la, sinon a parts egales sur les 8 par defaut.
+                // Repartition de l'XP gagnee cette semaine, selon la colonne "Competence
+                // visee" :
+                // - une competence precise choisie -> toute l'XP va dessus ;
+                // - "Completer jusqu'a 24" -> repartie a parts egales UNIQUEMENT sur les
+                //   competences pas encore a 24, plafonnee a 24 chacune (rien si toutes y
+                //   sont deja) ;
+                // - "Choix pas encore fait" (par defaut) -> XP non distribuee, PERDUE,
+                //   comme la vraie regle du jeu (l'XP d'entrainement ne se garde pas en
+                //   reserve indefiniment) - xpCumule (XP totale gagnee) continue quand
+                //   meme d'augmenter, seul xpTotal (somme des competences) n'en profite pas.
                 if (xpSemaine > 0) {
-                    if (c.competenceCible && COMPETENCES.indexOf(c.competenceCible) !== -1) {
+                    if (c.competenceCible === 'completer_24') {
+                        const cibles = COMPETENCES.filter(function (comp) { return competences[comp] < 24; });
+                        if (cibles.length > 0) {
+                            const part = xpSemaine / cibles.length;
+                            cibles.forEach(function (comp) { competences[comp] = Math.min(24, competences[comp] + part); });
+                        }
+                    } else if (c.competenceCible && COMPETENCES.indexOf(c.competenceCible) !== -1) {
                         competences[c.competenceCible] = Math.min(100, competences[c.competenceCible] + xpSemaine);
-                    } else {
-                        const part = xpSemaine / 8;
-                        COMPETENCES.forEach(function (comp) { competences[comp] = Math.min(100, competences[comp] + part); });
                     }
+                    // sinon (pas de choix) : rien, l'XP de la semaine est perdue.
                 }
 
                 xpCumule += xpSemaine;
@@ -415,7 +426,8 @@
                         </td>
                         <td>
                             <select class="sim-select sim-competence-select" data-semaine="${s.semaine}">
-                                <option value="">Répartition égale (par défaut)</option>
+                                <option value="">Choix pas encore fait</option>
+                                <option value="completer_24" ${c.competenceCible === 'completer_24' ? 'selected' : ''}>Compléter jusqu'à 24</option>
                                 ${COMPETENCES.map(function (comp) {
                                     return `<option value="${comp}" ${c.competenceCible === comp ? 'selected' : ''}>${COMPETENCES_LABELS[comp]}</option>`;
                                 }).join('')}
