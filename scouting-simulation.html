@@ -78,7 +78,7 @@
                 </div>
 
                 <div class="sim-note">
-                    <strong>Simulation, pas une prédiction.</strong> Certaines valeurs sont calculées avec les vraies règles du jeu (XP par tour atteint, perte de mental courant par tour, érosion hebdomadaire des compétences, automatismes, formule de moulinette). D'autres sont <strong>forcément des hypothèses</strong>, car un match futur n'a pas encore de résultat réel : ~20 jeux et ~8 points importants par match joué (perte de forme et gain de mental max), aucun style de jeu simulé (taux par défaut), et l'XP gagnée répartie à parts égales sur les 8 compétences (en jeu, le choix t'appartient). Part de ton état réel actuel, projette jusqu'à la fin de la saison en cours.
+                    <strong>Simulation, pas une prédiction.</strong> Certaines valeurs sont calculées avec les vraies règles du jeu (XP par tour atteint, perte de mental courant par tour, érosion hebdomadaire des compétences, automatismes, formule de moulinette). D'autres sont <strong>forcément des hypothèses</strong>, car un match futur n'a pas encore de résultat réel : ~20 jeux et ~8 points importants par match joué (perte de forme et gain de mental max), aucun style de jeu simulé (taux par défaut), et par défaut l'XP gagnée répartie à parts égales sur les 8 compétences — choisis une compétence dans la colonne "Compétence visée" pour lui donner toute l'XP de cette semaine-là à la place. Part de ton état réel actuel, projette jusqu'à la fin de la saison en cours.
                     <br><br>
                     Les colonnes <strong>XP total</strong> et <strong>Érosion semaine</strong> du tableau utilisent une règle d'érosion différente de celle des barres "Compétences projetées" ci-dessous : 1 point perdu par tranche de 24 déjà acquise sur chaque compétence (plutôt que −4 % arrondi), pour rester cohérent avec le reste de l'outil Scouting.
                 </div>
@@ -97,7 +97,7 @@
                     <table class="sim-table">
                         <thead>
                             <tr>
-                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
+                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th>Compétence visée</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
                                 <th class="num">Énergie</th><th class="num">XP total</th><th class="num">Érosion semaine</th>
                             </tr>
                         </thead>
@@ -270,12 +270,16 @@
                     if (surf !== surfaceProtegee) automatismes[surf] = Math.max(0, automatismes[surf] - 5);
                 });
 
-                // Repartition de l'XP gagnee cette semaine a parts egales sur les 8
-                // competences (hypothese - la vraie repartition est un choix du coach,
-                // jamais simule ici).
+                // Repartition de l'XP gagnee cette semaine : sur la competence choisie
+                // (colonne "Competence visee") si le coach en a selectionne une cette
+                // semaine-la, sinon a parts egales sur les 8 par defaut.
                 if (xpSemaine > 0) {
-                    const part = xpSemaine / 8;
-                    COMPETENCES.forEach(function (comp) { competences[comp] = Math.min(100, competences[comp] + part); });
+                    if (c.competenceCible && COMPETENCES.indexOf(c.competenceCible) !== -1) {
+                        competences[c.competenceCible] = Math.min(100, competences[c.competenceCible] + xpSemaine);
+                    } else {
+                        const part = xpSemaine / 8;
+                        COMPETENCES.forEach(function (comp) { competences[comp] = Math.min(100, competences[comp] + part); });
+                    }
                 }
 
                 xpCumule += xpSemaine;
@@ -315,7 +319,7 @@
                 return `
                     <tr class="sim-row-passe">
                         <td>S${h.position === null ? '—' : h.position}</td>
-                        <td colspan="2">${h.actionLibelle}</td>
+                        <td colspan="3">${h.actionLibelle}</td>
                         <td class="num">${h.xp}</td>
                         <td class="num">${h.xpCumule}</td>
                         <td class="num">${h.energie}</td>
@@ -337,7 +341,7 @@
                     return `
                         <tr class="sim-row-verrou">
                             <td>S${s.position}</td>
-                            <td colspan="2">Suite du tournoi (2e semaine, verrouillée)</td>
+                            <td colspan="3">Suite du tournoi (2e semaine, verrouillée)</td>
                             <td class="num">0</td>
                             <td class="num">${d.xpCumule}</td>
                             <td class="num">${d.energie}</td>
@@ -368,6 +372,14 @@
                                 ${estTournoi ? optionsTour : '<option>—</option>'}
                             </select>
                         </td>
+                        <td>
+                            <select class="sim-select sim-competence-select" data-semaine="${s.semaine}">
+                                <option value="">Répartition égale (par défaut)</option>
+                                ${COMPETENCES.map(function (comp) {
+                                    return `<option value="${comp}" ${c.competenceCible === comp ? 'selected' : ''}>${COMPETENCES_LABELS[comp]}</option>`;
+                                }).join('')}
+                            </select>
+                        </td>
                         <td class="num">${d.xp}</td>
                         <td class="num">${d.xpCumule}</td>
                         <td class="num">${d.energie}</td>
@@ -390,7 +402,8 @@
                     const s = Number(sel.dataset.semaine);
                     const action = sel.value;
                     const semaineInfo = semainesData.find(function (x) { return x.semaine === s; });
-                    choix[s] = { action: action, tourIndex: action.indexOf('tournoi:') === 0 ? 0 : null };
+                    const competenceCibleAvant = choix[s] ? choix[s].competenceCible : null;
+                    choix[s] = { action: action, tourIndex: action.indexOf('tournoi:') === 0 ? 0 : null, competenceCible: competenceCibleAvant || null };
 
                     // Tournoi 2 semaines : verrouille automatiquement la semaine suivante.
                     const indexSemaine = semainesData.indexOf(semaineInfo);
@@ -403,7 +416,7 @@
                         } else if (choix[semaineSuivante.semaine] && choix[semaineSuivante.semaine].action === 'verrou') {
                             // Etait verrouillee par un ancien choix qu'on vient de changer -
                             // liberee, repart sur la valeur par defaut.
-                            choix[semaineSuivante.semaine] = { action: 'generique', tourIndex: null };
+                            choix[semaineSuivante.semaine] = { action: 'generique', tourIndex: null, competenceCible: null };
                         }
                     }
                     rendreTableau();
@@ -414,6 +427,14 @@
                 sel.addEventListener('change', function () {
                     const s = Number(sel.dataset.semaine);
                     choix[s].tourIndex = Number(sel.value);
+                    rendreTableau();
+                    rendreResume(simuler());
+                });
+            });
+            document.querySelectorAll('.sim-competence-select').forEach(function (sel) {
+                sel.addEventListener('change', function () {
+                    const s = Number(sel.dataset.semaine);
+                    choix[s].competenceCible = sel.value || null;
                     rendreTableau();
                     rendreResume(simuler());
                 });
@@ -463,13 +484,13 @@
             semainesData = data.semaines;
             historiquePasse = data.historiquePasse;
             xpCumuleSaisonInitial = data.xpCumuleSaison;
-            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null }; });
+            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null, competenceCible: null }; });
 
             rendreTableau();
         }
 
         document.getElementById('sim-reset-btn').addEventListener('click', function () {
-            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null }; });
+            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null, competenceCible: null }; });
             rendreTableau();
         });
 
