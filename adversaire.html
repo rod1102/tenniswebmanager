@@ -44,17 +44,17 @@
             </div>
 
             <div class="tabs-nav" id="tabs-nav">
-                <button class="tab-btn active" data-tab="infos">Infos</button>
+                <button class="tab-btn" data-tab="infos">Infos</button>
                 <button class="tab-btn" data-tab="palmares">Palmarès</button>
-                <button class="tab-btn" data-tab="matchs">Derniers matchs</button>
+                <button class="tab-btn active" data-tab="matchs">Derniers matchs</button>
                 <button class="tab-btn" data-tab="stats">Statistiques</button>
                 <button class="tab-btn" data-tab="faceaface">Face-à-face</button>
                 <button class="tab-btn" data-tab="badges">Badges</button>
             </div>
 
-            <div class="tab-panel" id="tab-infos"></div>
+            <div class="tab-panel" id="tab-infos" style="display:none;"></div>
             <div class="tab-panel" id="tab-palmares" style="display:none;"></div>
-            <div class="tab-panel" id="tab-matchs" style="display:none;"></div>
+            <div class="tab-panel" id="tab-matchs"></div>
             <div class="tab-panel" id="tab-stats" style="display:none;"></div>
             <div class="tab-panel" id="tab-faceaface" style="display:none;"></div>
             <div class="tab-panel" id="tab-badges" style="display:none;"></div>
@@ -177,8 +177,9 @@
 
         // Permet a un lien externe (ex. "Historique de mes matchs" sur joueur.html)
         // d'arriver directement sur un onglet precis plutot que toujours "Infos" par
-        // defaut (demande utilisateur, 2026-08-21).
-        if (ongletInitial) activerOnglet(ongletInitial);
+        // defaut (demande utilisateur, 2026-08-21). Sans parametre, la fiche s'ouvre
+        // desormais sur "Derniers matchs" (demande utilisateur, 2026-09-30).
+        activerOnglet(ongletInitial || 'matchs');
 
         function ligneClassement(info) {
             const classementTxt = info.classement ? info.classement : 'Non classé';
