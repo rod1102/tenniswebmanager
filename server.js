@@ -1133,6 +1133,80 @@ function resoudreSemaineDepuisRequete(req, semaineActuelle) {
     return req.query.semaine ? Number(req.query.semaine) : semaineActuelle;
 }
 
+// Statistiques de balles de break sur tous les matchs de tournoi reellement joues,
+// recomptees a partir du deroule enregistre (tournoi_matchs.evenements) - aucune
+// ecriture. Tie-breaks exclus du compte des jeux (pas de balle de break possible).
+// Demande utilisateur 2026-10-01 : comparer le reel au calcul theorique (~60% des
+// jeux avec au moins une balle de break a niveau egal, pas d'avantage au service).
+app.get('/api/admin/stats-balles-break', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        function compteurVide() {
+            return { matchs: 0, jeux: 0, jeuxAvecBalleBreak: 0, jeuxBreakes: 0, ballesBreak: 0, ballesBreakSauvees: 0, ballesBreakConverties: 0, repartitionParJeu: {} };
+        }
+        const total = compteurVide();
+        const avecReel = compteurVide();
+
+        const lignes = db.prepare(`
+            SELECT tournoi_matchs.evenements,
+                   COALESCE(j1.est_reel, 0) AS reel1, COALESCE(j2.est_reel, 0) AS reel2
+            FROM tournoi_matchs
+            LEFT JOIN tournoi_joueurs j1 ON j1.id = tournoi_matchs.joueur1_id
+            LEFT JOIN tournoi_joueurs j2 ON j2.id = tournoi_matchs.joueur2_id
+            WHERE tournoi_matchs.evenements IS NOT NULL
+        `).all();
+
+        lignes.forEach(function (l) {
+            let evenements;
+            try { evenements = JSON.parse(l.evenements); } catch (e) { return; }
+            if (!Array.isArray(evenements) || evenements.length === 0) return;
+            const cibles = (l.reel1 || l.reel2) ? [total, avecReel] : [total];
+            cibles.forEach(function (c) { c.matchs++; });
+
+            let bbDansJeu = 0;
+            evenements.forEach(function (ev) {
+                const texte = ev.texte || '';
+                if (ev.type === 'point_important') {
+                    if (texte.indexOf('Balle de break') === 0) {
+                        bbDansJeu++;
+                        cibles.forEach(function (c) { c.ballesBreak++; });
+                    } else if (texte.indexOf('Break sauve par') === 0) {
+                        cibles.forEach(function (c) { c.ballesBreakSauvees++; });
+                    } else if (texte.indexOf('Break ') === 0) {
+                        cibles.forEach(function (c) { c.ballesBreakConverties++; c.jeuxBreakes++; });
+                    }
+                } else if (ev.type === 'jeu') {
+                    cibles.forEach(function (c) {
+                        c.jeux++;
+                        if (bbDansJeu > 0) c.jeuxAvecBalleBreak++;
+                        c.repartitionParJeu[bbDansJeu] = (c.repartitionParJeu[bbDansJeu] || 0) + 1;
+                    });
+                    bbDansJeu = 0;
+                } else if (ev.type === 'tie_break_debut' || ev.type === 'set_debut') {
+                    bbDansJeu = 0;
+                }
+            });
+        });
+
+        function resumer(c) {
+            const pct = function (a, b) { return b > 0 ? Math.round(a / b * 1000) / 10 : null; };
+            return Object.assign({}, c, {
+                pctJeuxAvecBalleBreak: pct(c.jeuxAvecBalleBreak, c.jeux),
+                pctJeuxBreakes: pct(c.jeuxBreakes, c.jeux),
+                pctConversion: pct(c.ballesBreakConverties, c.ballesBreak),
+                ballesBreakParJeu: c.jeux > 0 ? Math.round(c.ballesBreak / c.jeux * 100) / 100 : null,
+                ballesBreakParMatch: c.matchs > 0 ? Math.round(c.ballesBreak / c.matchs * 10) / 10 : null
+            });
+        }
+        res.json({ success: true, tousLesMatchs: resumer(total), matchsAvecJoueurReel: resumer(avecReel) });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.get('/api/admin/stats-actions-semaine', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
