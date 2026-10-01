@@ -1135,7 +1135,9 @@ function resoudreSemaineDepuisRequete(req, semaineActuelle) {
 
 // Statistiques de balles de break sur tous les matchs de tournoi reellement joues,
 // recomptees a partir du deroule enregistre (tournoi_matchs.evenements) - aucune
-// ecriture. Tie-breaks exclus du compte des jeux (pas de balle de break possible).
+// ecriture. Un match avec un joueur reel garde son deroule dans matchs (via
+// match_id - une seule des 2 perspectives d'un reel-vs-reel, pour ne pas le compter
+// 2 fois), un match 100% bots directement dans tournoi_matchs. Tie-breaks exclus du compte des jeux (pas de balle de break possible).
 // Demande utilisateur 2026-10-01 : comparer le reel au calcul theorique (~60% des
 // jeux avec au moins une balle de break a niveau egal, pas d'avantage au service).
 app.get('/api/admin/stats-balles-break', (req, res) => {
@@ -1150,12 +1152,13 @@ app.get('/api/admin/stats-balles-break', (req, res) => {
         const avecReel = compteurVide();
 
         const lignes = db.prepare(`
-            SELECT tournoi_matchs.evenements,
+            SELECT COALESCE(tournoi_matchs.evenements, m.evenements) AS evenements,
                    COALESCE(j1.est_reel, 0) AS reel1, COALESCE(j2.est_reel, 0) AS reel2
             FROM tournoi_matchs
             LEFT JOIN tournoi_joueurs j1 ON j1.id = tournoi_matchs.joueur1_id
             LEFT JOIN tournoi_joueurs j2 ON j2.id = tournoi_matchs.joueur2_id
-            WHERE tournoi_matchs.evenements IS NOT NULL
+            LEFT JOIN matchs m ON m.id = tournoi_matchs.match_id
+            WHERE COALESCE(tournoi_matchs.evenements, m.evenements) IS NOT NULL
         `).all();
 
         lignes.forEach(function (l) {
