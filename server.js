@@ -1216,7 +1216,8 @@ app.get('/api/admin/stats-balles-break', (req, res) => {
 // incluses), niveau_adversaire = niveau normal de l'adversaire. Ni les styles de
 // jeu (appliques set par set) ni le malus de condition physique (jeu par jeu) n'y
 // sont : ce sont les niveaux de depart du match. Le niveau "points importants"
-// d'un bot vaut toujours niveau + 100 ; celui d'un reel n'est pas enregistre.
+// d'un bot vaut niveau + BONUS_POINTS_IMPORTANTS_BOT (+100 pour les matchs joues
+// avant le 2026-10-01, cf. la constante) ; celui d'un reel n'est pas enregistre.
 // Demande utilisateur 2026-10-01.
 app.get('/api/admin/niveaux-confrontation/:playerId/:adversaire', (req, res) => {
     try {
@@ -1228,7 +1229,7 @@ app.get('/api/admin/niveaux-confrontation/:playerId/:adversaire', (req, res) => 
         const recherche = '%' + req.params.adversaire.toLowerCase() + '%';
 
         const matchs = db.prepare(`
-            SELECT matchs.id, matchs.semaine, matchs.surface, matchs.numero_tour, matchs.score, matchs.vainqueur,
+            SELECT matchs.id, matchs.semaine, matchs.surface, matchs.numero_tour, matchs.score, matchs.vainqueur, matchs.date_creation,
                    matchs.niveau_joueur, matchs.niveau_adversaire, tournois.nom AS tournoi,
                    CASE WHEN tj1.player_id = matchs.player_id THEN tj2.nom ELSE tj1.nom END AS adversaire_nom,
                    CASE WHEN tj1.player_id = matchs.player_id THEN tj2.est_reel ELSE tj1.est_reel END AS adversaire_reel
@@ -1245,7 +1246,7 @@ app.get('/api/admin/niveaux-confrontation/:playerId/:adversaire', (req, res) => 
             return Object.assign({}, m, {
                 saison: phaseAffichee(m.semaine).numeroSaison,
                 semaine_saison: positionSemaineAffichee(m.semaine),
-                niveau_points_importants_adversaire: m.adversaire_reel ? null : m.niveau_adversaire + 100
+                niveau_points_importants_adversaire: m.adversaire_reel ? null : m.niveau_adversaire + (m.date_creation < '2026-10-01 21:30:00' ? 100 : BONUS_POINTS_IMPORTANTS_BOT)
             });
         });
 
@@ -2408,7 +2409,7 @@ app.get('/api/admin/tournoi-niveaux/:calendrierId/:semaine', (req, res) => {
 // en poules (Masters de fin de saison) ne sont pas geres ici.
 function resoudreMatchDryRun(tournoi, j1, j2, label, tourIndex, meilleurDe5, estIndoor, premiersToursMax, getSnapshotReel) {
     if (!j1.est_reel && !j2.est_reel) {
-        const r = simulerMatch(j1.niveau, j1.niveau + 100, j2.niveau, j2.niveau + 100, null, undefined, null, undefined, 0, 0, meilleurDe5);
+        const r = simulerMatch(j1.niveau, j1.niveau + BONUS_POINTS_IMPORTANTS_BOT, j2.niveau, j2.niveau + BONUS_POINTS_IMPORTANTS_BOT, null, undefined, null, undefined, 0, 0, meilleurDe5);
         return r.vainqueur === 'A' ? j1 : j2;
     }
 
@@ -2422,7 +2423,7 @@ function resoudreMatchDryRun(tournoi, j1, j2, label, tourIndex, meilleurDe5, est
         const niveauNormalAvec = niveauNormalBrut + bonus.fixe;
         const niveauMental = niveauNormalAvec - snap.forme + snap.mental_courant;
         const style = styleDuTourCourant(tournoi.id, snap, reel);
-        const r = simulerMatch(niveauNormalAvec, niveauMental, bot.niveau, bot.niveau + 100, style, snap.mental_courant, null, undefined, bonus.sangFroid, 0, meilleurDe5,
+        const r = simulerMatch(niveauNormalAvec, niveauMental, bot.niveau, bot.niveau + BONUS_POINTS_IMPORTANTS_BOT, style, snap.mental_courant, null, undefined, bonus.sangFroid, 0, meilleurDe5,
             { forme: snap.forme, pointsEnergie: snap.points_energie, condition: snap.condition, type: snap.type });
         const taux = style === 'prudence' ? 0.08 : (style === 'en_avant' ? 0.12 : 0.10);
         snap.forme = Math.max(0, snap.forme - r.totalJeux * taux);
@@ -5011,6 +5012,13 @@ function niveauNormal(player, surface, bonusEnergieMisee) {
     return total;
 }
 
+// Niveau "points importants" d'un bot (rival/lambda, en tournoi comme en Coupe
+// Davis/BJK Cup) = son niveau normal + ce bonus fixe (un bot n'a ni forme ni mental
+// suivis). Etait +100 jusqu'au 2026-10-01, ramene a +40 sur demande explicite de
+// l'utilisateur : un joueur reel n'y gagne que (mental courant - forme), ~0 en
+// debut de saison, ce qui donnait aux bots un net avantage sur les points decisifs.
+const BONUS_POINTS_IMPORTANTS_BOT = 40;
+
 function probabiliteVictoireA(diff) {
     const d = Math.abs(diff);
     let p;
@@ -6681,7 +6689,7 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
     // pas comptee sur ces points), il ne s'y ajoute pas.
     const niveauReel_mental = niveauReel_normal_avecDispositions - player.forme + player.mental_courant;
     const niveauLambda_normal = lambda.niveau;
-    const niveauLambda_mental = niveauLambda_normal + 100;
+    const niveauLambda_mental = niveauLambda_normal + BONUS_POINTS_IMPORTANTS_BOT;
 
     const styleA = styleDuTourCourant(tournoi.id, player, reel);
 
@@ -6852,7 +6860,7 @@ function resoudreMatchAdversaire(tournoi, label, j1, j2, tourIndex) {
     // sets gagnants, produisant des scores en 2 manches impossibles pour un GC
     // (bug signale par l'utilisateur, 2026-08-20).
     const meilleurDe5 = tournoi.circuit === 'ATP' && tournoi.categorie === 'slam';
-    const resultat = simulerMatch(j1.niveau, j1.niveau + 100, j2.niveau, j2.niveau + 100, null, undefined, null, undefined, 0, 0, meilleurDe5, undefined, undefined, label === 'Finale' ? tournoi.nom : null);
+    const resultat = simulerMatch(j1.niveau, j1.niveau + BONUS_POINTS_IMPORTANTS_BOT, j2.niveau, j2.niveau + BONUS_POINTS_IMPORTANTS_BOT, null, undefined, null, undefined, 0, 0, meilleurDe5, undefined, undefined, label === 'Finale' ? tournoi.nom : null);
     // Le moteur etiquette toujours les 2 cotes "Toi"/"Adversaire" (perspective d'un
     // coach) - sans le moindre sens pour un match 100% bots, remplace par les vrais
     // noms des deux entrants avant stockage.
@@ -12387,7 +12395,7 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
         // Niveau du rival recale sur la moyenne des joueurs reels SELECTIONNES DANS
         // CETTE RENCONTRE (bande 60-85 %) - cf. niveauBotUnique/moyenneNiveauReelsCoupe.
         const niv = niveauBotUnique(tie, surface);
-        return { normal: niv, mental: niv + 100, mentalCourant: 100, joueur: null };
+        return { normal: niv, mental: niv + BONUS_POINTS_IMPORTANTS_BOT, mentalCourant: 100, joueur: null };
     }
 
     const vDomicile = valeurs(domicileEntree);
@@ -12684,7 +12692,7 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
             return Object.assign({ joueur: player, style: null }, ajusterNiveauxStyle(normal, mental, null, player.mental_courant, 1));
         }
         const niv = niveauBotUnique(tie, surface);
-        return { normal: niv, mental: niv + 100 };
+        return { normal: niv, mental: niv + BONUS_POINTS_IMPORTANTS_BOT };
     }
 
     const d1 = valeurJoueur(!!compoDomicile.double_j1_est_reel, compoDomicile.double_j1_id);

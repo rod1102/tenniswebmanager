@@ -62,6 +62,7 @@ Jeu de gestion de tennis en navigateur, inspiré des règles du jeu "Tennis Web 
 
 - Fonction partagée `simulerMatch` (server.js) : simulation jeu par jeu, set par set (best of 3), tie-break **point par point** à 6-6 (pas un tirage unique). Utilisée par la simulation de tournoi (`simulerUnTour`/`simulerUnTourPoules`)
 - Loi de probabilité du PDF : 50%/54%/56.5%/59% aux écarts de niveau 0/25/50/100, puis +2.5% par palier de 100 au-delà
+- **Niveau « points importants » d'un bot** (rival/lambda, tournoi et Coupe Davis/BJK Cup) = niveau normal + `BONUS_POINTS_IMPORTANTS_BOT` (server.js) : **+40** depuis le 2026-10-01 (demande explicite de l'utilisateur), +100 avant — un joueur réel n'y gagne que (mental courant − forme), ~0 en début de saison
 - Points importants (balle de break/set/match, points décisifs du tie-break) : double tirage — technique puis mental si nécessaire ; égalité entre les deux = on rejoue le point
 - **Matchs amicaux retirés du jeu** (2026-07-24, demande explicite de l'utilisateur) : la route `/api/match-amical`, le bloc "Match amical" de `joueur.html` (sélecteurs surface/difficulté + bouton "Lancer le match") ont été supprimés. Le seul match amical jamais joué (Youssouf, player_id=19) a eu ses effets annulés manuellement (retour aux valeurs de création) et son enregistrement supprimé de la table `matchs`. `matchs.html`/`/api/matchs/:userId` restent inchangés (partagés avec les matchs de tournoi, qui continuent d'utiliser la table `matchs`)
 
