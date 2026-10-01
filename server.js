@@ -1210,6 +1210,52 @@ app.get('/api/admin/stats-balles-break', (req, res) => {
     }
 });
 
+// Niveaux de jeu enregistres lors des derniers matchs d'un joueur reel contre un
+// adversaire donne (recherche par nom, partielle, insensible a la casse) - lecture
+// seule. niveau_joueur = niveau normal du reel (dispositions + mise d'energie
+// incluses), niveau_adversaire = niveau normal de l'adversaire. Ni les styles de
+// jeu (appliques set par set) ni le malus de condition physique (jeu par jeu) n'y
+// sont : ce sont les niveaux de depart du match. Le niveau "points importants"
+// d'un bot vaut toujours niveau + 100 ; celui d'un reel n'est pas enregistre.
+// Demande utilisateur 2026-10-01.
+app.get('/api/admin/niveaux-confrontation/:playerId/:adversaire', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const player = db.prepare('SELECT id, prenom, nom FROM players WHERE id = ?').get(Number(req.params.playerId));
+        if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
+        const recherche = '%' + req.params.adversaire.toLowerCase() + '%';
+
+        const matchs = db.prepare(`
+            SELECT matchs.id, matchs.semaine, matchs.surface, matchs.numero_tour, matchs.score, matchs.vainqueur,
+                   matchs.niveau_joueur, matchs.niveau_adversaire, tournois.nom AS tournoi,
+                   CASE WHEN tj1.player_id = matchs.player_id THEN tj2.nom ELSE tj1.nom END AS adversaire_nom,
+                   CASE WHEN tj1.player_id = matchs.player_id THEN tj2.est_reel ELSE tj1.est_reel END AS adversaire_reel
+            FROM matchs
+            JOIN tournois ON tournois.id = matchs.tournoi_id
+            JOIN tournoi_matchs AS tm ON tm.match_id = matchs.id OR tm.match_id_j2 = matchs.id
+            LEFT JOIN tournoi_joueurs AS tj1 ON tj1.id = tm.joueur1_id
+            LEFT JOIN tournoi_joueurs AS tj2 ON tj2.id = tm.joueur2_id
+            WHERE matchs.player_id = ?
+              AND LOWER(CASE WHEN tj1.player_id = matchs.player_id THEN tj2.nom ELSE tj1.nom END) LIKE ?
+            ORDER BY matchs.id DESC
+            LIMIT 10
+        `).all(player.id, recherche).map(function (m) {
+            return Object.assign({}, m, {
+                saison: phaseAffichee(m.semaine).numeroSaison,
+                semaine_saison: positionSemaineAffichee(m.semaine),
+                niveau_points_importants_adversaire: m.adversaire_reel ? null : m.niveau_adversaire + 100
+            });
+        });
+
+        res.json({ success: true, joueur: player.prenom + ' ' + player.nom, matchs });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 app.get('/api/admin/stats-actions-semaine', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
