@@ -679,6 +679,10 @@ const migrations = [
     "ALTER TABLE coupe_rubbers ADD COLUMN domicile_id2 INTEGER",
     "ALTER TABLE coupe_rubbers ADD COLUMN exterieur_id2 INTEGER",
     "ALTER TABLE matchs ADD COLUMN coupe_equipe_id INTEGER",
+    // Niveau "points importants" (niveau normal - forme + mental courant pour un reel,
+    // + bonus fixe pour un bot) au depart du match, des deux cotes - 2026-10-01.
+    "ALTER TABLE matchs ADD COLUMN niveau_mental_joueur INTEGER",
+    "ALTER TABLE matchs ADD COLUMN niveau_mental_adversaire INTEGER",
     "ALTER TABLE coupe_equipes ADD COLUMN rubber_actuel INTEGER DEFAULT 0",
     "ALTER TABLE coupe_equipes ADD COLUMN division INTEGER DEFAULT 1",
     "ALTER TABLE players ADD COLUMN points_competences_a_repartir INTEGER DEFAULT 0",

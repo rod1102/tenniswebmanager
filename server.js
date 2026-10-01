@@ -1230,7 +1230,7 @@ app.get('/api/admin/niveaux-confrontation/:playerId/:adversaire', (req, res) => 
 
         const matchs = db.prepare(`
             SELECT matchs.id, matchs.semaine, matchs.surface, matchs.numero_tour, matchs.score, matchs.vainqueur, matchs.date_creation,
-                   matchs.niveau_joueur, matchs.niveau_adversaire, tournois.nom AS tournoi,
+                   matchs.niveau_joueur, matchs.niveau_adversaire, matchs.niveau_mental_joueur, matchs.niveau_mental_adversaire, tournois.nom AS tournoi,
                    CASE WHEN tj1.player_id = matchs.player_id THEN tj2.nom ELSE tj1.nom END AS adversaire_nom,
                    CASE WHEN tj1.player_id = matchs.player_id THEN tj2.est_reel ELSE tj1.est_reel END AS adversaire_reel
             FROM matchs
@@ -1246,7 +1246,11 @@ app.get('/api/admin/niveaux-confrontation/:playerId/:adversaire', (req, res) => 
             return Object.assign({}, m, {
                 saison: phaseAffichee(m.semaine).numeroSaison,
                 semaine_saison: positionSemaineAffichee(m.semaine),
-                niveau_points_importants_adversaire: m.adversaire_reel ? null : m.niveau_adversaire + (m.date_creation < '2026-10-01 21:30:00' ? 100 : BONUS_POINTS_IMPORTANTS_BOT)
+                // Enregistres directement depuis le 2026-10-01 ; avant, seul celui d'un
+                // bot se deduit (bonus fixe de l'epoque), celui d'un reel est inconnu.
+                niveau_points_importants_joueur: m.niveau_mental_joueur,
+                niveau_points_importants_adversaire: m.niveau_mental_adversaire !== null ? m.niveau_mental_adversaire
+                    : (m.adversaire_reel ? null : m.niveau_adversaire + (m.date_creation < '2026-10-01 21:30:00' ? 100 : BONUS_POINTS_IMPORTANTS_BOT))
             });
         });
 
@@ -6712,15 +6716,16 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
     const vainqueurEstReel = resultat.vainqueur === 'A';
 
     const insertion = db.prepare(`
-        INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour, kine_intervenu, balles_break_sauvees)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour, kine_intervenu, balles_break_sauvees, niveau_mental_joueur, niveau_mental_adversaire)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         player.user_id, player.id, tournoi.surface, 'tournoi', tournoi.semaine,
         vainqueurEstReel ? 'joueur' : 'adversaire',
         resultat.score,
         Math.round(niveauReel_normal_avecDispositions), Math.round(niveauLambda_normal),
         JSON.stringify(resultat.evenements),
-        tournoi.id, label, kineIntervenu ? 1 : 0, resultat.ballesBreakSauveesA
+        tournoi.id, label, kineIntervenu ? 1 : 0, resultat.ballesBreakSauveesA,
+        Math.round(niveauReel_mental), Math.round(niveauLambda_mental)
     );
 
     return { vainqueur: vainqueurEstReel ? reel : lambda, score: resultat.score, matchId: insertion.lastInsertRowid, matchIdJ2: null };
@@ -6822,23 +6827,25 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
     const j1Gagne = resultat.vainqueur === 'A';
 
     const matchId1 = db.prepare(`
-        INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour, kine_intervenu, balles_break_sauvees)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour, kine_intervenu, balles_break_sauvees, niveau_mental_joueur, niveau_mental_adversaire)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         player1.user_id, player1.id, tournoi.surface, 'tournoi', tournoi.semaine,
         j1Gagne ? 'joueur' : 'adversaire', resultat.score,
         Math.round(niveau1_normal), Math.round(niveau2_normal),
-        JSON.stringify(resultat.evenements), tournoi.id, label, etat1.kineIntervenu ? 1 : 0, resultat.ballesBreakSauveesA
+        JSON.stringify(resultat.evenements), tournoi.id, label, etat1.kineIntervenu ? 1 : 0, resultat.ballesBreakSauveesA,
+        Math.round(niveau1_mental), Math.round(niveau2_mental)
     ).lastInsertRowid;
 
     const matchId2 = db.prepare(`
-        INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour, kine_intervenu, balles_break_sauvees)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, tournoi_id, numero_tour, kine_intervenu, balles_break_sauvees, niveau_mental_joueur, niveau_mental_adversaire)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
         player2.user_id, player2.id, tournoi.surface, 'tournoi', tournoi.semaine,
         j1Gagne ? 'adversaire' : 'joueur', miroirScore(resultat.score),
         Math.round(niveau2_normal), Math.round(niveau1_normal),
-        JSON.stringify(miroirEvenements(resultat.evenements)), tournoi.id, label, etat2.kineIntervenu ? 1 : 0, resultat.ballesBreakSauveesB
+        JSON.stringify(miroirEvenements(resultat.evenements)), tournoi.id, label, etat2.kineIntervenu ? 1 : 0, resultat.ballesBreakSauveesB,
+        Math.round(niveau2_mental), Math.round(niveau1_mental)
     ).lastInsertRowid;
 
     return { vainqueur: j1Gagne ? j1 : j2, score: resultat.score, matchId: matchId1, matchIdJ2: matchId2 };
@@ -12455,24 +12462,26 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
     let matchIdDomicile = null, matchIdExterieur = null;
     if (vDomicile.joueur) {
         matchIdDomicile = db.prepare(`
-            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id, kine_intervenu)
-            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id, kine_intervenu, niveau_mental_joueur, niveau_mental_adversaire)
+            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             vDomicile.joueur.user_id, vDomicile.joueur.id, surface, tie.semaine,
             resultat.vainqueur === 'A' ? 'joueur' : 'adversaire', resultat.score,
             Math.round(domicileNormal), Math.round(exterieurNormal),
-            JSON.stringify(resultat.evenements || []), libelleRubber, resultat.ballesBreakSauveesA || 0, tie.id, kineDomicile ? 1 : 0
+            JSON.stringify(resultat.evenements || []), libelleRubber, resultat.ballesBreakSauveesA || 0, tie.id, kineDomicile ? 1 : 0,
+            Math.round(domicileMental), Math.round(exterieurMental)
         ).lastInsertRowid;
     }
     if (vExterieur.joueur) {
         matchIdExterieur = db.prepare(`
-            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id, kine_intervenu)
-            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id, kine_intervenu, niveau_mental_joueur, niveau_mental_adversaire)
+            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
             vExterieur.joueur.user_id, vExterieur.joueur.id, surface, tie.semaine,
             resultat.vainqueur === 'B' ? 'joueur' : 'adversaire', miroirScore(resultat.score),
             Math.round(exterieurNormal), Math.round(domicileNormal),
-            JSON.stringify(miroirEvenements(resultat.evenements || [])), libelleRubber, resultat.ballesBreakSauveesB || 0, tie.id, kineExterieur ? 1 : 0
+            JSON.stringify(miroirEvenements(resultat.evenements || [])), libelleRubber, resultat.ballesBreakSauveesB || 0, tie.id, kineExterieur ? 1 : 0,
+            Math.round(exterieurMental), Math.round(domicileMental)
         ).lastInsertRowid;
     }
 
@@ -12725,30 +12734,32 @@ function simulerRubberDouble(tie, compoDomicile, compoExterieur) {
             appliquerEtatPostMatch(j.joueur, surface, j.style, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, pair[1], true);
         });
 
-    function ecrireMatch(estReel, id, userId, monNiveau, adversaireNiveau, jaiGagne, score, evenements) {
+    function ecrireMatch(estReel, id, userId, monNiveau, adversaireNiveau, jaiGagne, score, evenements, estDomicile) {
         if (!estReel) return null;
+        const monMental = estDomicile ? niveauEquipeDomicileMental : niveauEquipeExterieurMental;
+        const adversaireMental = estDomicile ? niveauEquipeExterieurMental : niveauEquipeDomicileMental;
         return db.prepare(`
-            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id)
-            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, 'Coupe - Double', ?, ?)
-        `).run(userId, id, surface, tie.semaine, jaiGagne ? 'joueur' : 'adversaire', score, Math.round(monNiveau), Math.round(adversaireNiveau), JSON.stringify(evenements), jaiGagne ? resultat.ballesBreakSauveesA || 0 : resultat.ballesBreakSauveesB || 0, tie.id).lastInsertRowid;
+            INSERT INTO matchs (user_id, player_id, surface, difficulte, semaine, vainqueur, score, niveau_joueur, niveau_adversaire, evenements, numero_tour, balles_break_sauvees, coupe_equipe_id, niveau_mental_joueur, niveau_mental_adversaire)
+            VALUES (?, ?, ?, 'coupe', ?, ?, ?, ?, ?, ?, 'Coupe - Double', ?, ?, ?, ?)
+        `).run(userId, id, surface, tie.semaine, jaiGagne ? 'joueur' : 'adversaire', score, Math.round(monNiveau), Math.round(adversaireNiveau), JSON.stringify(evenements), jaiGagne ? resultat.ballesBreakSauveesA || 0 : resultat.ballesBreakSauveesB || 0, tie.id, Math.round(monMental), Math.round(adversaireMental)).lastInsertRowid;
     }
 
     let matchIdDomicileJ1 = null, matchIdDomicileJ2 = null, matchIdExterieurJ1 = null, matchIdExterieurJ2 = null;
     if (compoDomicile.double_j1_est_reel) {
         const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(compoDomicile.double_j1_id);
-        matchIdDomicileJ1 = ecrireMatch(true, compoDomicile.double_j1_id, player.user_id, niveauEquipeDomicileNormal, niveauEquipeExterieurNormal, domicileGagne, resultat.score, resultat.evenements);
+        matchIdDomicileJ1 = ecrireMatch(true, compoDomicile.double_j1_id, player.user_id, niveauEquipeDomicileNormal, niveauEquipeExterieurNormal, domicileGagne, resultat.score, resultat.evenements, true);
     }
     if (compoDomicile.double_j2_est_reel) {
         const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(compoDomicile.double_j2_id);
-        matchIdDomicileJ2 = ecrireMatch(true, compoDomicile.double_j2_id, player.user_id, niveauEquipeDomicileNormal, niveauEquipeExterieurNormal, domicileGagne, resultat.score, resultat.evenements);
+        matchIdDomicileJ2 = ecrireMatch(true, compoDomicile.double_j2_id, player.user_id, niveauEquipeDomicileNormal, niveauEquipeExterieurNormal, domicileGagne, resultat.score, resultat.evenements, true);
     }
     if (compoExterieur.double_j1_est_reel) {
         const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(compoExterieur.double_j1_id);
-        matchIdExterieurJ1 = ecrireMatch(true, compoExterieur.double_j1_id, player.user_id, niveauEquipeExterieurNormal, niveauEquipeDomicileNormal, !domicileGagne, miroirScore(resultat.score), miroirEvenements(resultat.evenements));
+        matchIdExterieurJ1 = ecrireMatch(true, compoExterieur.double_j1_id, player.user_id, niveauEquipeExterieurNormal, niveauEquipeDomicileNormal, !domicileGagne, miroirScore(resultat.score), miroirEvenements(resultat.evenements), false);
     }
     if (compoExterieur.double_j2_est_reel) {
         const player = db.prepare('SELECT user_id FROM players WHERE id = ?').get(compoExterieur.double_j2_id);
-        matchIdExterieurJ2 = ecrireMatch(true, compoExterieur.double_j2_id, player.user_id, niveauEquipeExterieurNormal, niveauEquipeDomicileNormal, !domicileGagne, miroirScore(resultat.score), miroirEvenements(resultat.evenements));
+        matchIdExterieurJ2 = ecrireMatch(true, compoExterieur.double_j2_id, player.user_id, niveauEquipeExterieurNormal, niveauEquipeDomicileNormal, !domicileGagne, miroirScore(resultat.score), miroirEvenements(resultat.evenements), false);
     }
 
     // domicile_id/domicile_id2 et exterieur_id/exterieur_id2 identifient TOUJOURS les
