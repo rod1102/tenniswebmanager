@@ -2809,3 +2809,54 @@ table.points td.pts {
     color: #F5F7FA;
     border-color: rgba(255, 255, 255, 0.4);
 }
+
+/* Records (statistiques.html) : bouton "Voir +", ex aequo, surlignage de ses joueurs */
+.record-entete {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 10px;
+}
+
+.record-voir-plus {
+    flex-shrink: 0;
+    background: none;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #9AA5B1;
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.record-voir-plus:hover {
+    color: #F5F7FA;
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.record-ex-aequo {
+    font-size: 0.75rem;
+    color: #8B98A5;
+    font-style: italic;
+    margin-top: 4px;
+}
+
+.record-classement {
+    margin-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 4px;
+}
+
+a.lien-adversaire.record-moi,
+.record-moi {
+    color: #D4F000;
+    font-weight: 700;
+}
+
+.record-ligne-moi td.rang,
+.record-ligne-moi td.pts {
+    color: #D4F000;
+    font-weight: 700;
+}

@@ -9,7 +9,7 @@
     <title>Statistiques — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260829">
+    <link rel="stylesheet" href="style.css?v=20261002b">
 </head>
 <body>
     <div class="dashboard-page">
@@ -391,12 +391,69 @@
             { cle: 'pointsRace', titre: 'Points au classement Race', parSurface: false, type: 'valeur' }
         ];
 
+        // Joueurs du visiteur connecte (ou lui-meme en vue Coachs) : surlignes en
+        // jaune dans les classements "Voir +" (renvoyes par /api/statistiques/records).
+        let mesJoueursRecords = [];
+        let monUserIdRecords = null;
+        function estMonJoueur(j) { return !!j && mesJoueursRecords.indexOf(j.id) !== -1; }
+        function estMoiCoach(c) { return !!c && monUserIdRecords !== null && c.userId === monUserIdRecords; }
+
         function detenteurHtml(resultat, vue) {
             if (vue === 'coachs') {
-                return `<a class="lien-adversaire" href="coach.html?id=${resultat.coach.userId}">${resultat.coach.pseudo}</a>`;
+                return `<a class="lien-adversaire ${estMoiCoach(resultat.coach) ? 'record-moi' : ''}" href="coach.html?id=${resultat.coach.userId}">${resultat.coach.pseudo}</a>`;
             }
             const j = resultat.joueur;
-            return `<a class="lien-adversaire ${classeCircuit(j.type)}" href="${lienJoueurReel(j.id)}">${flagImg(j.drapeau)} ${formaterNom(j.prenom, j.nom)}</a>`;
+            return `<a class="lien-adversaire ${estMonJoueur(j) ? 'record-moi' : classeCircuit(j.type)}" href="${lienJoueurReel(j.id)}">${flagImg(j.drapeau)} ${formaterNom(j.prenom, j.nom)}</a>`;
+        }
+
+        // Valeur affichee d'une entree (detenteur ou ligne du classement).
+        function valeurRecordHtml(def, e) {
+            if (def.type === 'ratio') {
+                return `${Math.round(e.valeur * 1000) / 10}% <span class="match-hint">(${e.extra.victoires}/${e.extra.total})</span>`;
+            }
+            if (def.type === 'valeurTournoi') {
+                const nomTournoi = e.extra && e.extra.tournoiNom ? e.extra.tournoiNom : '';
+                return `${e.valeur} <span class="match-hint">(${nomTournoi})</span>`;
+            }
+            if (def.type === 'valeurSemaines') return `${e.valeur} semaine${e.valeur > 1 ? 's' : ''}`;
+            return String(e.valeur);
+        }
+
+        function nomRivalHtml(e, cote, vue) {
+            if (vue === 'coachs') {
+                const c = e['coach' + cote];
+                return `<a class="lien-adversaire ${estMoiCoach(c) ? 'record-moi' : ''}" href="coach.html?id=${c.userId}">${c.pseudo}</a>`;
+            }
+            const j = e['joueur' + cote];
+            return `<a class="lien-adversaire ${estMonJoueur(j) ? 'record-moi' : classeCircuit(j.type)}" href="${lienJoueurReel(j.id)}">${flagImg(j.drapeau)} ${formaterNom(j.prenom, j.nom)}</a>`;
+        }
+
+        // "+ N autres ... a egalite" quand plusieurs detiennent exactement le meme record.
+        function texteExAequo(def, resultat, vue) {
+            const n = resultat.exAequo || 0;
+            if (n <= 0) return '';
+            const mot = def.type === 'rivalite' ? 'rivalité' : (vue === 'coachs' ? 'coach' : (vue === 'WTA' ? 'joueuse' : 'joueur'));
+            const pluriel = n > 1 ? 's' : '';
+            return `<div class="record-ex-aequo">+ ${n} autre${pluriel} ${mot}${pluriel} à égalité</div>`;
+        }
+
+        // Classement complet du record, deplie par "Voir +".
+        function classementRecordHtml(def, resultat, vue) {
+            const lignes = (resultat.classement || []).map(function (e) {
+                const moi = def.type === 'rivalite'
+                    ? (vue === 'coachs' ? (estMoiCoach(e.coach1) || estMoiCoach(e.coach2)) : (estMonJoueur(e.joueur1) || estMonJoueur(e.joueur2)))
+                    : (vue === 'coachs' ? estMoiCoach(e.coach) : estMonJoueur(e.joueur));
+                let nom, valeur;
+                if (def.type === 'rivalite') {
+                    nom = nomRivalHtml(e, 1, vue) + ' <span class="match-hint">–</span> ' + nomRivalHtml(e, 2, vue);
+                    valeur = vue === 'coachs' ? e.nbMatchs + ' match' + (e.nbMatchs > 1 ? 's' : '') : (e.victoires1 + ' - ' + e.victoires2);
+                } else {
+                    nom = detenteurHtml(e, vue);
+                    valeur = valeurRecordHtml(def, e);
+                }
+                return `<tr class="${moi ? 'record-ligne-moi' : ''}"><td class="rang">${e.rang}</td><td>${nom}</td><td class="pts">${valeur}</td></tr>`;
+            }).join('');
+            return `<table class="classement-table"><tbody>${lignes}</tbody></table>`;
         }
 
         function carteRecord(def, resultat, vue, surface) {
@@ -422,19 +479,21 @@
                     </div>
                     <div class="tournoi-card-meta" style="text-align:center;">${resultat.nbMatchs} confrontation${resultat.nbMatchs > 1 ? 's' : ''}${vue === 'coachs' ? ' cumulées (ATP + WTA)' : ''}</div>
                 `;
-            } else if (def.type === 'ratio') {
-                const pct = Math.round(resultat.valeur * 1000) / 10;
-                corps = `<div class="stat-row"><span class="stat-label">${detenteurHtml(resultat, vue)}</span><span class="stat-value">${pct}% <span class="match-hint">(${resultat.extra.victoires}/${resultat.extra.total})</span></span></div>`;
-            } else if (def.type === 'valeurTournoi') {
-                const nomTournoi = resultat.extra && resultat.extra.tournoiNom ? resultat.extra.tournoiNom : '';
-                corps = `<div class="stat-row"><span class="stat-label">${detenteurHtml(resultat, vue)}</span><span class="stat-value">${resultat.valeur} <span class="match-hint">(${nomTournoi})</span></span></div>`;
-            } else if (def.type === 'valeurSemaines') {
-                corps = `<div class="stat-row"><span class="stat-label">${detenteurHtml(resultat, vue)}</span><span class="stat-value">${resultat.valeur} semaine${resultat.valeur > 1 ? 's' : ''}</span></div>`;
             } else {
-                corps = `<div class="stat-row"><span class="stat-label">${detenteurHtml(resultat, vue)}</span><span class="stat-value">${resultat.valeur}</span></div>`;
+                corps = `<div class="stat-row"><span class="stat-label">${detenteurHtml(resultat, vue)}</span><span class="stat-value">${valeurRecordHtml(def, resultat)}</span></div>`;
             }
 
-            return `<div class="${classeCarte}" style="margin-bottom:14px; padding:16px;"><div class="stats-header" style="margin-bottom:8px;">${def.titre}</div>${corps}</div>`;
+            return `
+                <div class="${classeCarte}" style="margin-bottom:14px; padding:16px;">
+                    <div class="record-entete">
+                        <div class="stats-header" style="margin-bottom:8px;">${def.titre}</div>
+                        <button type="button" class="record-voir-plus">Voir +</button>
+                    </div>
+                    ${corps}
+                    ${texteExAequo(def, resultat, vue)}
+                    <div class="record-classement" style="display:none;">${classementRecordHtml(def, resultat, vue)}</div>
+                </div>
+            `;
         }
 
         let vueRecords = 'ATP';
@@ -455,9 +514,20 @@
                 return;
             }
 
+            mesJoueursRecords = data.mesJoueurs || [];
+            monUserIdRecords = data.monUserId || null;
             const defsAffichees = STATS_DEFS.filter(function (d) { return d.parSurface || surfaceRecords === 'global'; });
             container.innerHTML = defsAffichees.map(function (d) { return carteRecord(d, data.resultats[d.cle], vueRecords, surfaceRecords); }).join('');
         }
+
+        document.getElementById('records-liste').addEventListener('click', function (e) {
+            const bouton = e.target.closest('.record-voir-plus');
+            if (!bouton) return;
+            const classement = bouton.closest('.record-entete').parentNode.querySelector('.record-classement');
+            const ouvert = classement.style.display !== 'none';
+            classement.style.display = ouvert ? 'none' : 'block';
+            bouton.textContent = ouvert ? 'Voir +' : 'Voir −';
+        });
 
         document.querySelectorAll('#records-vue-nav .tab-btn').forEach(function (bouton) {
             bouton.addEventListener('click', function () {

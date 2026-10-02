@@ -11103,23 +11103,51 @@ function detenteurJoueur(joueursById, playerId) {
     return { id: j.id, prenom: j.prenom, nom: j.nom, drapeau: drapeau(j.nationalite), type: j.type };
 }
 
-// Meilleur joueur d'un circuit donne pour une serie de donnees {playerId, valeur}.
+// Classement complet d'un record + detenteur (1er) + nombre d'ex aequo du 1er
+// (onglet Records de statistiques.html : "+ N autres" et bouton "Voir +", demande
+// utilisateur 2026-10-02). liste = entrees deja triees par valeur decroissante ;
+// cleValeur = champ compare pour les ex aequo. Classement plafonne a
+// TAILLE_CLASSEMENT_RECORD lignes (rang "olympique" : 1, 1, 3...).
+const TAILLE_CLASSEMENT_RECORD = 50;
+function resultatRecord(liste, cleValeur) {
+    if (liste.length === 0) return null;
+    const valeurRecord = liste[0][cleValeur];
+    let rang = 0;
+    const classement = liste.slice(0, TAILLE_CLASSEMENT_RECORD).map(function (e, i) {
+        if (i === 0 || e[cleValeur] !== liste[i - 1][cleValeur]) rang = i + 1;
+        return Object.assign({ rang: rang }, e);
+    });
+    const exAequo = liste.filter(function (e) { return e[cleValeur] === valeurRecord; }).length - 1;
+    return Object.assign({}, liste[0], { exAequo: exAequo, classement: classement });
+}
+
+// Tri decroissant stable (a valeur egale, l'ordre d'arrivee est conserve - le
+// detenteur affiche reste donc le meme qu'avant l'ajout du classement).
+function trierDecroissant(liste, cleValeur) {
+    return liste
+        .map(function (e, i) { return { e: e, i: i }; })
+        .sort(function (x, y) { return (y.e[cleValeur] - x.e[cleValeur]) || (x.i - y.i); })
+        .map(function (x) { return x.e; });
+}
+
+// Record d'un circuit donne pour une serie de donnees {playerId, valeur} - une
+// seule ligne par joueur au classement (sa meilleure), certaines series en ayant
+// plusieurs (ex. balles de break sauvees : une ligne par match).
 function meilleurJoueurCircuit(donnees, joueursById, type) {
-    let meilleur = null;
+    const parJoueur = new Map();
     donnees.forEach(function (d) {
         const j = joueursById.get(d.playerId);
         if (!j || j.type !== type) return;
-        if (!meilleur || d.valeur > meilleur.valeur) meilleur = d;
+        const actuel = parJoueur.get(d.playerId);
+        if (!actuel || d.valeur > actuel.valeur) parJoueur.set(d.playerId, d);
     });
-    if (!meilleur) return null;
-    return { valeur: meilleur.valeur, joueur: detenteurJoueur(joueursById, meilleur.playerId), extra: meilleur };
+    const liste = trierDecroissant(Array.from(parJoueur.values()), 'valeur').map(function (d) {
+        return { valeur: d.valeur, joueur: detenteurJoueur(joueursById, d.playerId), extra: d };
+    });
+    return resultatRecord(liste, 'valeur');
 }
 
-// Meilleur coach pour une serie de donnees {playerId, valeur}, en agregeant les 2
-// personnages d'un meme coach : 'somme' pour les stats cumulatives (trophees,
-// victoires, matchs, points Race), 'max' pour les series/records ponctuels (streak,
-// duree num1 consecutive, meilleure perf sur un seul match/tournoi) qui n'ont pas de
-// sens additionnes entre 2 personnages/circuits differents.
+// Meme principe cote coach : somme (ou max) des valeurs de ses 2 joueurs.
 function meilleurCoach(donnees, joueursById, mode) {
     const parCoach = new Map();
     donnees.forEach(function (d) {
@@ -11133,26 +11161,23 @@ function meilleurCoach(donnees, joueursById, mode) {
             parCoach.set(j.user_id, actuel + d.valeur);
         }
     });
-    let meilleurUserId = null, meilleurValeur = -Infinity, meilleurExtra = null;
+    const entrees = [];
     parCoach.forEach(function (valeurOuObjet, userId) {
         const valeur = mode === 'max' ? valeurOuObjet.valeur : valeurOuObjet;
-        if (valeur > meilleurValeur) { meilleurValeur = valeur; meilleurUserId = userId; meilleurExtra = mode === 'max' ? valeurOuObjet : null; }
+        if (valeur <= 0) return;
+        entrees.push({ valeur: valeur, coach: { userId: userId, pseudo: nomCoach(userId) }, extra: mode === 'max' ? valeurOuObjet : null });
     });
-    if (meilleurUserId === null || meilleurValeur <= 0) return null;
-    return { valeur: meilleurValeur, coach: { userId: meilleurUserId, pseudo: nomCoach(meilleurUserId) }, extra: meilleurExtra };
+    return resultatRecord(trierDecroissant(entrees, 'valeur'), 'valeur');
 }
 
 function meilleureRivaliteCircuit(paires, joueursById, type) {
-    let meilleure = null;
+    const entrees = [];
     paires.forEach(function (p) {
         const ja = joueursById.get(p.a), jb = joueursById.get(p.b);
         if (!ja || !jb || ja.type !== type || jb.type !== type) return;
-        const nbMatchs = p.victoiresA + p.victoiresB;
-        if (!meilleure || nbMatchs > meilleure.nbMatchs) {
-            meilleure = { nbMatchs, joueur1: detenteurJoueur(joueursById, p.a), joueur2: detenteurJoueur(joueursById, p.b), victoires1: p.victoiresA, victoires2: p.victoiresB };
-        }
+        entrees.push({ nbMatchs: p.victoiresA + p.victoiresB, joueur1: detenteurJoueur(joueursById, p.a), joueur2: detenteurJoueur(joueursById, p.b), victoires1: p.victoiresA, victoires2: p.victoiresB });
     });
-    return meilleure;
+    return resultatRecord(trierDecroissant(entrees, 'nbMatchs'), 'nbMatchs');
 }
 
 function meilleureRivaliteCoachs(paires, joueursById) {
@@ -11162,16 +11187,15 @@ function meilleureRivaliteCoachs(paires, joueursById) {
         if (!ja || !jb || ja.user_id === jb.user_id) return;
         const uA = Math.min(ja.user_id, jb.user_id), uB = Math.max(ja.user_id, jb.user_id);
         const cle = uA + '-' + uB;
-        const nbMatchs = p.victoiresA + p.victoiresB;
-        parPaireCoach.set(cle, (parPaireCoach.get(cle) || 0) + nbMatchs);
+        parPaireCoach.set(cle, (parPaireCoach.get(cle) || 0) + p.victoiresA + p.victoiresB);
     });
-    let meilleurCle = null, meilleurValeur = 0;
+    const entrees = [];
     parPaireCoach.forEach(function (valeur, cle) {
-        if (valeur > meilleurValeur) { meilleurValeur = valeur; meilleurCle = cle; }
+        if (valeur <= 0) return;
+        const [uA, uB] = cle.split('-').map(Number);
+        entrees.push({ nbMatchs: valeur, coach1: { userId: uA, pseudo: nomCoach(uA) }, coach2: { userId: uB, pseudo: nomCoach(uB) } });
     });
-    if (!meilleurCle) return null;
-    const [uA, uB] = meilleurCle.split('-').map(Number);
-    return { nbMatchs: meilleurValeur, coach1: { userId: uA, pseudo: nomCoach(uA) }, coach2: { userId: uB, pseudo: nomCoach(uB) } };
+    return resultatRecord(trierDecroissant(entrees, 'nbMatchs'), 'nbMatchs');
 }
 
 app.get('/api/statistiques/records', (req, res) => {
@@ -11225,7 +11249,17 @@ app.get('/api/statistiques/records', (req, res) => {
             }
         }
 
-        res.json({ success: true, resultats });
+        // Pour surligner ses propres joueurs (ou soi-meme, vue Coachs) dans les
+        // classements "Voir +". Route publique (pas de req.userId pose par le
+        // middleware) : session lue ici si le visiteur est connecte, sinon rien.
+        let monUserId = null;
+        const token = req.cookies.session_token;
+        if (token) {
+            const session = db.prepare('SELECT user_id, date_expiration FROM sessions WHERE token = ?').get(token);
+            if (session && new Date(session.date_expiration) > new Date()) monUserId = session.user_id;
+        }
+        const mesJoueurs = monUserId ? db.prepare('SELECT id FROM players WHERE user_id = ?').all(monUserId).map(function (p) { return p.id; }) : [];
+        res.json({ success: true, resultats, mesJoueurs, monUserId });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
