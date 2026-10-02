@@ -9,7 +9,7 @@
     <title>Adversaire — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260928a">
+    <link rel="stylesheet" href="style.css?v=20261002a">
 </head>
 <body>
     <div class="dashboard-page">
@@ -211,12 +211,69 @@
             `;
         }
 
+        // Presentation libre du joueur, ecrite par son coach. Visible par tous ; le
+        // coach du joueur (et lui seul - le serveur le verifie aussi) voit en plus un
+        // bouton pour la modifier. Texte toujours echappe (jamais de HTML interprete).
+        const BIO_LONGUEUR_MAX = 1500;
+        function blocBio(info) {
+            const estMonJoueur = String(info.coachUserId) === String(userId);
+            const texte = info.bio
+                ? `<div class="bio-texte">${echapperHtml(info.bio)}</div>`
+                : `<div class="match-hint">${estMonJoueur ? "Aucune présentation pour l'instant. Présente ton joueur aux autres coachs !" : "Son coach n'a pas encore écrit de présentation."}</div>`;
+            if (!estMonJoueur) {
+                return `<div class="bio-bloc"><div class="stats-header">Présentation</div>${texte}</div>`;
+            }
+            return `
+                <div class="bio-bloc" id="bio-bloc">
+                    <div class="stats-header">Présentation</div>
+                    <div id="bio-lecture">${texte}<button type="button" class="bio-btn" id="bio-modifier-btn">${info.bio ? 'Modifier la présentation' : 'Écrire une présentation'}</button></div>
+                    <div id="bio-edition" style="display:none;">
+                        <textarea id="bio-textarea" class="bio-textarea" maxlength="${BIO_LONGUEUR_MAX}" rows="6" placeholder="Son histoire, son caractère, ses objectifs...">${echapperHtml(info.bio || '')}</textarea>
+                        <div class="bio-compteur" id="bio-compteur"></div>
+                        <div class="bio-actions">
+                            <button type="button" class="bio-btn" id="bio-enregistrer-btn">Enregistrer</button>
+                            <button type="button" class="bio-btn bio-btn-secondaire" id="bio-annuler-btn">Annuler</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function brancherBio() {
+            const btnModifier = document.getElementById('bio-modifier-btn');
+            if (!btnModifier) return;
+            const zone = document.getElementById('bio-textarea');
+            const compteur = document.getElementById('bio-compteur');
+            const majCompteur = function () { compteur.textContent = zone.value.length + ' / ' + BIO_LONGUEUR_MAX; };
+            btnModifier.addEventListener('click', function () {
+                document.getElementById('bio-lecture').style.display = 'none';
+                document.getElementById('bio-edition').style.display = 'block';
+                majCompteur();
+                zone.focus();
+            });
+            zone.addEventListener('input', majCompteur);
+            document.getElementById('bio-annuler-btn').addEventListener('click', function () { chargerFiche(); });
+            document.getElementById('bio-enregistrer-btn').addEventListener('click', async function () {
+                const bouton = this;
+                bouton.disabled = true;
+                const rep = await fetch('/api/joueur/bio/' + adversaireId, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ bio: zone.value })
+                });
+                const d = await rep.json();
+                if (!rep.ok) { alert(d.error || "Impossible d'enregistrer la présentation."); bouton.disabled = false; return; }
+                chargerFiche();
+            });
+        }
+
         function afficherInfos(data) {
             const panneau = document.getElementById('tab-infos');
             const info = data.infos;
 
             if (typeAdversaire === 'reel') {
                 panneau.innerHTML = `
+                    ${blocBio(info)}
                     <div class="stat-row"><span class="stat-label">Prénom</span><span class="stat-value">${info.prenom}</span></div>
                     <div class="stat-row"><span class="stat-label">Nom</span><span class="stat-value">${(info.nom || '').toUpperCase()}</span></div>
                     <div class="stat-row"><span class="stat-label">Âge</span><span class="stat-value">${info.age} ans</span></div>
@@ -620,6 +677,7 @@
             }
 
             afficherInfos(data);
+            brancherBio();
             afficherPalmares(data);
             afficherDerniersMatchs(data);
             afficherStats(data);

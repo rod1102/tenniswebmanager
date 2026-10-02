@@ -2732,3 +2732,80 @@ table.points td.pts {
 .article-detail-contenu p {
     margin-bottom: 14px;
 }
+/* Presentation (bio) d'un joueur sur sa fiche - adversaire.html, onglet Infos */
+.bio-bloc {
+    margin-bottom: 20px;
+}
+
+.bio-texte {
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+    line-height: 1.6;
+    color: #E6EAF0;
+    font-size: 0.9rem;
+    padding: 4px 0 12px;
+}
+
+.bio-textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 12px;
+    color: #F5F7FA;
+    font-family: inherit;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    padding: 12px;
+    resize: vertical;
+}
+
+.bio-textarea:focus {
+    outline: none;
+    border-color: #D4F000;
+}
+
+.bio-compteur {
+    font-size: 0.7rem;
+    color: #8B98A5;
+    text-align: right;
+    margin: 4px 0 8px;
+}
+
+.bio-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.bio-btn {
+    background: none;
+    border: 1px solid #D4F000;
+    color: #D4F000;
+    border-radius: 999px;
+    padding: 6px 14px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+.bio-btn:hover {
+    background: #D4F000;
+    color: #0B1220;
+}
+
+.bio-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.bio-btn-secondaire {
+    border-color: rgba(255, 255, 255, 0.18);
+    color: #9AA5B1;
+}
+
+.bio-btn-secondaire:hover {
+    background: none;
+    color: #F5F7FA;
+    border-color: rgba(255, 255, 255, 0.4);
+}

@@ -699,6 +699,9 @@ const migrations = [
     "ALTER TABLE users ADD COLUMN dernier_refus_date TEXT",
     "ALTER TABLE players ADD COLUMN xp_repartition_en_attente TEXT",
     "ALTER TABLE players ADD COLUMN photo_avatar TEXT",
+    // Presentation libre du joueur par son coach, visible par tous sur sa fiche
+    // (adversaire.html, onglet Infos) - 2026-10-02.
+    "ALTER TABLE players ADD COLUMN bio TEXT",
     "ALTER TABLE tournoi_matchs ADD COLUMN manche_poules INTEGER",
     // Historique physique complet par joueur/semaine (energie/usure/mental/
     // condition/automatismes, en plus de forme_avant/forme_apres deja existants) -

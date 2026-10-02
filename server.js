@@ -1012,6 +1012,28 @@ app.delete('/api/joueur/avatar/:playerId', (req, res) => {
     }
 });
 
+// Bio du joueur (texte libre, visible par tous sur sa fiche) : modifiable UNIQUEMENT
+// par son propre coach - l'identite vient de la session (req.userId), jamais du
+// client. Texte brut, echappe a l'affichage cote page. Demande utilisateur 2026-10-02.
+const BIO_LONGUEUR_MAX = 1500;
+app.post('/api/joueur/bio/:playerId', (req, res) => {
+    try {
+        const player = db.prepare('SELECT id, user_id FROM players WHERE id = ?').get(Number(req.params.playerId));
+        if (!player || Number(player.user_id) !== Number(req.userId)) {
+            return res.status(403).json({ error: 'Seul le coach de ce joueur peut modifier sa présentation.' });
+        }
+        const bio = String((req.body && req.body.bio) || '').replace(/\r\n/g, '\n').trim();
+        if (bio.length > BIO_LONGUEUR_MAX) {
+            return res.status(400).json({ error: 'Présentation trop longue (' + BIO_LONGUEUR_MAX + ' caractères maximum).' });
+        }
+        db.prepare('UPDATE players SET bio = ? WHERE id = ?').run(bio || null, player.id);
+        res.json({ success: true, bio: bio });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/utilisateur/:userId', (req, res) => {
     try {
         const userId = req.userId;
@@ -9584,7 +9606,8 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
             classement: calculerRangsLiveGlobal(circuitAdversaire).get(cleAdversaire) || null,
             meilleurClassement: meilleurClassement(circuitAdversaire, cleAdversaire),
             coachUserId: adversaire.user_id, coachNom: nomCoach(adversaire.user_id),
-            photoAvatar: adversaire.photo_avatar
+            photoAvatar: adversaire.photo_avatar,
+            bio: adversaire.bio || ''
         };
 
         const palmares = db.prepare(`
