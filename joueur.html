@@ -770,9 +770,9 @@
                 return `
                     <div class="style-tournoi-bloc" data-tournoi-id="${bloc.tournoi.id}" style="margin-bottom:20px;">
                         <div class="match-hint">${bloc.tournoi.nom} (semaine ${bloc.tournoi.positionSemaine}) — à choisir avant le début du tournoi. Le même style peut être gardé sur plusieurs tours d'affilée.${tournoiDemarre ? ' Le tournoi a déjà commencé, les styles ne sont plus modifiables.' : ''}${texteInterdits}</div>
-                        ${miseHtml}
                         <div class="style-tour-grid">${toursHtml}</div>
-                        <button class="cta cta-primary style-valider-btn" style="padding:12px 24px; font-size:0.85rem;" ${tournoiDemarre ? 'disabled' : ''}>Valider les styles</button>
+                        <button class="cta cta-primary style-valider-btn" style="padding:12px 24px; font-size:0.85rem; margin-bottom:16px;" ${tournoiDemarre ? 'disabled' : ''}>Valider les styles</button>
+                        ${miseHtml}
                     </div>
                 `;
                 }).join('');
