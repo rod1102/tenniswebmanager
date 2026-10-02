@@ -11137,7 +11137,9 @@ function meilleurJoueurCircuit(donnees, joueursById, type) {
     const parJoueur = new Map();
     donnees.forEach(function (d) {
         const j = joueursById.get(d.playerId);
-        if (!j || j.type !== type) return;
+        // Valeur nulle = pas un record (ex. 0 semaine n°1 pour tout le monde, qui
+        // affichait "+ 103 autres a egalite") - meme regle que meilleurCoach.
+        if (!j || j.type !== type || !(d.valeur > 0)) return;
         const actuel = parJoueur.get(d.playerId);
         if (!actuel || d.valeur > actuel.valeur) parJoueur.set(d.playerId, d);
     });
