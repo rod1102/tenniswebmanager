@@ -9,7 +9,7 @@
     <title>Planifier la saison — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260906">
+    <link rel="stylesheet" href="style.css?v=20261003a">
     <style>
         .planning-bulk {
             display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
@@ -160,16 +160,28 @@
             const ordresInitiaux = {};
             dataPlan.ordres.forEach(function (o) { ordresInitiaux[o.semaine] = o.action; });
 
+            const lienTournoiHtml = function (t, texte) {
+                return `<a class="planning-tournoi-lien" href="tournoi-detail.html?calendrierId=${t.id}&semaine=${t.semaine}&playerId=${player.id}&onglet=tableau">${texte}</a>`;
+            };
+
             let weeksHtml = '';
             for (let s = dataPlan.debut; s <= dataPlan.fin; s++) {
                 const phaseInfo = dataPlan.phases && dataPlan.phases[s];
                 const labelSemaine = libellePhase(phaseInfo) || ('Semaine ' + s);
 
+                // Nom de tournoi cliquable -> onglet Tableau de sa fiche (meme lien que
+                // la programmation des 5 semaines de joueur.html), retrouve dans le
+                // calendrier de la semaine ; texte simple si introuvable.
+                const lienTournoi = function (nom) {
+                    const t = (calParSemaine[s] || []).find(function (x) { return !x.estCoupe && x.nom === nom; });
+                    return t ? lienTournoiHtml(t, nom) : nom;
+                };
+
                 let lockLabel = null;
                 let lockFavori = false;
                 if (dataPlan.coupes[s]) lockLabel = dataPlan.coupes[s];
-                else if (dataPlan.tournoisVerrous[s]) lockLabel = 'Tournoi : ' + dataPlan.tournoisVerrous[s];
-                else if (dataPlan.favoris && dataPlan.favoris[s]) { lockLabel = '♥ Tournoi visé : ' + dataPlan.favoris[s]; lockFavori = true; }
+                else if (dataPlan.tournoisVerrous[s]) lockLabel = 'Tournoi : ' + lienTournoi(dataPlan.tournoisVerrous[s]);
+                else if (dataPlan.favoris && dataPlan.favoris[s]) { lockLabel = '♥ Tournoi visé : ' + lienTournoi(dataPlan.favoris[s]); lockFavori = true; }
                 else if (phaseInfo && phaseInfo.type !== 'tournoi') lockLabel = phaseInfo.type === 'presaison' ? 'Pré-saison — rien à planifier' : 'Semaine 0 — préparatifs';
                 else if (phaseInfo && phaseInfo.finDeSaison) lockLabel = 'Fin de saison : Moulinette';
 
@@ -177,7 +189,7 @@
                 (calParSemaine[s] || []).forEach(function (t) {
                     if (t.estCoupe) { hint += '<div class="planning-week-hint">' + t.nom + ' — ' + t.manche + '</div>'; return; }
                     const dbut = t.semaine === s ? '' : ' (2ᵉ sem.)';
-                    hint += '<div class="planning-week-hint">' + t.nom + ' · ' + labelCategorie(t) + ' · ' + (LABELS_SURFACE[t.surface] || t.surface) + dbut + '</div>';
+                    hint += '<div class="planning-week-hint">' + lienTournoiHtml(t, t.nom) + ' · ' + labelCategorie(t) + ' · ' + (LABELS_SURFACE[t.surface] || t.surface) + dbut + '</div>';
                 });
 
                 if (lockLabel) {

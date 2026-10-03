@@ -2860,3 +2860,15 @@ a.lien-adversaire.record-moi,
     color: #D4F000;
     font-weight: 700;
 }
+
+/* Liens de tournoi dans les petites lignes grises du calendrier (planifier toute
+   la saison) : meme couleur que le texte autour, comme demande pour les liens de
+   la programmation des 5 semaines. */
+.planning-week-hint .planning-tournoi-lien,
+.planning-week-hint .planning-tournoi-lien:visited {
+    color: inherit;
+}
+
+.planning-week-hint .planning-tournoi-lien:hover {
+    color: #FFFFFF;
+}
