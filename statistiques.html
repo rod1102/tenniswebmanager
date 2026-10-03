@@ -9,7 +9,7 @@
     <title>Statistiques — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261003b">
+    <link rel="stylesheet" href="style.css?v=20261003c">
 </head>
 <body>
     <div class="dashboard-page">
@@ -386,6 +386,10 @@
             { cle: 'ratioVictoire', titre: 'Ratio de victoire', parSurface: true, type: 'ratio' },
             { cle: 'breakSauveesMatch', titre: 'Le plus de balles de break sauvées (un match)', parSurface: true, type: 'valeur' },
             { cle: 'breakSauveesTournoi', titre: 'Tournoi gagné en sauvant le plus de balles de break', parSurface: true, type: 'valeurTournoi' },
+            { cle: 'conversionBreak', titre: 'Meilleur taux de conversion des balles de break (20 balles minimum)', parSurface: true, type: 'ratio' },
+            { cle: 'tiebreaksGagnes', titre: 'Le plus de tie-breaks gagnés', parSurface: true, type: 'valeur' },
+            { cle: 'plusLongMatch', titre: 'Plus long match (en jeux)', parSurface: true, type: 'valeurJeux' },
+            { cle: 'sets60', titre: 'Le plus de sets gagnés 6-0', parSurface: true, type: 'valeur' },
             { cle: 'dureeNum1', titre: 'Record de durée numéro 1 mondial', parSurface: false, type: 'valeurSemaines' },
             { cle: 'dureeNum1Consecutive', titre: 'Record de durée numéro 1 mondial (semaines consécutives)', parSurface: false, type: 'valeurSemaines' },
             { cle: 'pointsRace', titre: 'Points au classement Race', parSurface: false, type: 'valeur' }
@@ -416,6 +420,10 @@
                 return `${e.valeur} <span class="match-hint">(${nomTournoi})</span>`;
             }
             if (def.type === 'valeurSemaines') return `${e.valeur} semaine${e.valeur > 1 ? 's' : ''}`;
+            if (def.type === 'valeurJeux') {
+                const nomTournoi = e.extra && e.extra.tournoiNom ? ` <span class="match-hint">(${e.extra.tournoiNom})</span>` : '';
+                return `${e.valeur} jeux${nomTournoi}`;
+            }
             return String(e.valeur);
         }
 

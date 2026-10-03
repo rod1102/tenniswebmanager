@@ -9726,7 +9726,11 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
             t.indoor = !!(entreeCalendrier && entreeCalendrier.indoor);
         });
 
-        res.json({ success: true, infos, palmares, derniersMatchs, stats, faceAFace, badges, saisonAffichee, saisonsDisponibles, prochainsTournois });
+        // Stats de jeu (balles de break, service/retour, points importants,
+        // tie-breaks) : carriere + saison affichee, globales et par surface.
+        const statsJeuToutes = statsJeuJoueur(adversaire.id);
+        const statsJeu = { carriere: statsJeuToutes.carriere, saison: statsJeuToutes.parSaison[saisonAffichee] || null };
+        res.json({ success: true, infos, palmares, derniersMatchs, stats, faceAFace, badges, saisonAffichee, saisonsDisponibles, prochainsTournois, statsJeu });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
@@ -10926,6 +10930,207 @@ function joueursReelsParId() {
     );
 }
 
+// Stats d'un match recalculees a partir de son deroule enregistre (evenements) -
+// valables pour tous les matchs deja joues. Code IDENTIQUE dans server.js (stats de
+// carriere/saison de la fiche joueur, records) et dans matchs.html,
+// tournoi-detail.html et adversaire.html (bouton "Stats") : a modifier partout a la
+// fois. Cotes A/B = cotes du moteur (jeuxA/jeuxB/serveur), noms lus dans le texte
+// ("Service : NOM", "Set N remporte par NOM (a-b)"). Balles de break/set/match :
+// annonce "<Libelle> pour NOM" suivie de son issue ("... sauve par ..." = sauvee,
+// sinon convertie) ; un point decisif de tie-break compte comme balle de match s'il
+// pouvait conclure le match, sinon comme balle de set. Serveur de chaque jeu : evt
+// jeu_debut quand il existe (matchs depuis le 2026-09-21), sinon alternance depuis
+// le serveur annonce en debut de set. Demande utilisateur 2026-10-03.
+function calculerStatsMatch(evenements) {
+    const noms = { A: null, B: null };
+    const vide = function () {
+        return { bb: 0, bbOk: 0, bs: 0, bsOk: 0, bm: 0, bmOk: 0, pi: 0, piOk: 0, svc: 0, svcOk: 0, ret: 0, retOk: 0, tb: 0, tbOk: 0, tbPts: 0, serie: 0, jeux: 0, sets60: 0 };
+    };
+    const stats = { A: vide(), B: vide() };
+    let setsRequis = 2;
+
+    evenements.forEach(function (e) {
+        const t = e.texte || '';
+        if (e.type === 'set_debut') {
+            const m = /Service : (.+)\) ---/.exec(t);
+            if (m && (e.serveur === 'A' || e.serveur === 'B') && !noms[e.serveur]) noms[e.serveur] = m[1];
+        } else if (e.type === 'set_fin') {
+            const m = /remporte par (.+) \(/.exec(t);
+            if (m && e.jeuxA !== e.jeuxB) {
+                const cote = e.jeuxA > e.jeuxB ? 'A' : 'B';
+                if (!noms[cote]) noms[cote] = m[1];
+            }
+        } else if (e.type === 'match_fin' && typeof e.setsA === 'number') {
+            setsRequis = Math.max(2, e.setsA, e.setsB);
+        }
+    });
+    // Cote encore inconnu (meme serveur au debut de chaque set et victoire en sets
+    // secs) : n'importe quel autre nom cite dans le deroule.
+    if ((noms.A && !noms.B) || (noms.B && !noms.A)) {
+        const connu = noms.A || noms.B;
+        evenements.forEach(function (e) {
+            const m = /(?: pour | remporte par )(.+?)(?: \(|$)/.exec(e.texte || '');
+            if (m && m[1] !== connu && !(noms.A && noms.B)) {
+                if (!noms.A) noms.A = m[1]; else noms.B = m[1];
+            }
+        });
+    }
+    if (!noms.A || !noms.B) return null;
+    const coteDe = function (nom) { return nom === noms.A ? 'A' : (nom === noms.B ? 'B' : null); };
+    const autre = function (c) { return c === 'A' ? 'B' : 'A'; };
+
+    let serveur = null, prec = { A: 0, B: 0 }, setsAvantTB = null, dansTB = false, dernierTB = null;
+    let serieCote = null, serieLongueur = 0;
+    const gagnerJeu = function (cote) {
+        if (cote === serieCote) serieLongueur++; else { serieCote = cote; serieLongueur = 1; }
+        if (serieLongueur > stats[cote].serie) stats[cote].serie = serieLongueur;
+    };
+
+    for (let i = 0; i < evenements.length; i++) {
+        const e = evenements[i];
+        const t = e.texte || '';
+        if (e.type === 'set_debut') {
+            serveur = e.serveur === 'A' || e.serveur === 'B' ? e.serveur : null;
+            prec = { A: 0, B: 0 }; dansTB = false;
+        } else if (e.type === 'jeu_debut') {
+            if (e.serveur === 'A' || e.serveur === 'B') serveur = e.serveur;
+        } else if (e.type === 'jeu' && typeof e.jeuxA === 'number') {
+            const gagnant = e.jeuxA > prec.A ? 'A' : (e.jeuxB > prec.B ? 'B' : null);
+            prec = { A: e.jeuxA, B: e.jeuxB };
+            if (gagnant && serveur) {
+                stats[serveur].svc++; stats[autre(serveur)].ret++;
+                if (gagnant === serveur) stats[serveur].svcOk++; else stats[gagnant].retOk++;
+            }
+            if (gagnant) gagnerJeu(gagnant);
+            if (serveur) serveur = autre(serveur);
+        } else if (e.type === 'tie_break_debut') {
+            setsAvantTB = { A: e.setsA, B: e.setsB }; dansTB = true; dernierTB = null;
+        } else if (e.type === 'tie_break_point') {
+            if (typeof e.ptsA === 'number') dernierTB = { A: e.ptsA, B: e.ptsB };
+            else { const m = /score : (\d+)-(\d+)/.exec(t); if (m) dernierTB = { A: +m[1], B: +m[2] }; }
+        } else if (e.type === 'set_fin') {
+            if (dansTB && e.jeuxA !== e.jeuxB) {
+                const g = e.jeuxA > e.jeuxB ? 'A' : 'B';
+                stats.A.tb++; stats.B.tb++; stats[g].tbOk++;
+                if (dernierTB) { stats.A.tbPts += dernierTB.A; stats.B.tbPts += dernierTB.B; }
+                gagnerJeu(g);
+            }
+            if (typeof e.jeuxA === 'number') {
+                stats.A.jeux += e.jeuxA; stats.B.jeux += e.jeuxB;
+                if (e.jeuxA === 6 && e.jeuxB === 0) stats.A.sets60++;
+                if (e.jeuxB === 6 && e.jeuxA === 0) stats.B.sets60++;
+            }
+            prec = { A: 0, B: 0 }; dansTB = false;
+        } else if (e.type === 'point_important') {
+            const pos = t.lastIndexOf(' pour ');
+            if (pos === -1) continue; // ligne d'issue, traitee avec son annonce
+            const libelle = t.slice(0, pos);
+            const cote = coteDe(t.slice(pos + 6));
+            if (!cote) continue;
+            const issue = evenements[i + 1] && evenements[i + 1].type === 'point_important' ? (evenements[i + 1].texte || '') : '';
+            if (issue === '') continue;
+            const convertie = issue.indexOf(' sauve par ') === -1;
+            const s = stats[cote];
+            stats.A.pi++; stats.B.pi++;
+            stats[convertie ? cote : autre(cote)].piOk++;
+            if (libelle.indexOf('Balle de break') === 0) { s.bb++; if (convertie) s.bbOk++; }
+            if (libelle.indexOf('Balle de set') !== -1) { s.bs++; if (convertie) s.bsOk++; }
+            if (libelle.indexOf('Balle de match') !== -1) { s.bm++; if (convertie) s.bmOk++; }
+            if (libelle === 'Point decisif') {
+                const estBalleMatch = setsAvantTB && setsAvantTB[cote] + 1 >= setsRequis;
+                if (estBalleMatch) { s.bm++; if (convertie) s.bmOk++; } else { s.bs++; if (convertie) s.bsOk++; }
+            }
+        }
+    }
+
+    // Set interrompu (abandon) : ses jeux comptent aussi.
+    if (prec.A || prec.B) { stats.A.jeux += prec.A; stats.B.jeux += prec.B; }
+    return { noms: noms, stats: stats };
+}
+
+// Stats de jeu cumulees d'un joueur REEL a partir de ses lignes matchs (deroule
+// stocke de SON point de vue : il y est toujours "Toi", l'adversaire "Adversaire").
+// Retourne { carriere: {global, dur, terre, herbe}, parSaison: {n: {...}} }.
+// Forfaits exclus (aucun point joue). Memoise jusqu'a la prochaine avancee.
+function cumulStatsJeuVide() {
+    return { matchs: 0, bb: 0, bbOk: 0, bbAdv: 0, bbSauvees: 0, svc: 0, svcOk: 0, ret: 0, retOk: 0, pi: 0, piOk: 0, tb: 0, tbOk: 0, tbPts: 0, tbPtsTotal: 0, sets60: 0 };
+}
+function ajouterStatsJeu(cumul, moi, adv) {
+    cumul.matchs++;
+    cumul.bb += moi.bb; cumul.bbOk += moi.bbOk;
+    cumul.bbAdv += adv.bb; cumul.bbSauvees += adv.bb - adv.bbOk;
+    cumul.svc += moi.svc; cumul.svcOk += moi.svcOk;
+    cumul.ret += moi.ret; cumul.retOk += moi.retOk;
+    cumul.pi += moi.pi; cumul.piOk += moi.piOk;
+    cumul.tb += moi.tb; cumul.tbOk += moi.tbOk;
+    cumul.tbPts += moi.tbPts; cumul.tbPtsTotal += moi.tbPts + adv.tbPts;
+    cumul.sets60 += moi.sets60;
+}
+// Une ligne matchs -> stats du joueur (moi) et de son adversaire (adv), ou null.
+function statsJeuDepuisLigneMatch(ligne) {
+    let evenements;
+    try { evenements = JSON.parse(ligne.evenements); } catch (e) { return null; }
+    if (!Array.isArray(evenements)) return null;
+    const r = calculerStatsMatch(evenements);
+    if (!r) return null;
+    const cote = r.noms.A === 'Toi' ? 'A' : (r.noms.B === 'Toi' ? 'B' : null);
+    if (!cote) return null;
+    return { moi: r.stats[cote], adv: r.stats[cote === 'A' ? 'B' : 'A'] };
+}
+function statsJeuJoueur(playerId) {
+    return memoLourd('statsJeu:' + playerId, 600000, function () {
+        const carriere = { global: cumulStatsJeuVide(), dur: cumulStatsJeuVide(), terre: cumulStatsJeuVide(), herbe: cumulStatsJeuVide() };
+        const parSaison = {};
+        db.prepare(`
+            SELECT surface, semaine, evenements FROM matchs
+            WHERE player_id = ? AND evenements IS NOT NULL AND score NOT LIKE 'Forfait%'
+        `).all(playerId).forEach(function (ligne) {
+            const r = statsJeuDepuisLigneMatch(ligne);
+            if (!r) return;
+            const saison = phaseAffichee(ligne.semaine).numeroSaison;
+            if (!parSaison[saison]) parSaison[saison] = { global: cumulStatsJeuVide(), dur: cumulStatsJeuVide(), terre: cumulStatsJeuVide(), herbe: cumulStatsJeuVide() };
+            [carriere, parSaison[saison]].forEach(function (bloc) {
+                ajouterStatsJeu(bloc.global, r.moi, r.adv);
+                if (bloc[ligne.surface]) ajouterStatsJeu(bloc[ligne.surface], r.moi, r.adv);
+            });
+        });
+        return { carriere: carriere, parSaison: parSaison };
+    });
+}
+
+// Records tires du deroule des matchs (onglet Records de statistiques.html, 2026-10-03) :
+// taux de conversion des balles de break (minimum MIN_BALLES_BREAK_RATIO balles),
+// tie-breaks gagnes, plus long match (en jeux), sets gagnes 6-0. Tous les vrais
+// joueurs (une ligne matchs par joueur et par match), memoise par surface.
+const MIN_BALLES_BREAK_RATIO = 20;
+function donneesRecordsJeu(surfaceValide) {
+    return memoLourd('recordsJeu:' + (surfaceValide || 'global'), 600000, function () {
+        const { clause, params } = clauseEtParamSurface('m.surface', surfaceValide, []);
+        const parJoueur = new Map();
+        db.prepare(`
+            SELECT m.player_id, m.evenements, t.nom AS tournoi_nom FROM matchs m
+            LEFT JOIN tournois t ON t.id = m.tournoi_id
+            WHERE m.evenements IS NOT NULL AND m.score NOT LIKE 'Forfait%'${clause}
+        `).all(...params).forEach(function (ligne) {
+            const r = statsJeuDepuisLigneMatch(ligne);
+            if (!r) return;
+            if (!parJoueur.has(ligne.player_id)) parJoueur.set(ligne.player_id, { bb: 0, bbOk: 0, tbOk: 0, sets60: 0, maxJeux: 0, maxJeuxTournoi: null });
+            const c = parJoueur.get(ligne.player_id);
+            c.bb += r.moi.bb; c.bbOk += r.moi.bbOk; c.tbOk += r.moi.tbOk; c.sets60 += r.moi.sets60;
+            const jeux = r.moi.jeux + r.adv.jeux;
+            if (jeux > c.maxJeux) { c.maxJeux = jeux; c.maxJeuxTournoi = ligne.tournoi_nom || 'Coupe Davis / BJK Cup'; }
+        });
+        const conversion = [], tiebreaks = [], plusLongMatch = [], sets60 = [];
+        parJoueur.forEach(function (c, playerId) {
+            if (c.bb >= MIN_BALLES_BREAK_RATIO) conversion.push({ playerId: playerId, valeur: c.bbOk / c.bb, victoires: c.bbOk, total: c.bb });
+            tiebreaks.push({ playerId: playerId, valeur: c.tbOk });
+            plusLongMatch.push({ playerId: playerId, valeur: c.maxJeux, tournoiNom: c.maxJeuxTournoi });
+            sets60.push({ playerId: playerId, valeur: c.sets60 });
+        });
+        return { conversion: conversion, tiebreaks: tiebreaks, plusLongMatch: plusLongMatch, sets60: sets60 };
+    });
+}
+
 function clauseEtParamSurface(colonne, surfaceValide, paramsBase) {
     if (!surfaceValide) return { clause: '', params: paramsBase };
     return { clause: ' AND ' + colonne + ' = ?', params: paramsBase.concat([surfaceValide]) };
@@ -11215,6 +11420,7 @@ app.get('/api/statistiques/records', (req, res) => {
         const ratio = donneesRatioVictoire(surfaceValide);
         const breakMatch = donneesBreakSauveesMatch(surfaceValide);
         const breakTournoi = donneesBreakSauveesTournoi(surfaceValide);
+        const recordsJeu = donneesRecordsJeu(surfaceValide);
 
         let resultats;
         if (vue === 'coachs') {
@@ -11226,7 +11432,11 @@ app.get('/api/statistiques/records', (req, res) => {
                 totalMatchs: meilleurCoach(totalMatchs, joueursById, 'somme'),
                 ratioVictoire: meilleurCoach(ratio, joueursById, 'max'),
                 breakSauveesMatch: meilleurCoach(breakMatch, joueursById, 'max'),
-                breakSauveesTournoi: meilleurCoach(breakTournoi, joueursById, 'max')
+                breakSauveesTournoi: meilleurCoach(breakTournoi, joueursById, 'max'),
+                conversionBreak: meilleurCoach(recordsJeu.conversion, joueursById, 'max'),
+                tiebreaksGagnes: meilleurCoach(recordsJeu.tiebreaks, joueursById, 'somme'),
+                plusLongMatch: meilleurCoach(recordsJeu.plusLongMatch, joueursById, 'max'),
+                sets60: meilleurCoach(recordsJeu.sets60, joueursById, 'somme')
             };
             if (!surfaceValide) {
                 resultats.dureeNum1 = meilleurCoach(donneesNum1Total(), joueursById, 'somme');
@@ -11242,7 +11452,11 @@ app.get('/api/statistiques/records', (req, res) => {
                 totalMatchs: meilleurJoueurCircuit(totalMatchs, joueursById, type),
                 ratioVictoire: meilleurJoueurCircuit(ratio, joueursById, type),
                 breakSauveesMatch: meilleurJoueurCircuit(breakMatch, joueursById, type),
-                breakSauveesTournoi: meilleurJoueurCircuit(breakTournoi, joueursById, type)
+                breakSauveesTournoi: meilleurJoueurCircuit(breakTournoi, joueursById, type),
+                conversionBreak: meilleurJoueurCircuit(recordsJeu.conversion, joueursById, type),
+                tiebreaksGagnes: meilleurJoueurCircuit(recordsJeu.tiebreaks, joueursById, type),
+                plusLongMatch: meilleurJoueurCircuit(recordsJeu.plusLongMatch, joueursById, type),
+                sets60: meilleurJoueurCircuit(recordsJeu.sets60, joueursById, type)
             };
             if (!surfaceValide) {
                 resultats.dureeNum1 = meilleurJoueurCircuit(donneesNum1Total(), joueursById, type);

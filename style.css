@@ -2923,3 +2923,44 @@ a.lien-adversaire.record-moi,
     font-weight: 400;
     font-size: 0.75rem;
 }
+
+/* Fiche joueur > Statistiques : stats de jeu cumulees (Carriere / Saison) */
+.stats-jeu-portee {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.stats-jeu-scroll {
+    overflow-x: auto;
+    margin-bottom: 16px;
+}
+
+.stats-jeu-table {
+    width: 100%;
+    min-width: 420px;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+}
+
+.stats-jeu-table th {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: #8B98A5;
+    padding: 6px 4px;
+    text-align: center;
+}
+
+.stats-jeu-table td {
+    padding: 6px 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    text-align: center;
+}
+
+.stats-jeu-table td.match-stats-lib {
+    text-align: left;
+}
+
+.stats-jeu-table .match-stats-pct {
+    font-size: 0.68rem;
+}
