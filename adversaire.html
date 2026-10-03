@@ -9,7 +9,7 @@
     <title>Adversaire — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261003c">
+    <link rel="stylesheet" href="style.css?v=20261003d">
 </head>
 <body>
     <div class="dashboard-page">
@@ -471,12 +471,26 @@
                 viewer.innerHTML = '<div class="match-hint">Statistiques indisponibles pour ce match.</div>';
                 return;
             }
+            // Chaque cellule porte un score de comparaison : seul le chiffre du joueur
+            // qui remporte la stat est mis en gras (rien en cas d'egalite). Ratios :
+            // compares au pourcentage, puis au nombre reussi ; une case vide (aucune
+            // tentative) ne gagne jamais face a une vraie valeur.
             const ratio = function (ok, total) {
-                if (!total) return '<span class="match-stats-vide">—</span>';
-                return ok + '/' + total + ' <span class="match-stats-pct">(' + Math.round(ok / total * 100) + ' %)</span>';
+                if (!total) return { html: '<span class="match-stats-vide">—</span>', score: null };
+                return { html: ok + '/' + total + ' <span class="match-stats-pct">(' + Math.round(ok / total * 100) + ' %)</span>', score: [ok / total, ok] };
+            };
+            const nombre = function (n) { return { html: String(n), score: [n] }; };
+            const comparer = function (x, y) {
+                if (!x.score || !y.score) return x.score ? 1 : (y.score ? -1 : 0);
+                for (let i = 0; i < x.score.length; i++) {
+                    if (x.score[i] !== y.score[i]) return x.score[i] > y.score[i] ? 1 : -1;
+                }
+                return 0;
             };
             const ligne = function (libelle, a, b) {
-                return '<tr><td class="match-stats-val">' + a + '</td><td class="match-stats-lib">' + libelle + '</td><td class="match-stats-val">' + b + '</td></tr>';
+                const c = comparer(a, b);
+                const cellule = function (v, gagne) { return '<td class="match-stats-val' + (gagne ? ' match-stats-gagne' : '') + '">' + v.html + '</td>'; };
+                return '<tr>' + cellule(a, c > 0) + '<td class="match-stats-lib">' + libelle + '</td>' + cellule(b, c < 0) + '</tr>';
             };
             const A = r.stats.A, B = r.stats.B;
             const tbTotal = A.tbPts + B.tbPts;
@@ -491,10 +505,10 @@
                         ${ligne('Points importants gagnés', ratio(A.piOk, A.pi), ratio(B.piOk, B.pi))}
                         ${ligne('Jeux de service gagnés', ratio(A.svcOk, A.svc), ratio(B.svcOk, B.svc))}
                         ${ligne('Jeux de retour gagnés', ratio(A.retOk, A.ret), ratio(B.retOk, B.ret))}
-                        ${A.tb ? ligne('Tie-breaks gagnés', A.tbOk + '/' + A.tb, B.tbOk + '/' + B.tb) : ''}
+                        ${A.tb ? ligne('Tie-breaks gagnés', { html: A.tbOk + '/' + A.tb, score: [A.tbOk] }, { html: B.tbOk + '/' + B.tb, score: [B.tbOk] }) : ''}
                         ${A.tb ? ligne('Points de tie-break gagnés', ratio(A.tbPts, tbTotal), ratio(B.tbPts, tbTotal)) : ''}
-                        ${ligne('Plus longue série de jeux', A.serie, B.serie)}
-                        ${ligne('Jeux gagnés', A.jeux, B.jeux)}
+                        ${ligne('Plus longue série de jeux', nombre(A.serie), nombre(B.serie))}
+                        ${ligne('Jeux gagnés', nombre(A.jeux), nombre(B.jeux))}
                     </tbody>
                 </table>
             `;

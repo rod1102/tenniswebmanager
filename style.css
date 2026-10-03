@@ -2912,9 +2912,15 @@ a.lien-adversaire.record-moi,
 }
 
 .match-stats-val {
-    color: #F5F7FA;
-    font-weight: 600;
+    color: #C9D1DA;
+    font-weight: 400;
     font-variant-numeric: tabular-nums;
+}
+
+/* Bouton Stats : chiffre du joueur qui remporte la stat */
+.match-stats-gagne {
+    color: #FFFFFF;
+    font-weight: 700;
 }
 
 .match-stats-pct,
