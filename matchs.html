@@ -9,7 +9,7 @@
     <title>Matchs — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20260905">
+    <link rel="stylesheet" href="style.css?v=20261003b">
 </head>
 <body>
     <div class="dashboard-page">
@@ -411,6 +411,118 @@
             });
         }
 
+        // ---------- Stats d'un match (bouton "Stats", a cote du Teletexte) ----------
+        // Recalculees entierement a partir du deroule enregistre (evenements), donc
+        // valables pour tous les matchs deja joues. Cotes A/B : reperes par
+        // "--- Set N (Service : NOM) ---" (serveur A ou B) et "Set N remporte par
+        // NOM (a-b)". Balles de break/set/match : annonce "<Libelle> pour NOM", suivie
+        // de son issue ("... sauve par ..." = sauvee, sinon convertie). Un point
+        // decisif de tie-break compte comme balle de match s'il pouvait conclure le
+        // match, sinon comme balle de set. Demande utilisateur 2026-10-03.
+        function calculerStatsMatch(evenements) {
+            const noms = { A: null, B: null };
+            const stats = {
+                A: { bb: 0, bbOk: 0, bs: 0, bsOk: 0, bm: 0, bmOk: 0 },
+                B: { bb: 0, bbOk: 0, bs: 0, bsOk: 0, bm: 0, bmOk: 0 }
+            };
+            const jeuxParSet = {};
+            let setsRequis = 2;
+            let setsAvantTB = null;
+
+            evenements.forEach(function (e) {
+                if (e.type === 'set_debut') {
+                    const m = /Service : (.+)\) ---/.exec(e.texte || '');
+                    if (m && (e.serveur === 'A' || e.serveur === 'B') && !noms[e.serveur]) noms[e.serveur] = m[1];
+                } else if (e.type === 'set_fin') {
+                    const m = /remporte par (.+) \(/.exec(e.texte || '');
+                    if (m && e.jeuxA !== e.jeuxB) {
+                        const cote = e.jeuxA > e.jeuxB ? 'A' : 'B';
+                        if (!noms[cote]) noms[cote] = m[1];
+                    }
+                } else if (e.type === 'match_fin' && typeof e.setsA === 'number') {
+                    setsRequis = Math.max(2, e.setsA, e.setsB);
+                }
+            });
+            // Cote encore inconnu (ex. meme serveur au debut de chaque set et victoire
+            // en sets secs) : n'importe quel autre nom cite dans le deroule.
+            if (noms.A && !noms.B || noms.B && !noms.A) {
+                const connu = noms.A || noms.B;
+                evenements.forEach(function (e) {
+                    const t = e.texte || '';
+                    const m = /(?: pour | remporte par )(.+?)(?: \(|$)/.exec(t);
+                    if (m && m[1] !== connu && !(noms.A && noms.B)) {
+                        if (!noms.A) noms.A = m[1]; else noms.B = m[1];
+                    }
+                });
+            }
+            if (noms.A && !noms.B) noms.B = '?';
+            if (noms.B && !noms.A) noms.A = '?';
+            const coteDe = function (nom) { return nom === noms.A ? 'A' : (nom === noms.B ? 'B' : null); };
+
+            for (let i = 0; i < evenements.length; i++) {
+                const e = evenements[i];
+                if (e.type === 'jeu' || e.type === 'set_fin') {
+                    if (e.numeroSet && typeof e.jeuxA === 'number') jeuxParSet[e.numeroSet] = { A: e.jeuxA, B: e.jeuxB };
+                    continue;
+                }
+                if (e.type === 'tie_break_debut') { setsAvantTB = { A: e.setsA, B: e.setsB }; continue; }
+                if (e.type !== 'point_important') continue;
+                const texte = e.texte || '';
+                const pos = texte.lastIndexOf(' pour ');
+                if (pos === -1) continue; // ligne d'issue, traitee avec son annonce
+                const libelle = texte.slice(0, pos);
+                const cote = coteDe(texte.slice(pos + 6));
+                if (!cote) continue;
+                const issue = evenements[i + 1] && evenements[i + 1].type === 'point_important' ? (evenements[i + 1].texte || '') : '';
+                const convertie = issue !== '' && issue.indexOf(' sauve par ') === -1;
+                const s = stats[cote];
+                if (libelle.indexOf('Balle de break') === 0) { s.bb++; if (convertie) s.bbOk++; }
+                if (libelle.indexOf('Balle de set') !== -1) { s.bs++; if (convertie) s.bsOk++; }
+                if (libelle.indexOf('Balle de match') !== -1) { s.bm++; if (convertie) s.bmOk++; }
+                if (libelle === 'Point decisif') {
+                    const estBalleMatch = setsAvantTB && setsAvantTB[cote] + 1 >= setsRequis;
+                    if (estBalleMatch) { s.bm++; if (convertie) s.bmOk++; } else { s.bs++; if (convertie) s.bsOk++; }
+                }
+            }
+
+            const jeux = { A: 0, B: 0 };
+            Object.keys(jeuxParSet).forEach(function (n) { jeux.A += jeuxParSet[n].A; jeux.B += jeuxParSet[n].B; });
+            return { noms: noms, stats: stats, jeux: jeux };
+        }
+
+        function afficherStatsMatch(viewer, match) {
+            const r = calculerStatsMatch(match.evenements || []);
+            if (!r.noms.A) {
+                viewer.innerHTML = '<div class="match-hint">Statistiques indisponibles pour ce match.</div>';
+                return;
+            }
+            const ratio = function (ok, total) {
+                if (!total) return '<span class="match-stats-vide">—</span>';
+                return ok + '/' + total + ' <span class="match-stats-pct">(' + Math.round(ok / total * 100) + ' %)</span>';
+            };
+            const ligne = function (libelle, a, b) {
+                return '<tr><td class="match-stats-val">' + a + '</td><td class="match-stats-lib">' + libelle + '</td><td class="match-stats-val">' + b + '</td></tr>';
+            };
+            const A = r.stats.A, B = r.stats.B;
+            viewer.innerHTML = `
+                <table class="match-stats-table">
+                    <thead><tr><th>${echapperStats(r.noms.A)}</th><th></th><th>${echapperStats(r.noms.B)}</th></tr></thead>
+                    <tbody>
+                        ${ligne('Balles de break converties', ratio(A.bbOk, A.bb), ratio(B.bbOk, B.bb))}
+                        ${ligne('Balles de set converties', ratio(A.bsOk, A.bs), ratio(B.bsOk, B.bs))}
+                        ${ligne('Balles de match converties', ratio(A.bmOk, A.bm), ratio(B.bmOk, B.bm))}
+                        ${ligne('Jeux gagnés', r.jeux.A, r.jeux.B)}
+                    </tbody>
+                </table>
+            `;
+        }
+
+        function echapperStats(texte) {
+            return String(texte).replace(/[&<>"']/g, function (c) {
+                return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+            });
+        }
+
         async function activerMode(matchId, mode, boutonClique) {
             // Cible la carte du bouton clique (closest), pas une recherche globale par
             // id - la vue Multiplex affiche desormais les memes matchs que la vue liste
@@ -431,6 +543,7 @@
                 const match = await obtenirDetail(matchId);
                 if (mode === 'resultat') afficherResultat(viewer, match);
                 else if (mode === 'teletexte') afficherTeletexte(viewer, match);
+                else if (mode === 'stats') afficherStatsMatch(viewer, match);
                 else if (mode === 'live') afficherLive(viewer, match, matchId);
             } catch (err) {
                 viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
@@ -549,6 +662,7 @@
                 const match = await obtenirDetailBot(tournoiMatchId);
                 if (mode === 'resultat') afficherResultatBot(viewer, match);
                 else if (mode === 'teletexte') afficherTeletexteBot(viewer, match);
+                else if (mode === 'stats') afficherStatsMatch(viewer, match);
                 else if (mode === 'live') afficherLiveBot(viewer, match, tournoiMatchId);
             } catch (err) {
                 viewer.innerHTML = '<div class="match-hint">' + err.message + '</div>';
@@ -641,6 +755,7 @@
                     <button class="match-mode-btn" data-mode="live" ${liveDisabled}>Live</button>
                     <button class="match-mode-btn" data-mode="resultat">Résultat direct</button>
                     <button class="match-mode-btn" data-mode="teletexte">Téletexte</button>
+                    <button class="match-mode-btn" data-mode="stats">Stats</button>
                 </div>
                 <div class="match-viewer"></div>
             `;
@@ -675,6 +790,7 @@
                         <button class="match-mode-btn" data-mode="live">Live</button>
                         <button class="match-mode-btn" data-mode="resultat">Résultat direct</button>
                         <button class="match-mode-btn" data-mode="teletexte">Téletexte</button>
+                    <button class="match-mode-btn" data-mode="stats">Stats</button>
                     </div>
                     <div class="match-viewer"></div>
                 `;

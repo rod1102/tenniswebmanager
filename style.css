@@ -2872,3 +2872,54 @@ a.lien-adversaire.record-moi,
 .planning-week-hint .planning-tournoi-lien:hover {
     color: #FFFFFF;
 }
+
+/* Bouton "Stats" d'un match (a cote du Teletexte) : tableau comparatif des 2 joueurs */
+.match-mode-mini-groupe {
+    display: flex;
+    gap: 6px;
+    flex-shrink: 0;
+}
+
+.match-stats-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin-top: 6px;
+    font-size: 0.85rem;
+}
+
+.match-stats-table th {
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: #D4F000;
+    padding: 6px 4px 8px;
+    text-align: center;
+    width: 35%;
+}
+
+.match-stats-table th:nth-child(2) {
+    width: 30%;
+}
+
+.match-stats-table td {
+    padding: 7px 4px;
+    border-top: 1px solid rgba(255, 255, 255, 0.07);
+    text-align: center;
+}
+
+.match-stats-lib {
+    color: #8B98A5;
+    font-size: 0.75rem;
+}
+
+.match-stats-val {
+    color: #F5F7FA;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.match-stats-pct,
+.match-stats-vide {
+    color: #8B98A5;
+    font-weight: 400;
+    font-size: 0.75rem;
+}
