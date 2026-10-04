@@ -436,15 +436,19 @@
             `;
         }
 
-        function construirePanneaux(circuit, liste) {
+        // Ton personnage + 2 places au-dessus et 2 en dessous dans un classement.
+        function voisinageDe(liste) {
             const avecRang = liste.map(function (j, i) { return Object.assign({}, j, { rang: i + 1 }); });
-            const top5 = avecRang.slice(0, 5);
             const idxMoi = avecRang.findIndex(function (j) { return j.estMoi; });
-            const voisinage = idxMoi === -1 ? [] : avecRang.slice(Math.max(0, idxMoi - 2), Math.min(avecRang.length, idxMoi + 3));
+            return idxMoi === -1 ? [] : avecRang.slice(Math.max(0, idxMoi - 2), Math.min(avecRang.length, idxMoi + 3));
+        }
 
+        function construirePanneaux(circuit, live, race) {
+            const top5 = live.slice(0, 5).map(function (j, i) { return Object.assign({}, j, { rang: i + 1 }); });
             return [
                 panneauClassementHtml(circuit + ' — Top 5 Live', top5),
-                panneauClassementHtml(circuit + ' — Autour de toi', voisinage)
+                panneauClassementHtml(circuit + ' — Autour de toi (Live)', voisinageDe(live)),
+                panneauClassementHtml(circuit + ' — Autour de toi (Race)', voisinageDe(race || []))
             ];
         }
 
@@ -466,7 +470,7 @@
             const data = await response.json();
             if (!response.ok) return;
 
-            pagesClassement = construirePanneaux('ATP', data.atp.live).concat(construirePanneaux('WTA', data.wta.live));
+            pagesClassement = construirePanneaux('ATP', data.atp.live, data.atp.race).concat(construirePanneaux('WTA', data.wta.live, data.wta.race));
             pageActuelle = 0;
             afficherPageClassement();
         }

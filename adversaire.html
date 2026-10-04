@@ -183,11 +183,13 @@
 
         function ligneClassement(info) {
             const classementTxt = info.classement ? info.classement : 'Non classé';
+            const classementRaceTxt = info.classementRace ? info.classementRace : 'Non classé';
             const meilleurTxt = info.meilleurClassement
                 ? info.meilleurClassement.rang + ' (' + info.meilleurClassement.semaines + (info.meilleurClassement.semaines > 1 ? ' semaines' : ' semaine') + ')'
                 : 'Pas encore de données';
             return `
-                <div class="stat-row"><span class="stat-label">Classement</span><span class="stat-value">${classementTxt}</span></div>
+                <div class="stat-row"><span class="stat-label">Classement Live</span><span class="stat-value">${classementTxt}</span></div>
+                <div class="stat-row"><span class="stat-label">Classement Race</span><span class="stat-value">${classementRaceTxt}</span></div>
                 <div class="stat-row"><span class="stat-label">Meilleur classement</span><span class="stat-value">${meilleurTxt}</span></div>
             `;
         }

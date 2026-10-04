@@ -9604,6 +9604,7 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
             main_forte: adversaire.main_forte, type: adversaire.type,
             circuit: circuitAdversaire,
             classement: calculerRangsLiveGlobal(circuitAdversaire).get(cleAdversaire) || null,
+            classementRace: calculerRangsRaceGlobal(circuitAdversaire).get(cleAdversaire) || null,
             meilleurClassement: meilleurClassement(circuitAdversaire, cleAdversaire),
             coachUserId: adversaire.user_id, coachNom: nomCoach(adversaire.user_id),
             photoAvatar: adversaire.photo_avatar,
@@ -9751,6 +9752,7 @@ app.get('/api/adversaire/rival/:rivalId', (req, res) => {
         const infos = {
             nom: rival.nom, nationalite: rival.nationalite, drapeau: drapeau(rival.nationalite), circuit: rival.circuit,
             classement: calculerRangsLiveGlobal(rival.circuit).get(cleRival) || null,
+            classementRace: calculerRangsRaceGlobal(rival.circuit).get(cleRival) || null,
             meilleurClassement: meilleurClassement(rival.circuit, cleRival)
         };
 
