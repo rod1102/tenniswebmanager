@@ -8332,12 +8332,22 @@ app.post('/api/tournois/mise-energie', (req, res) => {
 app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
     try {
         const { calendrierId } = req.params;
-        const { playerId, semaine } = req.query;
+        const { semaine } = req.query;
+        let { playerId } = req.query;
         const userId = req.userId;
 
         const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === calendrierId; });
         if (!entree) {
             return res.status(404).json({ error: 'Tournoi introuvable dans le calendrier.' });
+        }
+
+        // Lien sans playerId (articles de Presse, en-tetes de tournoi des derniers
+        // matchs d'une fiche joueur...) : on prend le personnage du visiteur sur le
+        // circuit du tournoi - avant, la page renvoyait directement au Calendrier
+        // (bug signale par l'utilisateur, 2026-10-04).
+        if (!playerId || playerId === 'null' || playerId === 'undefined') {
+            const monPerso = db.prepare('SELECT id FROM players WHERE user_id = ? AND type = ?').get(userId, entree.circuit === 'ATP' ? 'joueur' : 'joueuse');
+            playerId = monPerso ? monPerso.id : null;
         }
 
         const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, userId);
@@ -8566,6 +8576,7 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
 
         res.json({
             success: true,
+            playerId: player.id,
             info: Object.assign({}, entree, { baremePoints: bareme, paysDrapeau: drapeau(entree.pays) }),
             semaine: semaineNum,
             estInscrit,

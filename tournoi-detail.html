@@ -72,9 +72,11 @@
         const params = new URLSearchParams(window.location.search);
         const calendrierId = params.get('calendrierId');
         const semaineCible = parseInt(params.get('semaine'), 10);
-        const playerId = params.get('playerId');
+        // playerId optionnel : absent (lien de la Presse, d'une fiche joueur...), le
+        // serveur choisit ton personnage du circuit du tournoi et le renvoie.
+        let playerId = params.get('playerId');
 
-        if (!calendrierId || !semaineCible || !playerId) {
+        if (!calendrierId || !semaineCible) {
             window.location.href = 'tournois.html';
         }
 
@@ -1344,13 +1346,14 @@
         }
 
         async function chargerFiche() {
-            const response = await fetch('/api/tournois/fiche/' + calendrierId + '?userId=' + userId + '&playerId=' + playerId + '&semaine=' + semaineCible);
+            const response = await fetch('/api/tournois/fiche/' + calendrierId + '?userId=' + userId + (playerId ? '&playerId=' + playerId : '') + '&semaine=' + semaineCible);
             const data = await response.json();
 
             if (!response.ok) {
                 document.getElementById('tab-info').innerHTML = '<div class="match-hint">' + (data.error || 'Impossible de charger ce tournoi.') + '</div>';
                 return;
             }
+            if (!playerId && data.playerId) playerId = String(data.playerId);
 
             ficheCourante = data;
             document.getElementById('tournoi-titre').textContent = data.info.nom;
