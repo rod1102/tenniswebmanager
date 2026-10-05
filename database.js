@@ -1852,4 +1852,27 @@ if (db.prepare('SELECT patch_admin_szynal_20260927 AS p FROM jeu_etat WHERE id =
     db.prepare('UPDATE jeu_etat SET patch_admin_szynal_20260927 = 1 WHERE id = 1').run();
 }
 
+// Correctif unique demande par l'utilisateur (admin) le 2026-10-05 : Magnus JØRGENSEN
+// deplace 10 points de Resistance vers Service, et recoit 11 points en Service (le
+// point en plus compense l'erosion de la semaine precedente sur ces 10 points).
+// Garde-fous : un seul joueur avec exactement ce prenom/nom, au moins 10 en
+// Resistance, Service plafonne a 100 - sinon rien n'est modifie (log explicite).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_jorgensen_service_20261005 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_jorgensen_service_20261005 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const candidats = db.prepare("SELECT id, prenom, nom, service, resistance FROM players WHERE prenom = 'Magnus'").all()
+        .filter(function (p) { return String(p.nom).trim().toUpperCase() === 'JØRGENSEN'; });
+    if (candidats.length !== 1) {
+        console.log('[patch_jorgensen_service_20261005] non applique : ' + candidats.length + ' joueur(s) Magnus JØRGENSEN trouve(s)');
+    } else if (candidats[0].resistance < 10) {
+        console.log('[patch_jorgensen_service_20261005] non applique : Resistance trop basse (' + candidats[0].resistance + ')');
+    } else {
+        const j = candidats[0];
+        const nouvelleResistance = j.resistance - 10;
+        const nouveauService = Math.min(100, j.service + 11);
+        db.prepare('UPDATE players SET resistance = ?, service = ? WHERE id = ?').run(nouvelleResistance, nouveauService, j.id);
+        console.log('[patch_jorgensen_service_20261005] joueur ' + j.id + ' : Resistance ' + j.resistance + ' -> ' + nouvelleResistance + ', Service ' + j.service + ' -> ' + nouveauService);
+    }
+    db.prepare('UPDATE jeu_etat SET patch_jorgensen_service_20261005 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
