@@ -1246,13 +1246,25 @@ app.get('/api/admin/niveaux-confrontation/:playerId/:adversaire', (req, res) => 
         if (!estAdmin(req.userId)) {
             return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
         }
-        const player = db.prepare('SELECT id, prenom, nom FROM players WHERE id = ?').get(Number(req.params.playerId));
+        // :playerId = numero OU morceau de nom ("stakhan") - 2026-10-05.
+        let player = /^\d+$/.test(req.params.playerId)
+            ? db.prepare('SELECT id, prenom, nom, disposition_indoor FROM players WHERE id = ?').get(Number(req.params.playerId))
+            : null;
+        if (!player) {
+            const cherche = req.params.playerId.toLowerCase();
+            const trouves = db.prepare("SELECT id, prenom, nom, disposition_indoor FROM players WHERE statut = 'valide'").all()
+                .filter(function (p) { return (p.prenom + ' ' + p.nom).toLowerCase().indexOf(cherche) !== -1; });
+            if (trouves.length > 1) return res.status(400).json({ error: 'Plusieurs joueurs correspondent', joueurs: trouves.map(function (p) { return p.id + ' ' + p.prenom + ' ' + p.nom; }) });
+            player = trouves[0];
+        }
         if (!player) return res.status(404).json({ error: 'Joueur introuvable.' });
         const recherche = '%' + req.params.adversaire.toLowerCase() + '%';
 
         const matchs = db.prepare(`
             SELECT matchs.id, matchs.semaine, matchs.surface, matchs.numero_tour, matchs.score, matchs.vainqueur, matchs.date_creation,
                    matchs.niveau_joueur, matchs.niveau_adversaire, matchs.niveau_mental_joueur, matchs.niveau_mental_adversaire, tournois.nom AS tournoi,
+                   tournois.calendrier_id,
+                   CASE WHEN tj1.player_id = matchs.player_id THEN tj2.player_id ELSE tj1.player_id END AS adversaire_player_id,
                    CASE WHEN tj1.player_id = matchs.player_id THEN tj2.nom ELSE tj1.nom END AS adversaire_nom,
                    CASE WHEN tj1.player_id = matchs.player_id THEN tj2.est_reel ELSE tj1.est_reel END AS adversaire_reel
             FROM matchs
@@ -1265,7 +1277,25 @@ app.get('/api/admin/niveaux-confrontation/:playerId/:adversaire', (req, res) => 
             ORDER BY matchs.id DESC
             LIMIT 10
         `).all(player.id, recherche).map(function (m) {
+            // Disposition Indoor : bonus inclus dans les niveaux enregistres si le
+            // tournoi est en salle. Calcule avec les points ACTUELS (ils ont pu
+            // changer depuis le match, ex. coaching mental). Un bot n'a pas de
+            // disposition.
+            const entreeCal = CALENDRIER_TOURNOIS.find(function (e) { return e.id === m.calendrier_id; });
+            const indoor = !!(entreeCal && entreeCal.indoor);
+            const adv = m.adversaire_reel && m.adversaire_player_id
+                ? db.prepare('SELECT disposition_indoor FROM players WHERE id = ?').get(m.adversaire_player_id) : null;
+            const bonusMoi = indoor ? bonusDisposition(player.disposition_indoor) : 0;
+            const bonusAdv = indoor && adv ? bonusDisposition(adv.disposition_indoor) : 0;
+            const moins = function (v, b) { return v === null || v === undefined ? null : v - b; };
             return Object.assign({}, m, {
+                tournoi_indoor: indoor,
+                indoor_joueur: { points: player.disposition_indoor || 0, bonus: bonusMoi },
+                indoor_adversaire: adv ? { points: adv.disposition_indoor || 0, bonus: bonusAdv } : null,
+                niveau_joueur_sans_indoor: moins(m.niveau_joueur, bonusMoi),
+                niveau_adversaire_sans_indoor: moins(m.niveau_adversaire, bonusAdv),
+                niveau_mental_joueur_sans_indoor: moins(m.niveau_mental_joueur, bonusMoi),
+                niveau_mental_adversaire_sans_indoor: moins(m.niveau_mental_adversaire, bonusAdv),
                 saison: phaseAffichee(m.semaine).numeroSaison,
                 semaine_saison: positionSemaineAffichee(m.semaine),
                 // Enregistres directement depuis le 2026-10-01 ; avant, seul celui d'un
