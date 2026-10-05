@@ -1313,7 +1313,7 @@ app.get('/api/admin/joueurs-afk', (req, res) => {
         const toujours = lignes.filter(function (l) { return l.toujoursAfk; });
         const actuellement = lignes.filter(function (l) { return l.afkActuellement; });
         const auMoinsUneFois = lignes.filter(function (l) { return l.semainesAfk > 0; })
-            .sort(function (a, b) { return (b.semainesAfk - a.semainesAfk) || a.coach.localeCompare(b.coach); })
+            .sort(function (a, b) { return (b.semainesAfk - a.semainesAfk) || String(a.coach || '').localeCompare(String(b.coach || '')); })
             .map(function (l) { return { nom: l.nom.replace(/\s+/g, ' ').trim(), circuit: l.circuit, coach: l.coach, semainesAfk: l.semainesAfk, semainesJournalisees: l.semainesJournalisees }; });
         const coachsToujoursAfk = new Set();
         const parCoach = new Map();
