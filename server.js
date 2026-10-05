@@ -1283,6 +1283,165 @@ app.get('/api/admin/niveaux-confrontation/:playerId/:adversaire', (req, res) => 
     }
 });
 
+// Relance par e-mail des coachs AFK (campagne unique du 2026-10-05, textes valides
+// par l'utilisateur). 3 versions selon la situation du coach, liste de pseudos
+// arretee avec l'utilisateur a partir de /api/admin/joueurs-afk. GET sans parametre =
+// apercu (destinataires + texte exact, RIEN n'est envoye) ; ?envoyer=OUI = envoi
+// reel via Resend. Chaque coach ne recoit la campagne qu'UNE fois (table
+// relances_email) : recharger la page d'envoi ne renvoie rien.
+const CAMPAGNE_RELANCE_AFK = 'afk-2026-10-05';
+const COACHS_RELANCE_AFK = {
+    1: ['angelo', 'Frost', 'gleps', 'Jean-Eudes RUEL', 'Mervvyn', 'Milo', 'Sorikai', 'Thabo', 'Gropoto', 'MaxLCT', 'Tempaah', 'Gustave Ricou', 'LUCIO2A', 'Laojun'],
+    2: ['alphacho', 'Thomas Grandjean', 'Jerem', 'Capteno', 'Rebardinho', 'Viken'],
+    3: ['Fabio Carrasco', 'Jules Dumoret']
+};
+const LIEN_SITE_RELANCE = 'https://www.tenniswebmanager.com';
+const LIEN_DISCORD_RELANCE = 'https://discord.gg/FFXan3H9x';
+
+function echapperHtmlMail(t) {
+    return String(t).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+}
+
+// Contenu d'une version : liste de blocs { type: 'p'|'ul'|'ol', ... } rendue en
+// HTML et en texte brut (meme contenu).
+function contenuRelance(version, pseudo, noms, nbSemaines, autrePersoActif) {
+    const listeNoms = noms.length > 1 ? noms.slice(0, -1).join(', ') + ' et ' + noms[noms.length - 1] : noms[0];
+    const pluriel = noms.length > 1;
+    const blocXp = { type: 'p', html: '⚠️ <strong>Attention :</strong> les points d\'entraînement (XP) gagnés doivent quand même être <strong>répartis chaque semaine</strong> sur la fiche de ton joueur. Sinon, ils sont perdus.' };
+    const lienSite = { type: 'p', html: '👉 <a href="' + LIEN_SITE_RELANCE + '">' + LIEN_SITE_RELANCE.replace('https://', '') + '</a>' };
+    const discord = '<a href="' + LIEN_DISCORD_RELANCE + '">' + LIEN_DISCORD_RELANCE + '</a>';
+    const n = echapperHtmlMail(listeNoms);
+    let sujet, blocs;
+    if (version === 1) {
+        sujet = listeNoms + (pluriel ? ' t\'attendent' : ' t\'attend') + ' sur le circuit 🎾';
+        blocs = [
+            { type: 'p', html: 'Salut ' + echapperHtmlMail(pseudo) + ',' },
+            { type: 'p', html: (autrePersoActif
+                ? n + ' n\'a pas reçu de consignes depuis quelques semaines sur Tennis Web Manager.'
+                : 'Ça fait quelques semaines qu\'on ne t\'a pas vu sur Tennis Web Manager, et ' + (pluriel ? 'tes deux protégés, ' + n + ', n\'ont' : n + ' n\'a') + ' pas reçu de consignes depuis.') + ' Une semaine sans planification est une semaine perdue : pas d\'entraînement, pas d\'XP, et pendant ce temps l\'érosion continue de grignoter ' + (pluriel ? 'leurs' : 'ses') + ' compétences.' },
+            { type: 'p', html: 'Pour ne plus rien perdre :' },
+            { type: 'ul', items: [
+                '<strong>« Planifier toute la saison »</strong> (bouton « Voir plus » sur la fiche de ton joueur) : tu fixes tous les entraînements de la saison d\'un coup, et ils s\'appliquent tout seuls.',
+                '<strong>Le ♥ sur la page Tournois</strong> : mets en favori les tournois qui te tentent, ton joueur y est inscrit automatiquement à l\'ouverture des inscriptions.'
+            ] },
+            blocXp, lienSite,
+            { type: 'p', html: 'Une question, un souci ? Retrouve-nous sur le Discord : ' + discord },
+            { type: 'p', html: 'À bientôt sur les courts,<br>Team Tennis Web Manager' }
+        ];
+    } else if (version === 2) {
+        sujet = 'Petite astuce pour ne plus perdre de semaines';
+        blocs = [
+            { type: 'p', html: 'Salut ' + echapperHtmlMail(pseudo) + ',' },
+            { type: 'p', html: 'Merci de faire vivre ' + n + ' sur le circuit ! Petit constat : il ' + (pluriel ? 'leur' : 'lui') + ' est arrivé de passer ' + nbSemaines + ' semaine' + (nbSemaines > 1 ? 's' : '') + ' sans consigne. Une semaine non planifiée est une semaine perdue, sans entraînement ni XP.' },
+            { type: 'p', html: 'Pour que ça n\'arrive plus :' },
+            { type: 'ul', items: [
+                '<strong>« Planifier toute la saison »</strong> (bouton « Voir plus » sur la fiche de ton joueur) : tu fixes les entraînements à l\'avance, et ils s\'appliquent même si tu ne passes pas.',
+                '<strong>Le ♥ sur la page Tournois</strong> : inscription automatique aux tournois qui t\'intéressent.'
+            ] },
+            blocXp, lienSite,
+            { type: 'p', html: 'Bon jeu, et à bientôt sur le Discord : ' + discord },
+            { type: 'p', html: 'Team Tennis Web Manager' }
+        ];
+    } else {
+        sujet = 'Bienvenue sur Tennis Web Manager ! Par où commencer';
+        blocs = [
+            { type: 'p', html: 'Salut ' + echapperHtmlMail(pseudo) + ',' },
+            { type: 'p', html: 'Bienvenue sur le circuit ! ' + n + (pluriel ? ' sont prêts' : ' est prêt') + ', il ne ' + (pluriel ? 'leur' : 'lui') + ' manque plus que tes consignes. Pour l\'instant, ' + (pluriel ? 'leurs' : 'ses') + ' premières semaines sont passées sans planification, donc sans entraînement ni XP.' },
+            { type: 'p', html: 'Pour bien démarrer :' },
+            { type: 'ol', items: [
+                'Sur la fiche de ton joueur, choisis l\'entraînement des prochaines semaines, ou clique sur « Voir plus » pour <strong>planifier toute la saison</strong> d\'un coup.',
+                'Chaque semaine, <strong>répartis les points d\'entraînement (XP)</strong> gagnés dans les compétences de ton joueur. Sinon, ils sont perdus.',
+                'Sur la page <strong>Tournois</strong>, inscris-toi aux tournois de ton niveau, ou mets-les en ♥ pour une inscription automatique.',
+                'La page <strong>Règles</strong> explique tout le reste : surfaces, styles de jeu, énergie…'
+            ] },
+            lienSite,
+            { type: 'p', html: 'Si tu bloques sur quoi que ce soit, passe sur le Discord, on t\'aidera avec plaisir : ' + discord },
+            { type: 'p', html: 'À très vite sur les courts,<br>Team Tennis Web Manager' }
+        ];
+    }
+    const html = blocs.map(function (b) {
+        if (b.type === 'p') return '<p>' + b.html + '</p>';
+        const tag = b.type;
+        return '<' + tag + '>' + b.items.map(function (i) { return '<li>' + i + '</li>'; }).join('') + '</' + tag + '>';
+    }).join('\n');
+    const versTexte = function (h) { return h.replace(/<br>/g, '\n').replace(/<a href="([^"]+)">[^<]*<\/a>/g, '$1').replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'"); };
+    const texte = blocs.map(function (b) {
+        if (b.type === 'p') return versTexte(b.html);
+        return b.items.map(function (i, k) { return (b.type === 'ol' ? (k + 1) + '. ' : '- ') + versTexte(i); }).join('\n');
+    }).join('\n\n');
+    return { sujet: sujet, html: '<div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.5;color:#1a1a1a;">' + html + '</div>', texte: texte };
+}
+
+app.get('/api/admin/relances-afk', async (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        db.exec('CREATE TABLE IF NOT EXISTS relances_email (user_id INTEGER NOT NULL, campagne TEXT NOT NULL, date_envoi TEXT NOT NULL, PRIMARY KEY (user_id, campagne))');
+        const envoyer = req.query.envoyer === 'OUI';
+        const journal = db.prepare("SELECT COUNT(*) AS n FROM journal_semaine_joueur WHERE player_id = ? AND action_prevue = 'afk'");
+        const destinataires = [];
+        const introuvables = [];
+        [1, 2, 3].forEach(function (version) {
+            COACHS_RELANCE_AFK[version].forEach(function (pseudoCible) {
+                const user = db.prepare('SELECT id, pseudo, email FROM users WHERE TRIM(pseudo) = ? COLLATE NOCASE').get(pseudoCible);
+                if (!user) { introuvables.push(pseudoCible); return; }
+                const persos = db.prepare("SELECT id, prenom, nom, type FROM players WHERE user_id = ? AND statut = 'valide' ORDER BY type").all(user.id)
+                    .map(function (p) { return { nom: (p.prenom + ' ' + p.nom).replace(/\s+/g, ' ').trim(), afk: journal.get(p.id).n }; });
+                // Versions 1/2 : seulement les personnages qui ont ete AFK (un coach
+                // dont l'autre personnage est actif ne recoit pas un message faux).
+                const concernes = version === 3 ? persos : persos.filter(function (p) { return p.afk > 0; });
+                if (concernes.length === 0) { introuvables.push(pseudoCible + ' (aucun personnage concerne)'); return; }
+                const nbSemaines = Math.max.apply(null, concernes.map(function (p) { return p.afk; }));
+                const contenu = contenuRelance(version, user.pseudo, concernes.map(function (p) { return p.nom; }), nbSemaines, concernes.length < persos.length);
+                const dejaEnvoye = !!db.prepare('SELECT 1 FROM relances_email WHERE user_id = ? AND campagne = ?').get(user.id, CAMPAGNE_RELANCE_AFK);
+                destinataires.push({ userId: user.id, pseudo: user.pseudo, email: String(user.email).trim(), version: version, dejaEnvoye: dejaEnvoye, sujet: contenu.sujet, texte: contenu.texte, _html: contenu.html });
+            });
+        });
+
+        const resultats = [];
+        if (envoyer) {
+            if (!resend) return res.status(500).json({ error: 'RESEND_API_KEY absente : aucun envoi possible.' });
+            for (const d of destinataires) {
+                if (d.dejaEnvoye) { resultats.push({ pseudo: d.pseudo, statut: 'deja envoye, ignore' }); continue; }
+                try {
+                    const envoi = await resend.emails.send({
+                        from: 'Tennis Web Manager <noreply@tenniswebmanager.com>',
+                        to: [d.email],
+                        subject: d.sujet,
+                        html: d._html,
+                        text: d.texte
+                    });
+                    if (envoi.error) {
+                        resultats.push({ pseudo: d.pseudo, email: d.email, statut: 'ECHEC', erreur: envoi.error });
+                    } else {
+                        db.prepare('INSERT OR IGNORE INTO relances_email (user_id, campagne, date_envoi) VALUES (?, ?, ?)').run(d.userId, CAMPAGNE_RELANCE_AFK, new Date().toISOString());
+                        resultats.push({ pseudo: d.pseudo, email: d.email, statut: 'envoye' });
+                    }
+                } catch (e) {
+                    resultats.push({ pseudo: d.pseudo, email: d.email, statut: 'ECHEC', erreur: e.message });
+                }
+                // Resend limite le debit (quelques envois/seconde) : petite pause.
+                await new Promise(function (r) { setTimeout(r, 600); });
+            }
+        }
+
+        res.json({
+            success: true,
+            mode: envoyer ? 'ENVOI REEL' : 'APERCU (rien n\'a ete envoye)',
+            nbDestinataires: destinataires.length,
+            introuvables: introuvables,
+            resultatsEnvoi: envoyer ? resultats : undefined,
+            destinataires: destinataires.map(function (d) { return { pseudo: d.pseudo, email: d.email, version: d.version, dejaEnvoye: d.dejaEnvoye, sujet: d.sujet, texte: d.texte }; })
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Joueurs AFK (lecture seule, demande utilisateur 2026-10-05) : a partir du journal
 // hebdomadaire (action_prevue = 'afk' = aucune planification et aucun tournoi cette
 // semaine-la). "Toujours AFK" = toutes ses semaines journalisees sont afk depuis sa
