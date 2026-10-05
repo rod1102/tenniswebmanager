@@ -1283,6 +1283,57 @@ app.get('/api/admin/niveaux-confrontation/:playerId/:adversaire', (req, res) => 
     }
 });
 
+// Joueurs AFK (lecture seule, demande utilisateur 2026-10-05) : a partir du journal
+// hebdomadaire (action_prevue = 'afk' = aucune planification et aucun tournoi cette
+// semaine-la). "Toujours AFK" = toutes ses semaines journalisees sont afk depuis sa
+// creation (jamais rien fait) ; "AFK actuellement" = ses 3 dernieres semaines
+// journalisees sont afk (meme seuil que le budget de creation, cf. plus haut).
+app.get('/api/admin/joueurs-afk', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const joueurs = db.prepare(`
+            SELECT p.id, p.prenom, p.nom, p.type, p.user_id, u.pseudo AS coach
+            FROM players p JOIN users u ON u.id = p.user_id
+            WHERE p.statut = 'valide'
+        `).all();
+        const journal = db.prepare('SELECT action_prevue FROM journal_semaine_joueur WHERE player_id = ? ORDER BY semaine DESC');
+        const lignes = joueurs.map(function (p) {
+            const actions = journal.all(p.id).map(function (r) { return r.action_prevue; });
+            const nbAfk = actions.filter(function (a) { return a === 'afk'; }).length;
+            const trois = actions.slice(0, 3);
+            return {
+                id: p.id, nom: p.prenom + ' ' + p.nom, circuit: p.type === 'joueur' ? 'ATP' : 'WTA', coach: p.coach,
+                semainesJournalisees: actions.length, semainesAfk: nbAfk,
+                toujoursAfk: actions.length > 0 && nbAfk === actions.length,
+                afkActuellement: trois.length === 3 && trois.every(function (a) { return a === 'afk'; })
+            };
+        });
+        const toujours = lignes.filter(function (l) { return l.toujoursAfk; });
+        const actuellement = lignes.filter(function (l) { return l.afkActuellement; });
+        const coachsToujoursAfk = new Set();
+        const parCoach = new Map();
+        lignes.forEach(function (l) {
+            if (!parCoach.has(l.coach)) parCoach.set(l.coach, []);
+            parCoach.get(l.coach).push(l);
+        });
+        parCoach.forEach(function (persos, coach) { if (persos.every(function (l) { return l.toujoursAfk; })) coachsToujoursAfk.add(coach); });
+        res.json({
+            success: true,
+            totalJoueursValides: lignes.length,
+            nbToujoursAfk: toujours.length,
+            nbAfkActuellement: actuellement.length,
+            nbCoachsToujoursAfk: coachsToujoursAfk.size,
+            toujoursAfk: toujours,
+            afkActuellement: actuellement
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/admin/stats-actions-semaine', (req, res) => {
     try {
         if (!estAdmin(req.userId)) {
