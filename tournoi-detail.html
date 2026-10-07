@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
@@ -9,7 +9,7 @@
     <title>Tournoi — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261003d">
+    <link rel="stylesheet" href="style.css?v=20261007a">
 </head>
 <body>
     <div class="dashboard-page">
@@ -695,6 +695,40 @@
             if (estElimination) {
                 activerSurbrillanceParcours(panneau);
             }
+            ajouterBarreDefilementHaut(panneau.querySelector('.bracket'));
+        }
+
+        // Barre de defilement horizontal EN HAUT du tableau, collee en haut de l'ecran
+        // pendant qu'on descend (la barre native du tableau est tout en bas, hors de
+        // vue sur un grand tableau - demande utilisateur 2026-10-07). Synchronisee
+        // dans les deux sens avec le tableau ; masquee s'il n'y a rien a faire defiler.
+        // ResizeObserver : le tableau est souvent rendu dans un onglet masque (largeur
+        // 0), la barre se recale des qu'il devient visible.
+        function ajouterBarreDefilementHaut(bracket) {
+            if (!bracket) return;
+            const barre = document.createElement('div');
+            barre.className = 'bracket-barre-haut';
+            barre.innerHTML = '<div class="bracket-barre-haut-contenu"></div>';
+            bracket.parentNode.insertBefore(barre, bracket);
+            const contenu = barre.firstChild;
+            const recaler = function () {
+                contenu.style.width = bracket.scrollWidth + 'px';
+                barre.style.display = bracket.scrollWidth > bracket.clientWidth + 1 ? 'block' : 'none';
+            };
+            let synchro = false;
+            barre.addEventListener('scroll', function () {
+                if (synchro) { synchro = false; return; }
+                synchro = true;
+                bracket.scrollLeft = barre.scrollLeft;
+            });
+            bracket.addEventListener('scroll', function () {
+                if (synchro) { synchro = false; return; }
+                synchro = true;
+                barre.scrollLeft = bracket.scrollLeft;
+            });
+            if (window.ResizeObserver) new ResizeObserver(recaler).observe(bracket);
+            window.addEventListener('resize', recaler);
+            recaler();
         }
 
         // ---------- Onglet Resultats (reprend la logique de matchs.html) ----------

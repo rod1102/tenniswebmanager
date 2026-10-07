@@ -2435,6 +2435,40 @@ table.points td.pts {
     padding-bottom: 16px;
 }
 
+/* Barre de defilement horizontal en haut du tableau (tournoi-detail.html),
+   collee en haut de l'ecran pendant le defilement vertical. */
+.bracket-barre-haut {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    overflow-x: auto;
+    overflow-y: hidden;
+    height: 16px;
+    margin-bottom: 8px;
+    background: rgba(11, 18, 32, 0.92);
+    border-radius: 8px;
+    scrollbar-color: #D4F000 rgba(255, 255, 255, 0.08);
+    scrollbar-width: auto;
+}
+
+.bracket-barre-haut-contenu {
+    height: 1px;
+}
+
+.bracket-barre-haut::-webkit-scrollbar {
+    height: 12px;
+}
+
+.bracket-barre-haut::-webkit-scrollbar-track {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+}
+
+.bracket-barre-haut::-webkit-scrollbar-thumb {
+    background: #D4F000;
+    border-radius: 8px;
+}
+
 .bracket-round {
     display: flex;
     flex-direction: column;
