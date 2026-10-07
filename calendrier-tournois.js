@@ -10,21 +10,25 @@
 // eligibles en meme temps, sur des semaines qui reviennent chaque annee).
 //
 // Les baremes de points sont ordonnes [Vainqueur, Finale, 1/2, 1/4, 8e, 16e, 32e, 64e]
-// (du plus profond au moins profond). Un tableau plus court que le nombre de
-// tours reels d'un tournoi donne est complete en reutilisant sa derniere
-// valeur (les tours les plus precoces rapportent tous le meme minimum).
+// (du plus profond au moins profond). Chaque bareme doit avoir une valeur pour
+// CHAQUE tour reel de ses tournois (tableau de 48/56 -> 64 places, de 96 -> 128) :
+// un tableau trop court donnait au 1er tour les points du tour suivant (bug
+// signale par l'utilisateur le 2026-10-07, ex. 65 pts pour une defaite au 1er tour
+// du WTA 1000 de Doha). Completes ce jour-la avec les valeurs reelles du circuit ;
+// tableaux de 96 : 2e tour 30 (ATP) / 35 (WTA), 1er tour 10. Les points deja
+// attribues ont ete recalcules par patch_baremes_complets_20261007 (database.js).
 
 const BAREME_POINTS = {
     ATP_SLAM: [2000, 1300, 800, 400, 200, 100, 50, 10],
-    ATP_1000_96: [1000, 650, 400, 200, 100, 50, 10],
+    ATP_1000_96: [1000, 650, 400, 200, 100, 50, 30, 10],
     ATP_1000_56: [1000, 650, 400, 200, 100, 50, 10],
-    ATP_500: [500, 330, 200, 100, 50, 25],
-    ATP_250: [250, 165, 100, 50, 25, 13],
+    ATP_500: [500, 330, 200, 100, 50, 25, 0],
+    ATP_250: [250, 165, 100, 50, 25, 13, 0],
     WTA_SLAM: [2000, 1300, 780, 430, 240, 130, 70, 10],
-    WTA_1000_96: [1000, 650, 390, 215, 120, 65, 10],
-    WTA_1000_56: [1000, 650, 390, 215, 120, 65],
-    WTA_500: [500, 325, 195, 108, 60, 30],
-    WTA_250: [250, 163, 98, 54, 30],
+    WTA_1000_96: [1000, 650, 390, 215, 120, 65, 35, 10],
+    WTA_1000_56: [1000, 650, 390, 215, 120, 65, 10],
+    WTA_500: [500, 325, 195, 108, 60, 30, 1],
+    WTA_250: [250, 163, 98, 54, 30, 1],
     // Masters de fin de saison (format poules) : bareme officiel accumule par match gagne
     // (200/victoire de poule + 400 demie + 500 finale pour l'ATP, un peu moins cote WTA).
     // Simplifie ici en 4 paliers (Vainqueur/Finale/Demi-finale/Poules) pour rester coherent

@@ -1875,4 +1875,50 @@ if (db.prepare('SELECT patch_jorgensen_service_20261005 AS p FROM jeu_etat WHERE
     db.prepare('UPDATE jeu_etat SET patch_jorgensen_service_20261005 = 1 WHERE id = 1').run();
 }
 
+// Correctif unique (2026-10-07, accord explicite de l'utilisateur) : 7 baremes de
+// points etaient trop courts d'une ligne (cf. BAREME_POINTS dans
+// calendrier-tournois.js) - le 1er tour d'un tableau de 48/56/96, ou le 1er tour
+// d'un WTA 250 a 32, recevait les points du tour suivant, et le 2e tour d'un
+// tableau de 96 seulement 10. Recalcule tournoi_joueurs.points_gagnes de TOUS les
+// elimines concernes (reels comme bots, toutes saisons) avec les baremes completes.
+// Un forfait (0 point alors que l'ancien bareme donnait plus) reste a 0.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_baremes_complets_20261007 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_baremes_complets_20261007 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const { BAREME_POINTS } = require('./calendrier-tournois');
+    const ANCIENS = {
+        ATP_1000_96: [1000, 650, 400, 200, 100, 50, 10],
+        ATP_500: [500, 330, 200, 100, 50, 25],
+        ATP_250: [250, 165, 100, 50, 25, 13],
+        WTA_1000_96: [1000, 650, 390, 215, 120, 65, 10],
+        WTA_1000_56: [1000, 650, 390, 215, 120, 65],
+        WTA_500: [500, 325, 195, 108, 60, 30],
+        WTA_250: [250, 163, 98, 54, 30]
+    };
+    const PROFONDEUR = { 'Finale': 1, '1/2 finale': 2, '1/4 finale': 3, '8e de finale': 4, '16e de finale': 5, '32e de finale': 6, '64e de finale': 7 };
+    const lignes = db.prepare(`
+        SELECT tj.id, tj.tour_elimine, tj.points_gagnes, t.bareme FROM tournoi_joueurs tj
+        JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE t.bareme IN (${Object.keys(ANCIENS).map(function () { return '?'; }).join(',')})
+          AND tj.tour_elimine IS NOT NULL AND tj.nom != 'BYE'
+    `).all(...Object.keys(ANCIENS));
+    const maj = db.prepare('UPDATE tournoi_joueurs SET points_gagnes = ? WHERE id = ?');
+    const bilan = {};
+    db.transaction(function () {
+        lignes.forEach(function (l) {
+            const p = PROFONDEUR[l.tour_elimine];
+            if (p === undefined) return;
+            const ancien = ANCIENS[l.bareme], nouveau = BAREME_POINTS[l.bareme];
+            const ancienneValeur = ancien[Math.min(p, ancien.length - 1)];
+            const nouvelleValeur = nouveau[Math.min(p, nouveau.length - 1)];
+            if (ancienneValeur === nouvelleValeur || l.points_gagnes !== ancienneValeur) return; // inchange ou forfait
+            maj.run(nouvelleValeur, l.id);
+            const cle = l.bareme + ' ' + l.tour_elimine + ' : ' + ancienneValeur + ' -> ' + nouvelleValeur;
+            bilan[cle] = (bilan[cle] || 0) + 1;
+        });
+    })();
+    Object.keys(bilan).forEach(function (cle) { console.log('[patch_baremes_complets_20261007] ' + cle + ' (' + bilan[cle] + ' joueurs)'); });
+    if (Object.keys(bilan).length === 0) console.log('[patch_baremes_complets_20261007] aucun point a corriger');
+    db.prepare('UPDATE jeu_etat SET patch_baremes_complets_20261007 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
