@@ -3004,3 +3004,110 @@ a.lien-adversaire.record-moi,
 .stats-jeu-table .match-stats-pct {
     font-size: 0.68rem;
 }
+
+/* Classements ATP/WTA Live/Race "facon site officiel" (classements.html) */
+.classement-table-wrap {
+    overflow-x: auto;
+}
+
+.classement-detaille .classement-table {
+    min-width: 560px;
+}
+
+.classement-detaille .classement-table td {
+    vertical-align: middle;
+}
+
+.classement-col-evol {
+    width: 56px;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.classement-col-num {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.classement-evol {
+    font-size: 0.75rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+
+.classement-evol-hausse {
+    color: #5CC57F;
+    font-weight: 700;
+}
+
+.classement-evol-baisse {
+    color: #E5636B;
+    font-weight: 700;
+}
+
+.classement-evol-egal {
+    color: #8B98A5;
+}
+
+.classement-evol-nouveau {
+    color: #D4F000;
+    font-size: 0.62rem;
+    letter-spacing: 0.04em;
+}
+
+.classement-joueur-cell {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.classement-avatar {
+    flex-shrink: 0;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid rgba(212, 240, 0, 0.55);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.classement-avatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: top;
+}
+
+.classement-avatar-generique {
+    border-color: rgba(255, 255, 255, 0.18);
+}
+
+.classement-avatar-generique img {
+    object-fit: contain;
+    padding: 4px;
+    box-sizing: border-box;
+    opacity: 0.8;
+}
+
+/* Classements : colonnes points a defendre / tournoi en cours / prochain tournoi */
+.classement-detaille .classement-table {
+    min-width: 900px;
+}
+
+.classement-col-tournoi {
+    font-size: 0.78rem;
+    color: #C9D1DA;
+    white-space: nowrap;
+}
+
+.classement-tournoi-en-cours {
+    color: #D4F000;
+    font-weight: 600;
+}
+
+.classement-th-sous {
+    font-size: 0.62rem;
+    font-weight: 400;
+    text-transform: none;
+}

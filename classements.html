@@ -9,7 +9,7 @@
     <title>Classements — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261007a">
+    <link rel="stylesheet" href="style.css?v=20261011b">
 </head>
 <body>
     <div class="dashboard-page">
@@ -50,12 +50,14 @@
             <div class="tabs-nav" id="tabs-nav-type"></div>
 
             <div class="tab-panel">
+                <div id="classement-table-wrap" class="classement-table-wrap">
                 <table class="classement-table">
                     <thead id="classement-thead">
                         <tr><th>Rang</th><th id="classement-entete-nom">Joueur</th><th>Points</th></tr>
                     </thead>
                     <tbody id="classement-body"></tbody>
                 </table>
+                </div>
             </div>
         </div>
     </div>
@@ -196,6 +198,61 @@
             `;
         }
 
+        // Presentation "facon site officiel" des onglets ATP/WTA Live/Race (demande
+        // utilisateur 2026-10-11) : evolution de place (fleche verte/rouge ou =),
+        // photo, drapeau + nom, points, evolution des points sur la semaine, nombre
+        // de tournois joues. Les onglets Coach/Nation/Pronos gardent l'ancienne
+        // presentation (pas de photo ni d'evolution pour eux).
+        function estVueJoueursDetaillee() {
+            return (circuitCourant === 'atp' || circuitCourant === 'wta') && (typeCourant === 'live' || typeCourant === 'race');
+        }
+
+        function evolutionRangHtml(j) {
+            if (j.nouveauClasse) return '<span class="classement-evol classement-evol-nouveau" title="Nouveau classé">NEW</span>';
+            if (j.evolutionRang === null || j.evolutionRang === undefined) return '<span class="classement-evol classement-evol-egal">=</span>';
+            if (j.evolutionRang > 0) return `<span class="classement-evol classement-evol-hausse" title="+${j.evolutionRang} place${j.evolutionRang > 1 ? 's' : ''}">▲ ${j.evolutionRang}</span>`;
+            if (j.evolutionRang < 0) return `<span class="classement-evol classement-evol-baisse" title="${j.evolutionRang} place${j.evolutionRang < -1 ? 's' : ''}">▼ ${-j.evolutionRang}</span>`;
+            return '<span class="classement-evol classement-evol-egal" title="Aucun changement">=</span>';
+        }
+
+        function evolutionPointsHtml(j) {
+            const d = j.evolutionPoints || 0;
+            if (d > 0) return `<span class="classement-evol-hausse">+${d}</span>`;
+            if (d < 0) return `<span class="classement-evol-baisse">${d}</span>`;
+            return '<span class="classement-evol-egal">-</span>';
+        }
+
+        function avatarHtml(j) {
+            const generique = circuitCourant === 'wta' ? 'icone-joueuse.png' : 'icone-joueur.png';
+            const src = j.photoAvatar || generique;
+            return `<span class="classement-avatar${j.photoAvatar ? '' : ' classement-avatar-generique'}"><img src="${src}" alt="" loading="lazy"></span>`;
+        }
+
+        function ligneDetailleeHtml(j, rang) {
+            let lienDebut = '', lienFin = '';
+            if (j.cle && j.cle.indexOf('rival:') === 0) { lienDebut = `<a class="lien-adversaire classement-bot" href="adversaire.html?type=rival&id=${j.cle.slice(6)}">`; lienFin = '</a>'; }
+            else if (j.cle && j.cle.indexOf('joueur:') === 0) { lienDebut = `<a class="lien-adversaire" href="adversaire.html?type=reel&id=${j.cle.slice(7)}">`; lienFin = '</a>'; }
+            const boutonDetail = `<button class="pts-detail-btn" data-cle="${j.cle || ''}" data-user-id="${j.userId || ''}" data-type="${typeCourant}" title="Détail des points">?</button>`;
+            return `
+                <tr class="${j.estMoi ? 'classement-moi' : ''}">
+                    <td class="rang">${rang}</td>
+                    <td class="classement-col-evol">${evolutionRangHtml(j)}</td>
+                    <td>
+                        <div class="classement-joueur-cell">
+                            ${avatarHtml(j)}
+                            <span>${lienDebut}${flagImg(j.drapeau)} ${formaterNomComplet(j.nom)}${lienFin}</span>
+                        </div>
+                    </td>
+                    <td class="pts">${j.points} ${boutonDetail}</td>
+                    <td class="classement-col-num">${evolutionPointsHtml(j)}</td>
+                    <td class="classement-col-num">${j.nbTournois || 0}</td>
+                    <td class="classement-col-num">${j.pointsADefendre === null || j.pointsADefendre === undefined ? '<span class="classement-evol-egal">—</span>' : (j.pointsADefendre > 0 ? j.pointsADefendre : '<span class="classement-evol-egal">0</span>')}</td>
+                    <td class="classement-col-tournoi">${j.tournoiEnCours ? '<span class="classement-tournoi-en-cours">● ' + j.tournoiEnCours + '</span>' : '<span class="classement-evol-egal">—</span>'}</td>
+                    <td class="classement-col-tournoi">${j.prochainTournoi ? j.prochainTournoi : '<span class="classement-evol-egal">—</span>'}</td>
+                </tr>
+            `;
+        }
+
         function ligneNationHtml(n, rang) {
             const boutonDetail = `<button class="pts-detail-btn" data-nation="${encodeURIComponent(n.nation)}" data-circuit="${PARAM_NATIONS[circuitCourant]}" title="Détail des points">?</button>`;
             return `
@@ -229,8 +286,12 @@
                 afficherClassementNation();
                 return;
             }
-            thead.innerHTML = '<tr><th>Rang</th><th id="classement-entete-nom">Joueur</th><th>Points</th></tr>';
-            document.getElementById('classement-entete-nom').textContent = estIdentiteCoach() ? 'Coach' : 'Joueur';
+            const detaillee = estVueJoueursDetaillee();
+            thead.innerHTML = detaillee
+                ? '<tr><th>Rang</th><th class="classement-col-evol" title="Évolution par rapport à la semaine dernière">Évol.</th><th>Joueur</th><th class="pts">Points</th><th class="classement-col-num" title="Points gagnés ou perdus depuis la semaine dernière">+/-</th><th class="classement-col-num" title="Tournois joués sur la période">Tournois</th><th class="classement-col-num" title="Points qui sortiront du classement Live au cours des 3 prochaines semaines">À défendre<br><span class="classement-th-sous">(3 sem.)</span></th><th class="classement-col-tournoi">Tournoi en cours</th><th class="classement-col-tournoi">Prochain tournoi</th></tr>'
+                : '<tr><th>Rang</th><th id="classement-entete-nom">Joueur</th><th>Points</th></tr>';
+            document.getElementById('classement-table-wrap').classList.toggle('classement-detaille', detaillee);
+            if (!detaillee) document.getElementById('classement-entete-nom').textContent = estIdentiteCoach() ? 'Coach' : 'Joueur';
 
             let liste;
             if (typeCourant === 'pronos') {
@@ -245,7 +306,7 @@
                 return;
             }
 
-            corps.innerHTML = liste.map(function (j, i) { return ligneHtml(j, i + 1); }).join('');
+            corps.innerHTML = liste.map(function (j, i) { return detaillee ? ligneDetailleeHtml(j, i + 1) : ligneHtml(j, i + 1); }).join('');
         }
 
         async function chargerClassement() {

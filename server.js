@@ -6404,12 +6404,113 @@ function calculerClassementGlobal(circuit, semaineMin, semaineActuelle) {
             niveau: p.niveau,
             playerId: p.id,
             rivalId: null,
-            userId: p.user_id
+            userId: p.user_id,
+            photoAvatar: p.photo_avatar || null
         });
     });
 
     liste.sort(function (a, b) { return b.points - a.points; });
     return liste;
+}
+
+// Classements ATP/WTA Live/Race "facon site officiel" (classements.html, demande
+// utilisateur 2026-10-11) : ajoute a chaque ligne l'evolution par rapport a la
+// semaine precedente (places gagnees/perdues + points gagnes/perdus) et le nombre
+// de tournois joues dans la fenetre. "Semaine precedente" = meme classement
+// recalcule avec une fenetre qui s'arrete une semaine plus tot (fonctionne aussi
+// pour la Race, qui n'a pas d'historique stocke). Rangs compares en "rang
+// olympique" (ex aequo = meme rang) pour ne pas inventer de mouvements entre
+// joueurs a egalite de points (nombreux a 0).
+function enrichirClassementEvolution(circuit, liste, semaineMin, semaineMinPrecedente, semaineActuelle, estLive) {
+    const rangOlympique = function (l) {
+        const rangs = new Map();
+        l.forEach(function (e, i) {
+            const rang = (i > 0 && e.points === l[i - 1].points) ? rangs.get(l[i - 1].cle) : i + 1;
+            rangs.set(e.cle, rang);
+        });
+        return rangs;
+    };
+    const precedent = calculerClassementGlobal(circuit, semaineMinPrecedente, semaineActuelle - 1);
+    const pointsPrec = new Map(precedent.map(function (e) { return [e.cle, e.points]; }));
+    const rangsPrec = rangOlympique(precedent);
+    const rangsActuels = rangOlympique(liste);
+
+    const nbTournois = new Map();
+    db.prepare(`
+        SELECT tj.player_id, tj.rival_id, COUNT(DISTINCT tj.tournoi_id) AS n
+        FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE t.circuit = ? AND t.semaine > ? AND t.semaine <= ? AND t.statut = 'termine'
+          AND tj.points_gagnes IS NOT NULL
+          AND ((tj.player_id IS NOT NULL AND tj.est_reel = 1) OR tj.rival_id IS NOT NULL)
+        GROUP BY tj.player_id, tj.rival_id
+    `).all(circuit, semaineMin, semaineActuelle).forEach(function (r) {
+        nbTournois.set(r.player_id ? 'joueur:' + r.player_id : 'rival:' + r.rival_id, r.n);
+    });
+
+    const cleDe = function (r) { return r.player_id ? 'joueur:' + r.player_id : 'rival:' + r.rival_id; };
+    const dureeDe = function (calendrierId) {
+        const entree = CALENDRIER_TOURNOIS.find(function (x) { return x.id === calendrierId; });
+        return entree ? entree.duree : 1;
+    };
+
+    // Points a defendre (Live uniquement) : points des tournois qui sortiront de la
+    // fenetre glissante de 52 semaines au cours des 3 prochaines avancees de semaine
+    // (semaines semaineMin+1 a semaineMin+3). Somme brute des points obtenus, sans
+    // tenir compte de la regle des N meilleurs resultats.
+    const aDefendre = new Map();
+    if (estLive) {
+        db.prepare(`
+            SELECT tj.player_id, tj.rival_id, SUM(tj.points_gagnes) AS pts
+            FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+            WHERE t.circuit = ? AND t.statut = 'termine' AND t.semaine > ? AND t.semaine <= ?
+              AND tj.points_gagnes > 0
+              AND ((tj.player_id IS NOT NULL AND tj.est_reel = 1) OR tj.rival_id IS NOT NULL)
+            GROUP BY tj.player_id, tj.rival_id
+        `).all(circuit, semaineMin, semaineMin + 3).forEach(function (r) { aDefendre.set(cleDe(r), r.pts); });
+    }
+
+    // Tournoi en cours : tournoi qui couvre la semaine actuelle (1 ou 2 semaines),
+    // deja tire, ou le joueur est encore en lice.
+    const enCours = new Map();
+    db.prepare(`
+        SELECT tj.player_id, tj.rival_id, t.nom, t.semaine, t.calendrier_id
+        FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE t.circuit = ? AND t.statut = 'a_venir' AND t.semaine BETWEEN ? AND ?
+          AND tj.tour_elimine IS NULL AND tj.nom != 'BYE'
+          AND ((tj.player_id IS NOT NULL AND tj.est_reel = 1) OR tj.rival_id IS NOT NULL)
+    `).all(circuit, semaineActuelle - 1, semaineActuelle).forEach(function (r) {
+        if (r.semaine + dureeDe(r.calendrier_id) - 1 >= semaineActuelle) enCours.set(cleDe(r), r.nom);
+    });
+
+    // Prochain tournoi : tournoi qui commence la semaine prochaine (tableau deja tire
+    // a S-1, ou encore en liste d'attente pour un joueur reel).
+    const prochain = new Map();
+    db.prepare(`
+        SELECT tj.player_id, tj.rival_id, t.nom
+        FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+        WHERE t.circuit = ? AND t.semaine = ? AND tj.nom != 'BYE'
+          AND ((tj.player_id IS NOT NULL AND tj.est_reel = 1) OR tj.rival_id IS NOT NULL)
+    `).all(circuit, semaineActuelle + 1).forEach(function (r) { prochain.set(cleDe(r), r.nom); });
+    db.prepare('SELECT player_id, calendrier_id FROM tournoi_liste_attente WHERE semaine = ?').all(semaineActuelle + 1).forEach(function (r) {
+        const entree = CALENDRIER_TOURNOIS.find(function (x) { return x.id === r.calendrier_id; });
+        if (entree && entree.circuit === circuit && !prochain.has('joueur:' + r.player_id)) prochain.set('joueur:' + r.player_id, entree.nom);
+    });
+
+    return liste.map(function (e) {
+        const avant = pointsPrec.has(e.cle) ? pointsPrec.get(e.cle) : 0;
+        // Evolution de place : seulement si le joueur a des points maintenant ET
+        // avant (sinon "nouveau" ou toujours a 0 : pas de fleche).
+        const evolution = (e.points > 0 && avant > 0) ? rangsPrec.get(e.cle) - rangsActuels.get(e.cle) : null;
+        return Object.assign({}, e, {
+            evolutionRang: evolution,
+            nouveauClasse: e.points > 0 && avant === 0,
+            evolutionPoints: e.points - avant,
+            nbTournois: nbTournois.get(e.cle) || 0,
+            pointsADefendre: estLive ? (aDefendre.get(e.cle) || 0) : null,
+            tournoiEnCours: enCours.get(e.cle) || null,
+            prochainTournoi: prochain.get(e.cle) || null
+        });
+    });
 }
 
 // classementGlobal + le flag estMoi calcule du point de vue de l'appelant (mise en
@@ -9071,8 +9172,14 @@ app.get('/api/classement/:userId', (req, res) => {
 
         res.json({
             success: true,
-            atp: { live: classementPartage('ATP', semaineActuelle - FENETRE_LIVE, semaineActuelle, userId), race: classementPartage('ATP', debutSaison, semaineActuelle, userId) },
-            wta: { live: classementPartage('WTA', semaineActuelle - FENETRE_LIVE, semaineActuelle, userId), race: classementPartage('WTA', debutSaison, semaineActuelle, userId) },
+            atp: {
+                live: enrichirClassementEvolution('ATP', classementPartage('ATP', semaineActuelle - FENETRE_LIVE, semaineActuelle, userId), semaineActuelle - FENETRE_LIVE, semaineActuelle - 1 - FENETRE_LIVE, semaineActuelle, true),
+                race: enrichirClassementEvolution('ATP', classementPartage('ATP', debutSaison, semaineActuelle, userId), debutSaison, debutSaison, semaineActuelle, false)
+            },
+            wta: {
+                live: enrichirClassementEvolution('WTA', classementPartage('WTA', semaineActuelle - FENETRE_LIVE, semaineActuelle, userId), semaineActuelle - FENETRE_LIVE, semaineActuelle - 1 - FENETRE_LIVE, semaineActuelle, true),
+                race: enrichirClassementEvolution('WTA', classementPartage('WTA', debutSaison, semaineActuelle, userId), debutSaison, debutSaison, semaineActuelle, false)
+            },
             coach: {
                 live: classementCoachSomme(['ATP', 'WTA'], semaineActuelle - FENETRE_LIVE, semaineActuelle, userId),
                 race: classementCoachSomme(['ATP', 'WTA'], debutSaison, semaineActuelle, userId)
