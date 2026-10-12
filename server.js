@@ -6010,7 +6010,7 @@ function melanger(liste) {
 // l'utilisateur, 2026-08-31 ; ajuste le 2026-09-09, 2026-09-10 et 2026-09-11) ---
 // Le niveau de jeu d'un bot (rival persistant OU lambda jetable) n'est plus une
 // valeur fixe : a chaque tirage de tournoi (et a chaque rencontre de Coupe Davis/
-// BJK Cup), il est tire dans une bande de **60 a 85 %** d'une MOYENNE de reference
+// BJK Cup), il est tire dans une bande de **55 a 78 %** (60-85 % avant le 2026-10-12) d'une MOYENNE de reference
 // du niveau de jeu des joueurs reels SUR LA SURFACE concernee. **Plus aucun
 // plancher** (2026-09-11, demande explicite - avant : 270 minimum, quel que soit
 // le niveau reel des joueurs reels de reference).
@@ -6025,8 +6025,11 @@ function melanger(liste) {
 // Reference "niveau de jeu" = niveauNormal(joueur, surface) (forme/energie/
 // automatismes du moment inclus), pas la moyenne des 3 surfaces. Les niveaux d'un
 // meme tournoi sont rendus distincts tant que la largeur de bande le permet.
-const NIVEAU_BOT_BANDE_BAS = 0.60;
-const NIVEAU_BOT_BANDE_HAUT = 0.85;
+// 60-85 % -> 55-78 % le 2026-10-12 (demande explicite de l'utilisateur) : le nouveau
+// moteur de jeu (tirage service / balle de break) resserre les ecarts de niveau, les
+// joueurs reels perdaient beaucoup plus souvent contre des bots nettement plus faibles.
+const NIVEAU_BOT_BANDE_BAS = 0.55;
+const NIVEAU_BOT_BANDE_HAUT = 0.78;
 
 function moyenneNiveau(reels, surface) {
     if (reels.length === 0) return null;
@@ -13016,7 +13019,7 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
             return { normal, mental, mentalCourant: player.mental_courant, joueur: player };
         }
         // Niveau du rival recale sur la moyenne des joueurs reels SELECTIONNES DANS
-        // CETTE RENCONTRE (bande 60-85 %) - cf. niveauBotUnique/moyenneNiveauReelsCoupe.
+        // CETTE RENCONTRE (bande 55-78 %) - cf. niveauBotUnique/moyenneNiveauReelsCoupe.
         const niv = niveauBotUnique(tie, surface);
         return { normal: niv, mental: niv + BONUS_POINTS_IMPORTANTS_BOT, mentalCourant: 100, joueur: null };
     }
@@ -13460,6 +13463,20 @@ try {
     }
 } catch (err) {
     console.error('[bande_60_85] echec :', err.message);
+}
+
+// Idem pour le passage a la bande 55-78 % (2026-10-12, demande explicite de
+// l'utilisateur) : tournois tires mais pas commences recalibres immediatement.
+try {
+    try { db.exec('ALTER TABLE jeu_etat ADD COLUMN patch_bande_55_78_20261012 INTEGER DEFAULT 0'); } catch (e) {}
+    if (db.prepare('SELECT patch_bande_55_78_20261012 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+        const aRecaler = db.prepare("SELECT id, circuit FROM tournois WHERE statut = 'a_venir' AND tour_actuel = 0").all();
+        aRecaler.forEach(function (t) { recalerNiveauxBotsTournoi(t.id, t.circuit); });
+        db.prepare('UPDATE jeu_etat SET patch_bande_55_78_20261012 = 1 WHERE id = 1').run();
+        console.log('[bande_55_78] ' + aRecaler.length + ' tournoi(s) a_venir recalibre(s)');
+    }
+} catch (err) {
+    console.error('[bande_55_78] echec :', err.message);
 }
 
 // 2026-09-14, demande explicite de l'utilisateur : Rotterdam (ATP) avait ete cree
