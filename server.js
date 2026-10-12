@@ -5336,61 +5336,29 @@ function resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveau
     return vainqueur;
 }
 
-// Simule un jeu (service) point par point (0-15-30-40, egalite/avantage) plutot
-// qu'en un seul tirage global pour tout le jeu : chaque point ordinaire est un
-// tirage technique simple, SAUF le ou les points qui menacent reellement de
-// conclure le jeu ALORS que cette conclusion est deja classee decisive pour le
-// match (balle de break/set/match, determinee une fois pour tout le jeu par
-// l'appelant via pointImportant/menacant) - ceux-la seuls beneficient du double
-// tirage technique+mental, et peuvent se repeter plusieurs fois dans le meme jeu
-// si la balle est sauvee (retour a l'egalite, puis nouvelle balle) au lieu de
-// clore le jeu entier des la 1ere balle de break gagnee sans rejouer (bug signale
-// par l'utilisateur, 2026-08-20).
+// Simule un jeu (service) en UN SEUL tirage (2026-10-12, demande explicite de
+// l'utilisateur, apres comparaison chiffree : le point par point amplifiait
+// enormement le moindre ecart de niveau - 54 % des points devenaient 60 % des jeux
+// puis 86 % des matchs a 25 points d'ecart). La loi de probabilite du PDF
+// s'applique desormais directement au JEU. Jeu ordinaire : tirage sur les niveaux
+// normaux, sans annonce. Jeu decisif (balle de break/set/match, determine par
+// l'appelant via pointImportant/menacant - le jeu conclurait le set ou le match) :
+// un unique tirage sur les niveaux "points importants", annonce et issue dans le
+// teletexte comme avant. Le tie-break, lui, reste joue point par point.
 function resoudreJeu(serveur, niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, pointImportant, libelleAnnonce, motResolution, menacant, stats, evenements) {
+    if (!pointImportant || !menacant) {
+        return { vainqueur: tirage(niveauA_normal, niveauB_normal), libelleUtilise: null };
+    }
     const libelle = libelleAnnonce || 'Balle de break';
     const mot = motResolution || 'break';
+    const vainqueur = resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacant, libelle, mot, stats, evenements);
+    // Balle de break sauvee (badge Sang-froid, records) : le serveur remporte le jeu
+    // alors que le relanceur menacait de conclure le set/match en le breakant.
     const relanceur = serveur === 'A' ? 'B' : 'A';
-    let ptsA = 0, ptsB = 0;
-    let dernierPointAnnonce = false;
-
-    while (true) {
-        const completeraitPourServeur = serveur === 'A' ? (ptsA + 1 >= 4 && ptsA + 1 - ptsB >= 2) : (ptsB + 1 >= 4 && ptsB + 1 - ptsA >= 2);
-        const completeraitPourRelanceur = relanceur === 'A' ? (ptsA + 1 >= 4 && ptsA + 1 - ptsB >= 2) : (ptsB + 1 >= 4 && ptsB + 1 - ptsA >= 2);
-
-        // Une balle qui menace de faire gagner le jeu au relanceur est TOUJOURS une
-        // vraie balle de break, quels que soient les enjeux de set/match (jamais
-        // rien qu'un simple tirage technique) - seul le libelle change : celui,
-        // specifique, calcule par l'appelant si ce jeu est aussi classe decisif pour
-        // le relanceur, sinon le libelle generique par defaut.
-        let menacantPoint = null;
-        if (completeraitPourRelanceur) {
-            menacantPoint = relanceur;
-        } else if (completeraitPourServeur && pointImportant && menacant === serveur) {
-            menacantPoint = serveur;
-        }
-        dernierPointAnnonce = menacantPoint !== null;
-
-        const libelleUtilisePourCePoint = (menacantPoint === relanceur && !(pointImportant && menacant === relanceur))
-            ? 'Balle de break'
-            : libelle;
-        const motUtilisePourCePoint = (menacantPoint === relanceur && !(pointImportant && menacant === relanceur))
-            ? 'break'
-            : mot;
-
-        const vainqueurPoint = resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacantPoint, libelleUtilisePourCePoint, motUtilisePourCePoint, stats, evenements);
-        // Balle de break sauvee (badge Sang-froid, records) : TOUTE balle de break, pas
-        // seulement celles qui auraient aussi termine un set/match - le serveur
-        // remporte le point alors que le relanceur menacait de gagner le jeu.
-        if (menacantPoint === relanceur && vainqueurPoint === serveur) {
-            if (serveur === 'A') stats.ballesBreakSauveesA++; else stats.ballesBreakSauveesB++;
-        }
-        if (vainqueurPoint === 'A') ptsA++; else ptsB++;
-
-        if ((ptsA >= 4 || ptsB >= 4) && Math.abs(ptsA - ptsB) >= 2) break;
+    if (menacant === relanceur && vainqueur === serveur) {
+        if (serveur === 'A') stats.ballesBreakSauveesA++; else stats.ballesBreakSauveesB++;
     }
-
-    const vainqueur = ptsA > ptsB ? 'A' : 'B';
-    return { vainqueur, libelleUtilise: dernierPointAnnonce ? libelle : null };
+    return { vainqueur, libelleUtilise: vainqueur === menacant ? libelle : null };
 }
 
 function seraitDecisifTB(pts, autre, seuil) {
