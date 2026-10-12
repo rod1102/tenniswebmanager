@@ -5336,29 +5336,38 @@ function resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveau
     return vainqueur;
 }
 
-// Simule un jeu (service) en UN SEUL tirage (2026-10-12, demande explicite de
-// l'utilisateur, apres comparaison chiffree : le point par point amplifiait
-// enormement le moindre ecart de niveau - 54 % des points devenaient 60 % des jeux
-// puis 86 % des matchs a 25 points d'ecart). La loi de probabilite du PDF
-// s'applique desormais directement au JEU. Jeu ordinaire : tirage sur les niveaux
-// normaux, sans annonce. Jeu decisif (balle de break/set/match, determine par
-// l'appelant via pointImportant/menacant - le jeu conclurait le set ou le match) :
-// un unique tirage sur les niveaux "points importants", annonce et issue dans le
-// teletexte comme avant. Le tie-break, lui, reste joue point par point.
+// Simule un jeu (service) par une suite de tirages (2026-10-12, regle donnee par
+// l'utilisateur) - plus de point par point 0-15-30-40, qui amplifiait enormement le
+// moindre ecart de niveau :
+//   1. tirage "service" : si le serveur l'emporte, il gagne le jeu, fin du jeu ;
+//   2. sinon le relanceur obtient une BALLE DE BREAK : tirage sur les niveaux
+//      "points importants" (annonce + issue dans le teletexte). Convertie = jeu au
+//      relanceur ; sauvee = on revient au tirage 1, et ainsi de suite.
+// Si le jeu conclurait le set/match pour le SERVEUR (pointImportant, menacant ===
+// serveur), le tirage 1 devient lui-meme une balle de set/match, sur les niveaux
+// "points importants". Si c'est pour le RELANCEUR, ses balles de break portent le
+// libelle specifique ("Balle de break / Balle de set", etc.). Le tie-break, lui,
+// reste joue point par point.
 function resoudreJeu(serveur, niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, pointImportant, libelleAnnonce, motResolution, menacant, stats, evenements) {
-    if (!pointImportant || !menacant) {
-        return { vainqueur: tirage(niveauA_normal, niveauB_normal), libelleUtilise: null };
-    }
-    const libelle = libelleAnnonce || 'Balle de break';
-    const mot = motResolution || 'break';
-    const vainqueur = resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacant, libelle, mot, stats, evenements);
-    // Balle de break sauvee (badge Sang-froid, records) : le serveur remporte le jeu
-    // alors que le relanceur menacait de conclure le set/match en le breakant.
     const relanceur = serveur === 'A' ? 'B' : 'A';
-    if (menacant === relanceur && vainqueur === serveur) {
+    const serveurMenace = pointImportant && menacant === serveur;
+    const libelleBreak = pointImportant && menacant === relanceur ? (libelleAnnonce || 'Balle de break') : 'Balle de break';
+
+    while (true) {
+        const vainqueurService = serveurMenace
+            ? resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, serveur, libelleAnnonce, motResolution, stats, evenements)
+            : tirage(niveauA_normal, niveauB_normal);
+        if (vainqueurService === serveur) {
+            return { vainqueur: serveur, libelleUtilise: serveurMenace ? libelleAnnonce : null };
+        }
+
+        const vainqueurBalle = resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, relanceur, libelleBreak, 'break', stats, evenements);
+        if (vainqueurBalle === relanceur) {
+            return { vainqueur: relanceur, libelleUtilise: libelleBreak };
+        }
+        // Balle de break sauvee (badge Sang-froid, records).
         if (serveur === 'A') stats.ballesBreakSauveesA++; else stats.ballesBreakSauveesB++;
     }
-    return { vainqueur, libelleUtilise: vainqueur === menacant ? libelle : null };
 }
 
 function seraitDecisifTB(pts, autre, seuil) {
