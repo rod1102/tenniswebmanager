@@ -86,9 +86,11 @@
         function construireOngletsType() {
             const nav = document.getElementById('tabs-nav-type');
             const options = OPTIONS_TYPE[circuitCourant];
-            typeCourant = options[0].cle;
-            nav.innerHTML = options.map(function (o, i) {
-                return `<button class="tab-btn${i === 0 ? ' active' : ''}" data-type="${o.cle}">${o.libelle}</button>`;
+            // Garde le sous-onglet deja choisi en changeant de circuit (ex. Pronos ATP ->
+            // Pronos WTA), demande explicite de l'utilisateur - repli sur le 1er sinon.
+            if (!options.some(function (o) { return o.cle === typeCourant; })) typeCourant = options[0].cle;
+            nav.innerHTML = options.map(function (o) {
+                return `<button class="tab-btn${o.cle === typeCourant ? ' active' : ''}" data-type="${o.cle}">${o.libelle}</button>`;
             }).join('');
             nav.querySelectorAll('.tab-btn').forEach(function (bouton) {
                 bouton.addEventListener('click', function () {
