@@ -5674,6 +5674,10 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
                 const vainqueurTB = simulerTieBreak(niveauA_normal_manche, niveauB_normal_manche, niveauA_mental_manche, niveauB_mental_manche, stats, evenements, numeroSet, setsA, setsB, seuilTB);
                 if (vainqueurTB === 'A') jeuxA++; else jeuxB++;
                 totalJeux++;
+                // Le tie-break compte comme un jeu pour l'alternance : celui qui l'a servi
+                // en premier (= serveur courant) relance au 1er jeu du set suivant (bug
+                // signale par l'utilisateur 2026-10-15 : il resservait).
+                serveur = serveur === 'A' ? 'B' : 'A';
                 break;
             }
 
@@ -10457,6 +10461,24 @@ function recordsCircuit(circuit) {
     });
 }
 
+// Badge "Victime" (d'abord nomme "Bot d'or") (2026-10-16, demande explicite de l'utilisateur) : defaites d'un
+// VRAI joueur contre un bot (rival persistant ou lambda), en simple - tournois ET
+// Coupe Davis/BJK Cup. Tournoi : un match reel-vs-reel a 2 lignes matchs (match_id +
+// match_id_j2), contre un bot match_id_j2 est NULL. Coupe : match_id = cote domicile,
+// match_id_j2 = cote exterieur, l'autre cote est un bot si son *_est_reel vaut 0. Forfaits (blessure avant le
+// match) exclus : rien n'a ete joue ; un abandon en cours de match compte.
+const PALIERS_VICTIME = ['sombre', 'bronze', 'argent', 'or', 'diamant', 'platine'];
+const SEUILS_VICTIME = [1, 5, 10, 20, 30];
+function defaitesContreBot(playerId) {
+    return db.prepare(`
+        SELECT COUNT(*) AS n FROM matchs m
+        WHERE m.player_id = ? AND m.vainqueur = 'adversaire' AND m.score NOT LIKE 'Forfait%'
+          AND (EXISTS (SELECT 1 FROM tournoi_matchs tm WHERE tm.match_id = m.id AND tm.match_id_j2 IS NULL)
+               OR EXISTS (SELECT 1 FROM coupe_rubbers cr WHERE cr.type = 'simple'
+                          AND ((cr.match_id = m.id AND cr.exterieur_est_reel = 0) OR (cr.match_id_j2 = m.id AND cr.domicile_est_reel = 0))))
+    `).get(playerId).n;
+}
+
 function calculerBadges(circuit, cle, filtreColonne, id) {
     const R = recordsCircuit(circuit);
     const filtreDirect = filtreColonne === 'player_id' ? 'player_id = ? AND est_reel = 1' : 'rival_id = ?';
@@ -10578,7 +10600,11 @@ function calculerBadges(circuit, cle, filtreColonne, id) {
             estRecord: meilleureSerie === maxSequentiels.maxSerie },
         { id: 'sang_froid', nom: 'Sang-froid', description: 'Balles de break sauvées, cumulées sur la carrière', valeur: ballesBreakSauvees, seuils: [40, 100, 200, 400, 800],
             estRecord: filtreColonne === 'player_id' && ballesBreakSauvees === R.sangFroid }
-    ]);
+    ].concat(filtreColonne === 'player_id' ? [
+        // Pas pour un rival : c'est lui-meme un bot.
+        { id: 'victime', nom: 'Victime', description: 'Défaites contre un bot (tournois et Coupe Davis/BJK Cup en simple, hors forfaits)', valeur: defaitesContreBot(id),
+            seuils: SEUILS_VICTIME, nomsPaliers: PALIERS_VICTIME }
+    ] : []));
 }
 
 // Badges du COACH (distincts des badges par joueur ci-dessus) : cumules sur les
@@ -10658,7 +10684,10 @@ function calculerBadgesCoach(userId) {
         { id: 'points_pronos', nom: 'Points de pronostics', description: 'Points de pronostics cumulés, toute la carrière', valeur: pointsPronos, seuils: [200, 750, 1500, 2500, 5000] },
         { id: 'top10_simultane', nom: 'Semaines dans le Top 10 ensemble', description: 'Semaines où les 2 personnages sont dans le top 10 du classement Live en même temps', valeur: top10Simultanees, seuils: [1, 2, 3, 5, 10] },
         { id: 'saisons_jouees', nom: 'Saisons jouées', description: 'Saisons avec au moins un pronostic soumis', valeur: saisonsJouees, seuils: [1, 3, 5, 10, 20] },
-        { id: 'appel_kine', nom: 'Appel au kiné', description: 'Interventions du kiné, cumulées sur les 2 personnages', valeur: appelKine, seuils: [5, 10, 15, 25, 50] }
+        { id: 'appel_kine', nom: 'Appel au kiné', description: 'Interventions du kiné, cumulées sur les 2 personnages', valeur: appelKine, seuils: [5, 10, 15, 25, 50] },
+        // Coach : le plus PETIT des 2 totaux (ex. ATP 5 / WTA 0 -> 0), demande explicite.
+        { id: 'victime_coach', nom: 'Victime', description: 'Défaites contre un bot : le plus petit total entre le joueur et la joueuse', valeur: (joueurRow && joueuseRow) ? Math.min(defaitesContreBot(joueurRow.id), defaitesContreBot(joueuseRow.id)) : 0,
+            seuils: SEUILS_VICTIME, nomsPaliers: PALIERS_VICTIME }
     ]);
 }
 
