@@ -2266,14 +2266,6 @@ table.points td.pts {
 }
 .badge-card.palier-platine .badge-card-palier { color: #9DC3D4; }
 
-/* Palier "Diamant" : propre au badge Victime (paliers Bronze/Argent/Or/Diamant/
-   Platine, ordre demande par l'utilisateur 2026-10-16). */
-.badge-card.palier-diamant {
-    background: rgba(125, 211, 252, 0.16);
-    border-left-color: #7DD3FC;
-}
-.badge-card.palier-diamant .badge-card-palier { color: #7DD3FC; }
-
 /* Palier le plus prestigieux, commun a TOUS les badges (seuil numerique le plus
    haut, OU record absolu du circuit pour cette statistique peu importe le
    nombre) - fond argent brillant au milieu, degrade arc-en-ciel irise (façon

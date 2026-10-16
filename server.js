@@ -10466,8 +10466,10 @@ function recordsCircuit(circuit) {
 // Coupe Davis/BJK Cup. Tournoi : un match reel-vs-reel a 2 lignes matchs (match_id +
 // match_id_j2), contre un bot match_id_j2 est NULL. Coupe : match_id = cote domicile,
 // match_id_j2 = cote exterieur, l'autre cote est un bot si son *_est_reel vaut 0. Forfaits (blessure avant le
-// match) exclus : rien n'a ete joue ; un abandon en cours de match compte.
-const PALIERS_VICTIME = ['sombre', 'bronze', 'argent', 'or', 'diamant', 'platine'];
+// match) exclus : rien n'a ete joue ; un abandon en cours de match compte. Paliers
+// standard Bronze/Argent/Or/Platine/Legende (d'abord ...Diamant/Platine, aligne le
+// meme jour sur les autres badges a la demande de l'utilisateur) - pas de Legende
+// par record du circuit.
 const SEUILS_VICTIME = [1, 5, 10, 20, 30];
 function defaitesContreBot(playerId) {
     return db.prepare(`
@@ -10603,7 +10605,7 @@ function calculerBadges(circuit, cle, filtreColonne, id) {
     ].concat(filtreColonne === 'player_id' ? [
         // Pas pour un rival : c'est lui-meme un bot.
         { id: 'victime', nom: 'Victime', description: 'Défaites contre un bot (tournois et Coupe Davis/BJK Cup en simple, hors forfaits)', valeur: defaitesContreBot(id),
-            seuils: SEUILS_VICTIME, nomsPaliers: PALIERS_VICTIME }
+            seuils: SEUILS_VICTIME }
     ] : []));
 }
 
@@ -10687,7 +10689,7 @@ function calculerBadgesCoach(userId) {
         { id: 'appel_kine', nom: 'Appel au kiné', description: 'Interventions du kiné, cumulées sur les 2 personnages', valeur: appelKine, seuils: [5, 10, 15, 25, 50] },
         // Coach : le plus PETIT des 2 totaux (ex. ATP 5 / WTA 0 -> 0), demande explicite.
         { id: 'victime_coach', nom: 'Victime', description: 'Défaites contre un bot : le plus petit total entre le joueur et la joueuse', valeur: (joueurRow && joueuseRow) ? Math.min(defaitesContreBot(joueurRow.id), defaitesContreBot(joueuseRow.id)) : 0,
-            seuils: SEUILS_VICTIME, nomsPaliers: PALIERS_VICTIME }
+            seuils: SEUILS_VICTIME }
     ]);
 }
 
