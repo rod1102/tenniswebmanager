@@ -9,7 +9,7 @@
     <title>Tournoi — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261016">
+    <link rel="stylesheet" href="style.css?v=20261017">
 </head>
 <body>
     <div class="dashboard-page">
@@ -382,6 +382,58 @@
             });
         }
 
+        // Score d'un match du tableau : cliquable, ouvre Teletexte + Stats dans une
+        // fenetre (demande explicite de l'utilisateur, 2026-10-17). Le deroule vient de
+        // /api/tournois/match-bot/:id, public et valable pour TOUT match du tableau
+        // (bots, vrai joueur d'un autre coach ou le mien), noms deja remplaces.
+        function scoreCliquable(m, texteScore) {
+            if (!m.id) return `<div class="bracket-score">${texteScore}</div>`;
+            return `<button type="button" class="bracket-score bracket-score-lien" data-tm-id="${m.id}" title="Voir le téletexte et les stats">${texteScore}</button>`;
+        }
+
+        async function ouvrirDetailScore(tournoiMatchId) {
+            const overlay = document.createElement('div');
+            overlay.className = 'dispo-blocage-overlay';
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box">
+                    <div class="stats-header" style="margin-top:0;" id="score-detail-titre">Chargement...</div>
+                    <div class="match-modes" style="display:flex; gap:8px; margin:10px 0;">
+                        <button class="cta cta-primary score-detail-mode" data-mode="teletexte" style="padding:8px 16px; font-size:0.8rem;">Téletexte</button>
+                        <button class="cta cta-secondary score-detail-mode" data-mode="stats" style="padding:8px 16px; font-size:0.8rem;">Stats</button>
+                    </div>
+                    <div class="match-viewer" id="score-detail-viewer" style="display:block;"><div class="match-viewer-loading">Chargement...</div></div>
+                    <button class="cta cta-secondary" id="score-detail-fermer" style="margin-top:18px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+            overlay.querySelector('#score-detail-fermer').addEventListener('click', function () { overlay.remove(); });
+            const viewer = overlay.querySelector('#score-detail-viewer');
+            try {
+                const match = await obtenirDetailBot(tournoiMatchId);
+                overlay.querySelector('#score-detail-titre').innerHTML = flagImg(match.joueur1_drapeau) + ' ' + echapperStats(formaterNomComplet(match.joueur1_nom || '?'))
+                    + ' – ' + echapperStats(formaterNomComplet(match.joueur2_nom || '?')) + ' ' + flagImg(match.joueur2_drapeau);
+                const afficher = function (mode) {
+                    overlay.querySelectorAll('.score-detail-mode').forEach(function (b) {
+                        b.classList.toggle('cta-primary', b.dataset.mode === mode);
+                        b.classList.toggle('cta-secondary', b.dataset.mode !== mode);
+                    });
+                    if (mode === 'stats') afficherStatsMatch(viewer, match); else afficherTeletexteMatch(viewer, match);
+                };
+                overlay.querySelectorAll('.score-detail-mode').forEach(function (b) {
+                    b.addEventListener('click', function () { afficher(b.dataset.mode); });
+                });
+                afficher('teletexte');
+            } catch (err) {
+                viewer.innerHTML = '<div class="match-hint">' + echapperStats(err.message) + '</div>';
+            }
+        }
+
+        document.addEventListener('click', function (e) {
+            const bouton = e.target.closest('.bracket-score-lien');
+            if (bouton) ouvrirDetailScore(bouton.dataset.tmId);
+        });
+
         function afficherTableau(fiche) {
             const panneau = document.getElementById('tab-tableau');
             const instance = fiche.instance;
@@ -516,7 +568,7 @@
                                 const contenu = m.reel
                                     ? `<div class="bracket-match-row">${nomAffiche(m.reel, 1)}</div>
                                        <div class="bracket-match-row">${nomAffiche(m.reel, 2)}</div>
-                                       ${m.reel.score ? `<div class="bracket-score">${m.reel.score}</div>` : ''}`
+                                       ${m.reel.score ? scoreCliquable(m.reel, m.reel.score) : ''}`
                                     : `<div class="bracket-match-row">${nomJoueurCase(m.vide.j1)}</div>
                                        <div class="bracket-match-row">${nomJoueurCase(m.vide.j2)}</div>`;
                                 return `
@@ -566,7 +618,7 @@
                             <div class="bracket-match">
                                 <div class="bracket-match-row">${ligne1}</div>
                                 <div class="bracket-match-row">${ligne2}</div>
-                                ${joue && joue.score ? `<div class="bracket-score">${joue.joueur1_id === j1.id ? joue.score : miroirScoreClient(joue.score)}</div>` : ''}
+                                ${joue && joue.score ? scoreCliquable(joue, joue.joueur1_id === j1.id ? joue.score : miroirScoreClient(joue.score)) : ''}
                             </div>
                         </div>
                     `;
@@ -600,7 +652,7 @@
                                 <div class="bracket-match">
                                     <div class="bracket-match-row">${nomAffiche(m, 1)}</div>
                                     <div class="bracket-match-row">${nomAffiche(m, 2)}</div>
-                                    ${m.score ? `<div class="bracket-score">${m.score}</div>` : ''}
+                                    ${m.score ? scoreCliquable(m, m.score) : ''}
                                 </div>
                             </div>
                         `;
@@ -631,7 +683,7 @@
                                 <div class="bracket-match">
                                     <div class="bracket-match-row">${nomAffiche(finaleMatch, 1)}</div>
                                     <div class="bracket-match-row">${nomAffiche(finaleMatch, 2)}</div>
-                                    ${finaleMatch.score ? `<div class="bracket-score">${finaleMatch.score}</div>` : ''}
+                                    ${finaleMatch.score ? scoreCliquable(finaleMatch, finaleMatch.score) : ''}
                                 </div>
                             </div>
                         ` : `
@@ -955,7 +1007,7 @@
         function calculerStatsMatch(evenements) {
             const noms = { A: null, B: null };
             const vide = function () {
-                return { bb: 0, bbOk: 0, bs: 0, bsOk: 0, bm: 0, bmOk: 0, pi: 0, piOk: 0, svc: 0, svcOk: 0, ret: 0, retOk: 0, tb: 0, tbOk: 0, tbPts: 0, serie: 0, jeux: 0, sets60: 0 };
+                return { bb: 0, bbOk: 0, bs: 0, bsOk: 0, bm: 0, bmOk: 0, pi: 0, piOk: 0, svc: 0, svcOk: 0, ret: 0, retOk: 0, tb: 0, tbOk: 0, tbPts: 0, serie: 0, jeux: 0, sets60: 0, kine: 0 };
             };
             const stats = { A: vide(), B: vide() };
             let setsRequis = 2;
@@ -980,6 +1032,7 @@
             if ((noms.A && !noms.B) || (noms.B && !noms.A)) {
                 const connu = noms.A || noms.B;
                 evenements.forEach(function (e) {
+                    if (e.type === 'abandon' || e.type === 'kine') return;
                     const m = /(?: pour | remporte par )(.+?)(?: \(|$)/.exec(e.texte || '');
                     if (m && m[1] !== connu && !(noms.A && noms.B)) {
                         if (!noms.A) noms.A = m[1]; else noms.B = m[1];
@@ -1032,6 +1085,11 @@
                         if (e.jeuxB === 6 && e.jeuxA === 0) stats.B.sets60++;
                     }
                     prec = { A: 0, B: 0 }; dansTB = false;
+                } else if (e.type === 'kine' || e.type === 'abandon') {
+                    // Intervention du kine : appel simple, ou blessure qui force l'abandon.
+                    const mk = /^\S+ (.+) fait appel à John le kiné/.exec(t) || /rien pu faire pour (.+?), (?:il|elle) est oblig/.exec(t);
+                    const ck = mk && coteDe(mk[1]);
+                    if (ck) stats[ck].kine++;
                 } else if (e.type === 'point_important') {
                     const pos = t.lastIndexOf(' pour ');
                     if (pos === -1) continue; // ligne d'issue, traitee avec son annonce
@@ -1103,6 +1161,7 @@
                         ${A.tb ? ligne('Points de tie-break gagnés', ratio(A.tbPts, tbTotal), ratio(B.tbPts, tbTotal)) : ''}
                         ${ligne('Plus longue série de jeux', nombre(A.serie), nombre(B.serie))}
                         ${ligne('Jeux gagnés', nombre(A.jeux), nombre(B.jeux))}
+                        ${ligne('Interventions du kiné', { html: String(A.kine), score: [-A.kine] }, { html: String(B.kine), score: [-B.kine] })}
                     </tbody>
                 </table>
             `;

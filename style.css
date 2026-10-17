@@ -2604,6 +2604,22 @@ table.points td.pts {
     font-family: ui-monospace, monospace;
 }
 
+/* Score cliquable du tableau (ouvre Teletexte + Stats, 2026-10-17) : bouton remis
+   a plat pour garder l'aspect du score, souligne en pointilles pour signaler le clic. */
+.bracket-score-lien {
+    display: block;
+    background: none;
+    border: none;
+    padding: 0;
+    text-align: left;
+    cursor: pointer;
+    text-decoration: underline dotted;
+    text-underline-offset: 2px;
+}
+.bracket-score-lien:hover {
+    color: #D4F000;
+}
+
 .bracket-match-wrap[data-round-index] {
     cursor: pointer;
 }

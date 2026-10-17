@@ -11321,7 +11321,7 @@ function joueursReelsParId() {
 function calculerStatsMatch(evenements) {
     const noms = { A: null, B: null };
     const vide = function () {
-        return { bb: 0, bbOk: 0, bs: 0, bsOk: 0, bm: 0, bmOk: 0, pi: 0, piOk: 0, svc: 0, svcOk: 0, ret: 0, retOk: 0, tb: 0, tbOk: 0, tbPts: 0, serie: 0, jeux: 0, sets60: 0 };
+        return { bb: 0, bbOk: 0, bs: 0, bsOk: 0, bm: 0, bmOk: 0, pi: 0, piOk: 0, svc: 0, svcOk: 0, ret: 0, retOk: 0, tb: 0, tbOk: 0, tbPts: 0, serie: 0, jeux: 0, sets60: 0, kine: 0 };
     };
     const stats = { A: vide(), B: vide() };
     let setsRequis = 2;
@@ -11346,6 +11346,7 @@ function calculerStatsMatch(evenements) {
     if ((noms.A && !noms.B) || (noms.B && !noms.A)) {
         const connu = noms.A || noms.B;
         evenements.forEach(function (e) {
+            if (e.type === 'abandon' || e.type === 'kine') return;
             const m = /(?: pour | remporte par )(.+?)(?: \(|$)/.exec(e.texte || '');
             if (m && m[1] !== connu && !(noms.A && noms.B)) {
                 if (!noms.A) noms.A = m[1]; else noms.B = m[1];
@@ -11398,6 +11399,11 @@ function calculerStatsMatch(evenements) {
                 if (e.jeuxB === 6 && e.jeuxA === 0) stats.B.sets60++;
             }
             prec = { A: 0, B: 0 }; dansTB = false;
+        } else if (e.type === 'kine' || e.type === 'abandon') {
+            // Intervention du kine : appel simple, ou blessure qui force l'abandon.
+            const mk = /^\S+ (.+) fait appel à John le kiné/.exec(t) || /rien pu faire pour (.+?), (?:il|elle) est oblig/.exec(t);
+            const ck = mk && coteDe(mk[1]);
+            if (ck) stats[ck].kine++;
         } else if (e.type === 'point_important') {
             const pos = t.lastIndexOf(' pour ');
             if (pos === -1) continue; // ligne d'issue, traitee avec son annonce
