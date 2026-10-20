@@ -53,6 +53,12 @@
         }
         .sim-select:disabled { opacity: 0.5; }
         .sim-select option { background-color: #0E141B; color: #F5F7FA; }
+        .sim-xp-input {
+            width: 48px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16); color: #F5F7FA;
+            border-radius: 6px; padding: 4px 4px; font-size: 0.8rem; text-align: right; color-scheme: dark;
+        }
+        .sim-xp-input:disabled { opacity: 0.35; }
+        .sim-xp-reste { color: #E0A84F; font-size: 0.75rem; white-space: nowrap; }
         .sim-actions { display:flex; gap:10px; margin-bottom:18px; }
     </style>
 </head>
@@ -80,7 +86,7 @@
                 </div>
 
                 <div class="sim-note">
-                    <strong>Simulation, pas une prédiction.</strong> Certaines valeurs sont calculées avec les vraies règles du jeu (XP par tour atteint, perte de mental courant par tour, érosion hebdomadaire des compétences, automatismes, formule de moulinette). D'autres sont <strong>forcément des hypothèses</strong>, car un match futur n'a pas encore de résultat réel : ~20 jeux et ~8 points importants par match joué (perte de forme et gain de mental max), aucun style de jeu simulé (taux par défaut), et l'XP gagnée sans "Compétence visée" choisie est perdue (comme en jeu, elle ne se garde pas en réserve) — choisis une compétence précise pour lui donner toute l'XP de la semaine, ou "Compléter jusqu'à 24" pour la répartir sur celles qui n'ont pas encore atteint 24. Part de ton état réel actuel, projette jusqu'à la fin de la saison en cours.
+                    <strong>Simulation, pas une prédiction.</strong> Certaines valeurs sont calculées avec les vraies règles du jeu (XP par tour atteint, perte de mental courant par tour, érosion hebdomadaire des compétences, automatismes, formule de moulinette). D'autres sont <strong>forcément des hypothèses</strong>, car un match futur n'a pas encore de résultat réel : ~20 jeux et ~8 points importants par match joué (perte de forme et gain de mental max), aucun style de jeu simulé (taux par défaut), et l'XP de la semaine se répartit librement dans les colonnes des 8 compétences (jamais plus que l'XP gagnée cette semaine-là) — la part non répartie est perdue, comme en jeu (elle ne se garde pas en réserve). Part de ton état réel actuel, projette jusqu'à la fin de la saison en cours.
                     <br><br>
                     Les lignes en <strong style="color:#D46A6A;">rouge</strong> (🔻) marquent les semaines où le mental max de tous les joueurs réels perd les 2/3 de son excès au-delà de 100 (à l'issue de Miami, Wimbledon et l'US Open — règle du jeu, déjà prise en compte dans la projection).
                     <br><br>
@@ -103,7 +109,7 @@
                     <table class="sim-table">
                         <thead>
                             <tr>
-                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th>Compétence visée</th><th>Surplus vers</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
+                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th class="num" title="Service">Serv.</th><th class="num" title="Retour">Ret.</th><th class="num" title="Coup droit / Revers">CD/R</th><th class="num" title="Effet">Effet</th><th class="num" title="Volée">Volée</th><th class="num" title="Déplacement">Dépl.</th><th class="num" title="Puissance">Puiss.</th><th class="num" title="Résistance">Rés.</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
                                 <th class="num">Énergie</th><th class="num">XP total</th><th class="num">Érosion semaine</th>
                             </tr>
                         </thead>
@@ -174,7 +180,7 @@
         let historiquePasse = [];
         let xpCumuleSaisonInitial = 0;
         let positionsReductionMental = [];
-        // choix[semaine] = { action: 'repos'|'generique'|'surface_dur'|'surface_terre'|'surface_herbe'|'coaching_mental'|'tournoi:<id>', tourIndex: number|null, competenceCible: string|null }
+        // choix[semaine] = { action: 'repos'|'generique'|'surface_dur'|'surface_terre'|'surface_herbe'|'coaching_mental'|'tournoi:<id>', tourIndex: number|null, repartition: { <competence>: XP } }
         let choix = {};
 
         function carte(label, valeur, classe) {
@@ -227,7 +233,7 @@
                     detail.push({
                         semaine: s.semaine, xp: 0, xpCumule, energie,
                         xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
-                        erosionSemaine: erosionSemaine, depassement24: 0, depassementBrut: 0
+                        erosionSemaine: erosionSemaine, xpNonRepartie: 0, repartitionAppliquee: {}
                     });
                     return;
                 }
@@ -243,7 +249,6 @@
 
                 let xpSemaine = 0;
                 let surfaceProtegee = null;
-                let depassement24 = 0;
 
                 if (c.action === 'repos') {
                     forme = formeMax(usure);
@@ -293,55 +298,28 @@
                     if (surf !== surfaceProtegee) automatismes[surf] = Math.max(0, automatismes[surf] - 5);
                 });
 
-                // Repartition de l'XP gagnee cette semaine, selon la colonne "Competence
-                // visee" :
-                // - une competence precise choisie -> toute l'XP va dessus ;
-                // - "Completer jusqu'a 24" -> repartie en nombres ENTIERS (jamais de
-                //   decimale du style 20.3) UNIQUEMENT sur les competences pas encore a
-                //   24 : part de base = Math.floor(xp / nb de cibles), le reste (division
-                //   non exacte) distribue point par point aux premieres cibles pour ne
-                //   rien perdre inutilement a ce stade. Si la part d'une competence la
-                //   ferait depasser 24 (elle etait deja tres proche), l'exces (depassementBrut)
-                //   va vers la competence choisie dans la colonne "Surplus vers" si le
-                //   coach en a designe une pour cette semaine-la, sinon il est perdu
-                //   (depassement24, signale a l'utilisateur).
-                let depassementBrut = 0;
-                if (xpSemaine > 0) {
-                    if (c.competenceCible === 'completer_24') {
-                        const cibles = COMPETENCES.filter(function (comp) { return competences[comp] < 24; });
-                        if (cibles.length > 0) {
-                            const partBase = Math.floor(xpSemaine / cibles.length);
-                            const reste = xpSemaine - partBase * cibles.length;
-                            cibles.forEach(function (comp, idx) {
-                                const part = partBase + (idx < reste ? 1 : 0);
-                                const nouvelleValeur = competences[comp] + part;
-                                if (nouvelleValeur > 24) depassementBrut += nouvelleValeur - 24;
-                                competences[comp] = Math.min(24, nouvelleValeur);
-                            });
-                        } else {
-                            // Plus AUCUNE competence sous 24 : toute l'XP de la semaine est
-                            // du surplus (pas juste un exces partiel) - sans ca, elle
-                            // disparaissait silencieusement, sans meme le warning ⚠️ (bug
-                            // signale par l'utilisateur : les competences restaient bloquees
-                            // pile a 24 des que toutes l'atteignaient).
-                            depassementBrut = xpSemaine;
-                        }
-                        if (depassementBrut > 0 && c.surplusCible && COMPETENCES.indexOf(c.surplusCible) !== -1) {
-                            competences[c.surplusCible] = Math.min(100, competences[c.surplusCible] + depassementBrut);
-                        } else {
-                            depassement24 = depassementBrut;
-                        }
-                    } else if (c.competenceCible && COMPETENCES.indexOf(c.competenceCible) !== -1) {
-                        competences[c.competenceCible] = Math.min(100, competences[c.competenceCible] + xpSemaine);
-                    }
-                    // sinon (pas de choix) : rien, l'XP de la semaine est perdue.
-                }
+                // Repartition libre de l'XP de la semaine (colonnes des 8 competences,
+                // demande explicite de l'utilisateur 2026-10-20 - remplace "Competence
+                // visee"/"Surplus vers") : chaque competence recoit le nombre saisi, dans
+                // l'ordre des colonnes, sans jamais depasser l'XP de la semaine (si l'XP
+                // baisse apres coup, ex. changement d'action, l'excedent saisi est
+                // simplement ignore). Ce qui n'est pas reparti est perdu, comme en jeu.
+                let xpRestante = xpSemaine;
+                const repartition = c.repartition || {};
+                const repartitionAppliquee = {};
+                COMPETENCES.forEach(function (comp) {
+                    const voulu = Math.max(0, Math.floor(Number(repartition[comp]) || 0));
+                    const donne = Math.min(voulu, xpRestante);
+                    repartitionAppliquee[comp] = donne;
+                    xpRestante -= donne;
+                    competences[comp] = Math.min(100, competences[comp] + donne);
+                });
 
                 xpCumule += xpSemaine;
                 detail.push({
                     semaine: s.semaine, xp: xpSemaine, xpCumule, energie,
                     xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
-                    erosionSemaine: erosionSemaine, depassement24: depassement24, depassementBrut: depassementBrut
+                    erosionSemaine: erosionSemaine, xpNonRepartie: xpRestante, repartitionAppliquee: repartitionAppliquee
                 });
             });
 
@@ -374,7 +352,7 @@
                 return `
                     <tr class="sim-row-passe">
                         <td>S${h.position === null ? '—' : h.position}</td>
-                        <td colspan="4">${h.actionLibelle}</td>
+                        <td colspan="10">${h.actionLibelle}</td>
                         <td class="num">${h.xp}</td>
                         <td class="num">${h.xpCumule}</td>
                         <td class="num">${h.energie}</td>
@@ -399,7 +377,7 @@
             } else if (choix[semaineSuivante.semaine] && choix[semaineSuivante.semaine].action === 'verrou') {
                 // Etait verrouillee par un ancien choix qu'on vient de changer -
                 // liberee, repart sur la valeur par defaut.
-                choix[semaineSuivante.semaine] = { action: 'generique', tourIndex: null, competenceCible: null, surplusCible: null };
+                choix[semaineSuivante.semaine] = { action: 'generique', tourIndex: null, repartition: {} };
             }
         }
 
@@ -415,7 +393,7 @@
                     return `
                         <tr class="sim-row-verrou${classeMentalCut}">
                             <td>S${s.position}</td>
-                            <td colspan="4">Suite du tournoi (2e semaine, verrouillée)</td>
+                            <td colspan="10">Suite du tournoi (2e semaine, verrouillée)</td>
                             <td class="num">0</td>
                             <td class="num">${d.xpCumule}</td>
                             <td class="num">${d.energie}</td>
@@ -446,24 +424,11 @@
                                 ${estTournoi ? optionsTour : '<option>—</option>'}
                             </select>
                         </td>
-                        <td>
-                            <select class="sim-select sim-competence-select" data-semaine="${s.semaine}">
-                                <option value="">Choix pas encore fait</option>
-                                <option value="completer_24" ${c.competenceCible === 'completer_24' ? 'selected' : ''}>Compléter jusqu'à 24</option>
-                                ${COMPETENCES.map(function (comp) {
-                                    return `<option value="${comp}" ${c.competenceCible === comp ? 'selected' : ''}>${COMPETENCES_LABELS[comp]}</option>`;
-                                }).join('')}
-                            </select>
-                        </td>
-                        <td>
-                            <select class="sim-select sim-surplus-select" data-semaine="${s.semaine}" ${d.depassementBrut > 0 ? '' : 'disabled'}>
-                                <option value="">${d.depassementBrut > 0 ? 'Perdu' : '—'}</option>
-                                ${COMPETENCES.map(function (comp) {
-                                    return `<option value="${comp}" ${c.surplusCible === comp ? 'selected' : ''}>${COMPETENCES_LABELS[comp]}</option>`;
-                                }).join('')}
-                            </select>
-                        </td>
-                        <td class="num">${d.xp}${d.depassement24 ? ` <span title="${d.depassement24} point(s) perdu(s) : compétence(s) déjà à 24 ou trop proche, choisis une destination dans 'Surplus vers'">⚠️−${d.depassement24}</span>` : ''}</td>
+                        ${COMPETENCES.map(function (comp) {
+                            const valeur = (c.repartition && c.repartition[comp]) || '';
+                            return `<td class="num"><input type="number" class="sim-xp-input" data-semaine="${s.semaine}" data-comp="${comp}" min="0" max="${d.xp}" step="1" value="${valeur}" title="${COMPETENCES_LABELS[comp]}" ${d.xp > 0 ? '' : 'disabled'}></td>`;
+                        }).join('')}
+                        <td class="num">${d.xp}${d.xp > 0 && d.xpNonRepartie > 0 ? ` <span class="sim-xp-reste" title="${d.xpNonRepartie} XP pas encore répartie(s) : perdue(s) si tu les laisses ainsi">(reste ${d.xpNonRepartie})</span>` : ''}</td>
                         <td class="num">${d.xpCumule}</td>
                         <td class="num">${d.energie}</td>
                         <td class="num">${d.xpTotal}</td>
@@ -485,9 +450,8 @@
                     const s = Number(sel.dataset.semaine);
                     const action = sel.value;
                     const semaineInfo = semainesData.find(function (x) { return x.semaine === s; });
-                    const competenceCibleAvant = choix[s] ? choix[s].competenceCible : null;
-                    const surplusCibleAvant = choix[s] ? choix[s].surplusCible : null;
-                    choix[s] = { action: action, tourIndex: action.indexOf('tournoi:') === 0 ? 0 : null, competenceCible: competenceCibleAvant || null, surplusCible: surplusCibleAvant || null };
+                    const repartitionAvant = choix[s] ? choix[s].repartition : null;
+                    choix[s] = { action: action, tourIndex: action.indexOf('tournoi:') === 0 ? 0 : null, repartition: repartitionAvant || {} };
                     majVerrouSemaine2(semaineInfo);
                     rendreTableau();
                     rendreResume(simuler());
@@ -502,18 +466,27 @@
                     rendreResume(simuler());
                 });
             });
-            document.querySelectorAll('.sim-competence-select').forEach(function (sel) {
-                sel.addEventListener('change', function () {
-                    const s = Number(sel.dataset.semaine);
-                    choix[s].competenceCible = sel.value || null;
-                    rendreTableau();
-                    rendreResume(simuler());
-                });
-            });
-            document.querySelectorAll('.sim-surplus-select').forEach(function (sel) {
-                sel.addEventListener('change', function () {
-                    const s = Number(sel.dataset.semaine);
-                    choix[s].surplusCible = sel.value || null;
+            // Saisie de l'XP par competence : bornee en direct au restant de la semaine
+            // (XP de la semaine - deja saisi dans les 7 autres colonnes), recalcul
+            // complet a la validation du champ (change) - pas a chaque frappe, pour ne
+            // pas perdre le focus du champ en cours de saisie.
+            document.querySelectorAll('.sim-xp-input').forEach(function (input) {
+                const s = Number(input.dataset.semaine);
+                const comp = input.dataset.comp;
+                const borner = function () {
+                    const xpSemaine = Number(input.max) || 0;
+                    const rep = (choix[s] && choix[s].repartition) || {};
+                    const autres = COMPETENCES.reduce(function (sum, k) { return k === comp ? sum : sum + (Math.floor(Number(rep[k]) || 0)); }, 0);
+                    let v = Math.floor(Number(input.value) || 0);
+                    v = Math.max(0, Math.min(v, xpSemaine - autres));
+                    if (input.value !== '' && Number(input.value) !== v) input.value = v;
+                    return v;
+                };
+                input.addEventListener('input', borner);
+                input.addEventListener('change', function () {
+                    const v = borner();
+                    if (!choix[s].repartition) choix[s].repartition = {};
+                    if (v > 0) choix[s].repartition[comp] = v; else delete choix[s].repartition[comp];
                     rendreTableau();
                     rendreResume(simuler());
                 });
@@ -573,8 +546,21 @@
             semainesData.forEach(function (s) {
                 const sauve = planSauvegarde[s.semaine];
                 choix[s.semaine] = sauve
-                    ? { action: sauve.action, tourIndex: sauve.tourIndex, competenceCible: sauve.competenceCible || null, surplusCible: sauve.surplusCible || null }
-                    : { action: 'generique', tourIndex: null, competenceCible: null, surplusCible: null };
+                    ? { action: sauve.action, tourIndex: sauve.tourIndex, repartition: sauve.repartition || {}, ancienneCible: sauve.repartition ? null : (sauve.competenceCible || null) }
+                    : { action: 'generique', tourIndex: null, repartition: {} };
+            });
+            // Plan sauvegarde avec l'ancien format ("Competence visee" = une seule
+            // competence) : toute l'XP de la semaine est reportee dans la colonne de
+            // cette competence. "Completer jusqu'a 24" n'a pas d'equivalent direct : la
+            // semaine repart vide, a remplir a la main.
+            const detailInitial = simuler().detail;
+            semainesData.forEach(function (s, i) {
+                const c = choix[s.semaine];
+                if (c.ancienneCible && COMPETENCES.indexOf(c.ancienneCible) !== -1 && detailInitial[i].xp > 0) {
+                    c.repartition = {};
+                    c.repartition[c.ancienneCible] = detailInitial[i].xp;
+                }
+                delete c.ancienneCible;
             });
 
             rendreTableau();
@@ -607,7 +593,7 @@
         document.getElementById('sim-sauvegarder-btn').addEventListener('click', sauvegarderPlan);
 
         document.getElementById('sim-reset-btn').addEventListener('click', function () {
-            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null, competenceCible: null, surplusCible: null }; });
+            semainesData.forEach(function (s) { choix[s.semaine] = { action: 'generique', tourIndex: null, repartition: {} }; });
             rendreTableau();
         });
 
