@@ -5398,7 +5398,7 @@ function resoudrePointTB(niveauA_normal, niveauB_normal, niveauA_mental, niveauB
 
 function simulerTieBreak(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, stats, evenements, numeroSet, setsA, setsB, seuil) {
     let ptsA = 0, ptsB = 0;
-    evenements.push({ type: 'tie_break_debut', texte: '--- Jeu decisif (tie-break) ---', numeroSet, setsA, setsB, jeuxA: 6, jeuxB: 6 });
+    evenements.push({ type: 'tie_break_debut', texte: seuil === 10 ? '--- Super tie-break (10 points) ---' : '--- Jeu decisif (tie-break) ---', numeroSet, setsA, setsB, jeuxA: 6, jeuxB: 6 });
     while (true) {
         const menacant = seraitDecisifTB(ptsA, ptsB, seuil) ? 'A' : (seraitDecisifTB(ptsB, ptsA, seuil) ? 'B' : null);
         const vainqueur = resoudrePointTB(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacant, stats, evenements);
@@ -5668,9 +5668,10 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
             const niveauB_mental_manche = niveauxB.mental;
 
             if (jeuxA === 6 && jeuxB === 6) {
-                // 5e set d'un match en 3 sets gagnants : jeu decisif a 10 points (au lieu
-                // de 7) et gagne de 2 points d'ecart, seule exception au reglement normal.
-                const seuilTB = (meilleurDe5 && numeroSet === 5) ? 10 : 7;
+                // Set decisif (3e set en 2 sets gagnants, 5e en 3 sets gagnants) : super
+                // tie-break a 10 points (au lieu de 7), 2 points d'ecart. Avant le
+                // 2026-10-20, seul le 5e set en avait un (demande explicite de l'utilisateur).
+                const seuilTB = numeroSet === numeroSetDecisif ? 10 : 7;
                 const vainqueurTB = simulerTieBreak(niveauA_normal_manche, niveauB_normal_manche, niveauA_mental_manche, niveauB_mental_manche, stats, evenements, numeroSet, setsA, setsB, seuilTB);
                 if (vainqueurTB === 'A') jeuxA++; else jeuxB++;
                 totalJeux++;
