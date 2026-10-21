@@ -1975,7 +1975,7 @@ function competencesEstimees(playerId, semaineActuelle) {
             });
         }
         const part = (xpParSemaine.get(s) || 0) / 8;
-        COMPETENCES.forEach(function (c) { valeurs[c] = Math.min(100, valeurs[c] + part); });
+        COMPETENCES.forEach(function (c) { valeurs[c] = valeurs[c] + part; }); // pas de plafond (2026-10-21)
     }
 
     const parCompetence = {};
@@ -3941,9 +3941,8 @@ app.post('/api/repartir-xp', (req, res) => {
             if (!Number.isFinite(valeur) || valeur < 0) {
                 return res.status(400).json({ error: 'Valeurs invalides.' });
             }
-            if (player[cle] + valeur > 100) {
-                return res.status(400).json({ error: 'Impossible de depasser 100 en ' + cle + '.' });
-            }
+            // Plus de plafond a 100 (2026-10-21, demande explicite de l'utilisateur) :
+            // une competence peut depasser 100, seule l'XP disponible limite la repartition.
             valeurs[cle] = valeur;
             total += valeur;
         }
@@ -4404,7 +4403,7 @@ function executerAvancementSemaine() {
                     COMPETENCES.forEach(function (cle) {
                         const valeur = Number(enAttente[cle]) || 0;
                         if (valeur > 0) {
-                            competencesErodees[cle] = Math.min(100, competencesErodees[cle] + valeur);
+                            competencesErodees[cle] = competencesErodees[cle] + valeur; // pas de plafond (2026-10-21)
                         }
                     });
                 } catch (e) { /* JSON invalide, ignore */ }

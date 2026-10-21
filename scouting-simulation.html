@@ -312,7 +312,7 @@
                     const donne = Math.min(voulu, xpRestante);
                     repartitionAppliquee[comp] = donne;
                     xpRestante -= donne;
-                    competences[comp] = Math.min(100, competences[comp] + donne);
+                    competences[comp] = competences[comp] + donne; // pas de plafond a 100 (2026-10-21)
                 });
 
                 xpCumule += xpSemaine;
