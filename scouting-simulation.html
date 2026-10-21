@@ -58,6 +58,11 @@
             border-radius: 6px; padding: 4px 4px; font-size: 0.8rem; text-align: right; color-scheme: dark;
         }
         .sim-xp-input:disabled { opacity: 0.35; }
+        .sim-detail-btn {
+            margin-left: 4px; width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(255,255,255,0.3);
+            background: rgba(255,255,255,0.06); color: #C5CDD6; font-size: 0.7rem; line-height: 1; cursor: pointer; padding: 0;
+        }
+        .sim-detail-btn:hover { color: #D4F000; border-color: #D4F000; }
         .sim-xp-reste { color: #E0A84F; font-size: 0.75rem; white-space: nowrap; }
         .sim-actions { display:flex; gap:10px; margin-bottom:18px; }
     </style>
@@ -220,6 +225,10 @@
                     mentalCourant = Math.min(mentalCourant, mentalMax);
                 }
 
+                // Etat des competences en debut de semaine (bouton "?" de la ligne) - avant
+                // l'erosion de cette semaine, donc apres l'XP de toutes les semaines d'avant.
+                const compDebut = Object.assign({}, competences);
+
                 // Semaine "verrouillee" (2e semaine d'un tournoi 2 semaines deja compte sur
                 // la semaine de debut) : seule l'erosion s'applique, aucun nouvel effet.
                 if (c.action === 'verrou') {
@@ -233,7 +242,8 @@
                     detail.push({
                         semaine: s.semaine, xp: 0, xpCumule, energie,
                         xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
-                        erosionSemaine: erosionSemaine, xpNonRepartie: 0, repartitionAppliquee: {}
+                        erosionSemaine: erosionSemaine, xpNonRepartie: 0, repartitionAppliquee: {},
+                        compDebut: compDebut, compApresErosion: Object.assign({}, competences), compFin: Object.assign({}, competences)
                     });
                     return;
                 }
@@ -246,6 +256,7 @@
                     erosionSemaine += perte;
                     competences[comp] = Math.max(0, competences[comp] - perte);
                 });
+                const compApresErosion = Object.assign({}, competences);
 
                 let xpSemaine = 0;
                 let surfaceProtegee = null;
@@ -319,7 +330,8 @@
                 detail.push({
                     semaine: s.semaine, xp: xpSemaine, xpCumule, energie,
                     xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
-                    erosionSemaine: erosionSemaine, xpNonRepartie: xpRestante, repartitionAppliquee: repartitionAppliquee
+                    erosionSemaine: erosionSemaine, xpNonRepartie: xpRestante, repartitionAppliquee: repartitionAppliquee,
+                    compDebut: compDebut, compApresErosion: compApresErosion, compFin: Object.assign({}, competences)
                 });
             });
 
@@ -392,7 +404,7 @@
                 if (c.action === 'verrou') {
                     return `
                         <tr class="sim-row-verrou${classeMentalCut}">
-                            <td>S${s.position}</td>
+                            <td>S${s.position} <button type="button" class="sim-detail-btn" data-index="${i}" title="Où en seront les compétences cette semaine">?</button></td>
                             <td colspan="10">Suite du tournoi (2e semaine, verrouillée)</td>
                             <td class="num">0</td>
                             <td class="num">${d.xpCumule}</td>
@@ -413,7 +425,7 @@
 
                 return `
                     <tr class="${classeMentalCut.trim()}">
-                        <td>S${s.position}${classeMentalCut ? ' <span title="Mental max rabote de 2/3 de son exces au-dela de 100 (Miami/Wimbledon/US Open)">🔻</span>' : ''}</td>
+                        <td>S${s.position}${classeMentalCut ? ' <span title="Mental max rabote de 2/3 de son exces au-dela de 100 (Miami/Wimbledon/US Open)">🔻</span>' : ''} <button type="button" class="sim-detail-btn" data-index="${i}" title="Où en seront les compétences cette semaine">?</button></td>
                         <td>
                             <select class="sim-select sim-action-select" data-semaine="${s.semaine}">
                                 ${optionsAction(s)}
@@ -494,6 +506,49 @@
 
             rendreResume(resultat);
         }
+
+        // Bouton "?" d'une semaine : valeur de chaque competence en debut de semaine
+        // (= resultat de tout ce qui a ete reparti les semaines d'avant), erosion de la
+        // semaine, base apres erosion (celle a laquelle s'ajoute l'XP), XP mise cette
+        // semaine et valeur en fin de semaine. Recalcule a l'ouverture, donc toujours a
+        // jour avec les saisies en cours. Demande explicite de l'utilisateur, 2026-10-21.
+        function ouvrirDetailSemaine(index) {
+            const d = simuler().detail[index];
+            const s = semainesData[index];
+            if (!d || !d.compDebut) return;
+            const arr = function (v) { return Math.round(v * 10) / 10; };
+            const lignes = COMPETENCES.map(function (comp) {
+                const debut = d.compDebut[comp], apres = d.compApresErosion[comp], fin = d.compFin[comp];
+                const erosion = debut - apres;
+                const xp = (d.repartitionAppliquee && d.repartitionAppliquee[comp]) || 0;
+                return `<tr><td>${COMPETENCES_LABELS[comp]}</td><td class="num">${arr(debut)}</td><td class="num">${erosion ? '−' + arr(erosion) : '0'}</td><td class="num">${arr(apres)}</td><td class="num">${xp ? '+' + xp : ''}</td><td class="num"><strong>${arr(fin)}</strong></td></tr>`;
+            }).join('');
+            const total = function (o) { return arr(COMPETENCES.reduce(function (t, c) { return t + o[c]; }, 0)); };
+            const overlay = document.createElement('div');
+            overlay.className = 'dispo-blocage-overlay';
+            overlay.innerHTML = `
+                <div class="dispo-blocage-box">
+                    <div class="stats-header" style="margin-top:0;">Compétences — S${s.position}</div>
+                    <p class="match-hint" style="margin-bottom:10px;">L'érosion de la semaine (−4 %, arrondie par défaut) passe d'abord ; l'XP répartie s'ajoute ensuite à la valeur après érosion (plafond 102).</p>
+                    <div class="sim-table-wrap" style="margin-bottom:0;">
+                        <table class="sim-table">
+                            <thead><tr><th>Compétence</th><th class="num">Début</th><th class="num">Érosion</th><th class="num">Après érosion</th><th class="num">XP</th><th class="num">Fin de semaine</th></tr></thead>
+                            <tbody>${lignes}
+                                <tr><td><strong>Total</strong></td><td class="num">${total(d.compDebut)}</td><td class="num">−${d.erosionSemaine}</td><td class="num">${total(d.compApresErosion)}</td><td class="num">${d.xp - (d.xpNonRepartie || 0) ? '+' + (d.xp - (d.xpNonRepartie || 0)) : ''}</td><td class="num"><strong>${total(d.compFin)}</strong></td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <button class="cta cta-secondary sim-detail-fermer" style="margin-top:18px; padding:8px 16px; font-size:0.8rem;">Fermer</button>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+            overlay.addEventListener('click', function (e) { if (e.target === overlay) overlay.remove(); });
+            overlay.querySelector('.sim-detail-fermer').addEventListener('click', function () { overlay.remove(); });
+        }
+        document.addEventListener('click', function (e) {
+            const bouton = e.target.closest('.sim-detail-btn');
+            if (bouton) ouvrirDetailSemaine(Number(bouton.dataset.index));
+        });
 
         const LABELS_CONDITION = { en_forme: 'En forme', fatigue: 'Fatigué', diminue: 'Diminué', blesse: 'Blessé' };
         function rendreResume(resultat) {
