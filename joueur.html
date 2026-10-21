@@ -334,7 +334,7 @@
                     inputsHtml += `
                         <div class="form-group">
                             <label>${COMPETENCES_LABELS[cle]} ${iconeInfo(COMPETENCES_TOOLTIPS[cle])} (actuel : ${player[cle]})</label>
-                            <input type="number" min="0" value="${valeurEnAttente}" class="xp-input" data-cle="${cle}">
+                            <input type="number" min="0" max="${Math.max(0, 102 - player[cle])}" value="${valeurEnAttente}" class="xp-input" data-cle="${cle}">
                         </div>
                     `;
                 });

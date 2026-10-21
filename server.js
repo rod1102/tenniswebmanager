@@ -258,6 +258,10 @@ function authentifier(req, res, next) {
 app.use(authentifier);
 
 const BUDGET_POINTS = 120;
+// Plafond d'une competence en progression (repartition d'XP) : 102 depuis le
+// 2026-10-21 (demande explicite de l'utilisateur, etait 100). La creation reste a
+// 100 max par competence (competencesValides).
+const MAX_COMPETENCE = 102;
 const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
 
 // Budget de competences d'un personnage cree en cours de saison (ancien modele du
@@ -1975,7 +1979,7 @@ function competencesEstimees(playerId, semaineActuelle) {
             });
         }
         const part = (xpParSemaine.get(s) || 0) / 8;
-        COMPETENCES.forEach(function (c) { valeurs[c] = valeurs[c] + part; }); // pas de plafond (2026-10-21)
+        COMPETENCES.forEach(function (c) { valeurs[c] = Math.min(MAX_COMPETENCE, valeurs[c] + part); });
     }
 
     const parCompetence = {};
@@ -3941,8 +3945,9 @@ app.post('/api/repartir-xp', (req, res) => {
             if (!Number.isFinite(valeur) || valeur < 0) {
                 return res.status(400).json({ error: 'Valeurs invalides.' });
             }
-            // Plus de plafond a 100 (2026-10-21, demande explicite de l'utilisateur) :
-            // une competence peut depasser 100, seule l'XP disponible limite la repartition.
+            if (player[cle] + valeur > MAX_COMPETENCE) {
+                return res.status(400).json({ error: 'Impossible de depasser ' + MAX_COMPETENCE + ' en ' + cle + '.' });
+            }
             valeurs[cle] = valeur;
             total += valeur;
         }
@@ -4403,7 +4408,7 @@ function executerAvancementSemaine() {
                     COMPETENCES.forEach(function (cle) {
                         const valeur = Number(enAttente[cle]) || 0;
                         if (valeur > 0) {
-                            competencesErodees[cle] = competencesErodees[cle] + valeur; // pas de plafond (2026-10-21)
+                            competencesErodees[cle] = Math.min(MAX_COMPETENCE, competencesErodees[cle] + valeur);
                         }
                     });
                 } catch (e) { /* JSON invalide, ignore */ }
