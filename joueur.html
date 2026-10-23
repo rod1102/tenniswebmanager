@@ -741,10 +741,13 @@
                     <div class="xp-pool-panel">
                         <div class="xp-pool-title">Mise de points d'énergie (plafond ${plafondMise}, énergie disponible ${data.pointsEnergieDisponibles})</div>
                         <div class="planning-alerte-texte" style="margin-bottom:8px;">S'ajoute au niveau de jeu pendant tout le tournoi, mais définitivement perdue à l'élimination ou à la victoire. ${tournoiDemarre ? 'Le tournoi a déjà commencé, la mise ne peut plus être modifiée.' : 'Modifiable librement jusqu\'au début du tournoi.'}</div>
+                        ${tournoiDemarre ? `
+                            <div style="font-size:0.95rem; color:#F5F7FA;">Points misés sur l'ensemble du tournoi : <strong style="color:#D4F000;">${bloc.energieMiseeActuelle || 0}</strong>${bloc.energieMiseeActuelle ? ` <span class="match-hint">(+${bloc.energieMiseeActuelle * 5} au niveau de jeu)</span>` : ''}</div>
+                        ` : `
                         <div class="training-row">
-                            <input type="number" min="0" max="${maxMise}" step="1" inputmode="numeric" value="${bloc.energieMiseeActuelle || 0}" class="mise-energie-input" style="width:70px;" ${tournoiDemarre ? 'disabled' : ''}>
-                            <button class="cta cta-primary mise-energie-btn" style="padding:10px 16px; font-size:0.8rem;" ${tournoiDemarre ? 'disabled' : ''}>Valider la mise</button>
-                        </div>
+                            <input type="number" min="0" max="${maxMise}" step="1" inputmode="numeric" value="${bloc.energieMiseeActuelle || 0}" class="mise-energie-input" style="width:70px;">
+                            <button class="cta cta-primary mise-energie-btn" style="padding:10px 16px; font-size:0.8rem;">Valider la mise</button>
+                        </div>`}
                     </div>
                 ` : '';
                 const tourActuel = bloc.tournoi.tour_actuel || 0;
