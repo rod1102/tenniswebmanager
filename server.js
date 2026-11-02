@@ -5379,8 +5379,15 @@ function seraitDecisifTB(pts, autre, seuil) {
 }
 
 function resoudrePointTB(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, menacant, stats, evenements) {
+    // TOUT le tie-break se joue sur les niveaux "points importants" (2026-11-02,
+    // demande explicite de l'utilisateur, conforme a la page Regles). Mais un point
+    // qui ne peut pas conclure le tie-break reste discret : pas d'annonce, pas de
+    // stats.pointsImportants++ - il ne compte donc ni dans les "points importants"
+    // des stats (calculerStatsMatch lit les evenements point_important) ni dans le
+    // gain de mental max (pointsImportants x taux). Seuls les points decisifs
+    // (balle de set/match du tie-break), ci-dessous, comptent comme avant.
     if (!menacant) {
-        return tirage(niveauA_normal, niveauB_normal);
+        return tirage(niveauA_mental, niveauB_mental);
     }
 
     evenements.push({ type: 'point_important', texte: 'Point decisif pour ' + nomJoueur(menacant) });
