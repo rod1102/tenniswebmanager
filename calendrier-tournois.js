@@ -23,11 +23,21 @@ const BAREME_POINTS = {
     ATP_1000_96: [1000, 650, 400, 200, 100, 50, 30, 10],
     ATP_1000_56: [1000, 650, 400, 200, 100, 50, 10],
     ATP_500: [500, 330, 200, 100, 50, 25, 0],
+    // ATP 500 a 32 joueurs : 0 point au 1er tour (le 25 n'existe qu'au 2e tour des tableaux
+    // de 48), comme sur le vrai circuit - 2026-11-03, demande explicite de l'utilisateur.
+    ATP_500_32: [500, 330, 200, 100, 50, 0],
     ATP_250: [250, 165, 100, 50, 25, 13, 0],
+    // ATP 250 a 28/32 joueurs : 0 point pour une defaite au 1er tour, comme sur le vrai
+    // circuit (le 13 n'existe qu'au 2e tour des tableaux de 48). Demande explicite de
+    // l'utilisateur, 2026-11-03 - avant, ces tournois utilisaient ATP_250 (13 au 1er tour).
+    ATP_250_32: [250, 165, 100, 50, 25, 0],
     WTA_SLAM: [2000, 1300, 780, 430, 240, 130, 70, 10],
     WTA_1000_96: [1000, 650, 390, 215, 120, 65, 35, 10],
     WTA_1000_56: [1000, 650, 390, 215, 120, 65, 10],
     WTA_500: [500, 325, 195, 108, 60, 30, 1],
+    // WTA 500 a 28/32 joueurs : 1 point au 1er tour (le 30 n'existe qu'au 2e tour des
+    // tableaux de 48), comme sur le vrai circuit - 2026-11-03, demande de l'utilisateur.
+    WTA_500_32: [500, 325, 195, 108, 60, 1],
     WTA_250: [250, 163, 98, 54, 30, 1],
     // Masters de fin de saison (format poules) : bareme officiel accumule par match gagne
     // (200/victoire de poule + 400 demie + 500 finale pour l'ATP, un peu moins cote WTA).
@@ -70,24 +80,24 @@ const SEMAINES_COUPES_EQUIPE = [
 
 const CALENDRIER_TOURNOIS = [
     // --- ATP : swing australien ---
-    { id: 'atp-brisbane', circuit: 'ATP', nom: 'Brisbane International', pays: 'Australie', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 1, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-hong-kong', circuit: 'ATP', nom: 'Hong Kong Open', pays: 'Hong Kong', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 1, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-adelaide', circuit: 'ATP', nom: 'Adelaide International', pays: 'Australie', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 2, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-auckland', circuit: 'ATP', nom: 'Auckland Open', pays: 'Nouvelle-Zelande', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 2, duree: 1, bareme: 'ATP_250' },
+    { id: 'atp-brisbane', circuit: 'ATP', nom: 'Brisbane International', pays: 'Australie', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 1, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-hong-kong', circuit: 'ATP', nom: 'Hong Kong Open', pays: 'Hong Kong', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 1, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-adelaide', circuit: 'ATP', nom: 'Adelaide International', pays: 'Australie', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 2, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-auckland', circuit: 'ATP', nom: 'Auckland Open', pays: 'Nouvelle-Zelande', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 2, duree: 1, bareme: 'ATP_250_32' },
     { id: 'atp-ao', circuit: 'ATP', nom: 'Open d\'Australie', pays: 'Australie', categorie: 'slam', surface: 'dur', taille_tableau: 128, semaine_debut: 3, duree: 2, bareme: 'ATP_SLAM' },
 
     // --- ATP : golden swing (indoor + Amerique du Sud) ---
-    { id: 'atp-montpellier', circuit: 'ATP', nom: 'Open Occitanie (Montpellier)', pays: 'France', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 6, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-dallas', circuit: 'ATP', nom: 'Dallas Open', pays: 'Etats-Unis', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 6, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-rotterdam', circuit: 'ATP', nom: 'Rotterdam Open', pays: 'Pays-Bas', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 6, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-delray-beach', circuit: 'ATP', nom: 'Delray Beach Open', pays: 'Etats-Unis', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 7, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-marseille', circuit: 'ATP', nom: 'Open 13 Provence (Marseille)', pays: 'France', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 7, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-buenos-aires', circuit: 'ATP', nom: 'Argentina Open (Buenos Aires)', pays: 'Argentine', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 7, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-doha', circuit: 'ATP', nom: 'Qatar Open (Doha)', pays: 'Qatar', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 8, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-rio', circuit: 'ATP', nom: 'Rio Open', pays: 'Bresil', categorie: 500, surface: 'terre', taille_tableau: 32, semaine_debut: 8, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-dubai', circuit: 'ATP', nom: 'Dubai Championships', pays: 'Emirats arabes unis', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 9, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-acapulco', circuit: 'ATP', nom: 'Mexican Open (Acapulco)', pays: 'Mexique', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 9, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-santiago', circuit: 'ATP', nom: 'Chile Open (Santiago)', pays: 'Chili', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 9, duree: 1, bareme: 'ATP_250' },
+    { id: 'atp-montpellier', circuit: 'ATP', nom: 'Open Occitanie (Montpellier)', pays: 'France', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 6, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-dallas', circuit: 'ATP', nom: 'Dallas Open', pays: 'Etats-Unis', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 6, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-rotterdam', circuit: 'ATP', nom: 'Rotterdam Open', pays: 'Pays-Bas', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 6, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-delray-beach', circuit: 'ATP', nom: 'Delray Beach Open', pays: 'Etats-Unis', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 7, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-marseille', circuit: 'ATP', nom: 'Open 13 Provence (Marseille)', pays: 'France', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 7, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-buenos-aires', circuit: 'ATP', nom: 'Argentina Open (Buenos Aires)', pays: 'Argentine', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 7, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-doha', circuit: 'ATP', nom: 'Qatar Open (Doha)', pays: 'Qatar', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 8, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-rio', circuit: 'ATP', nom: 'Rio Open', pays: 'Bresil', categorie: 500, surface: 'terre', taille_tableau: 32, semaine_debut: 8, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-dubai', circuit: 'ATP', nom: 'Dubai Championships', pays: 'Emirats arabes unis', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 9, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-acapulco', circuit: 'ATP', nom: 'Mexican Open (Acapulco)', pays: 'Mexique', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 9, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-santiago', circuit: 'ATP', nom: 'Chile Open (Santiago)', pays: 'Chili', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 9, duree: 1, bareme: 'ATP_250_32' },
 
     // --- ATP : Sunshine Double ---
     { id: 'atp-indian-wells', circuit: 'ATP', nom: 'Indian Wells Masters', pays: 'Etats-Unis', categorie: 1000, surface: 'dur', taille_tableau: 96, semaine_debut: 10, duree: 2, bareme: 'ATP_1000_96' },
@@ -96,31 +106,31 @@ const CALENDRIER_TOURNOIS = [
     // --- ATP : swing terre battue ---
     // Houston (US Men's Clay Court Championships) et Bucarest (Romanian Open) retires
     // du calendrier le 2026-09-02 (demande de l'utilisateur) - S15 garde Marrakech + Monte-Carlo.
-    { id: 'atp-marrakech', circuit: 'ATP', nom: 'Grand Prix Hassan II (Marrakech)', pays: 'Maroc', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 15, duree: 1, bareme: 'ATP_250' },
+    { id: 'atp-marrakech', circuit: 'ATP', nom: 'Grand Prix Hassan II (Marrakech)', pays: 'Maroc', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 15, duree: 1, bareme: 'ATP_250_32' },
     { id: 'atp-monte-carlo', circuit: 'ATP', nom: 'Monte-Carlo Masters', pays: 'Monaco', categorie: 1000, surface: 'terre', taille_tableau: 56, semaine_debut: 15, duree: 1, bareme: 'ATP_1000_56' },
-    { id: 'atp-barcelone', circuit: 'ATP', nom: 'Barcelona Open', pays: 'Espagne', categorie: 500, surface: 'terre', taille_tableau: 32, semaine_debut: 16, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-munich', circuit: 'ATP', nom: 'Bavarian International (Munich)', pays: 'Allemagne', categorie: 500, surface: 'terre', taille_tableau: 32, semaine_debut: 16, duree: 1, bareme: 'ATP_500' },
+    { id: 'atp-barcelone', circuit: 'ATP', nom: 'Barcelona Open', pays: 'Espagne', categorie: 500, surface: 'terre', taille_tableau: 32, semaine_debut: 16, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-munich', circuit: 'ATP', nom: 'Bavarian International (Munich)', pays: 'Allemagne', categorie: 500, surface: 'terre', taille_tableau: 32, semaine_debut: 16, duree: 1, bareme: 'ATP_500_32' },
     { id: 'atp-madrid', circuit: 'ATP', nom: 'Madrid Masters', pays: 'Espagne', categorie: 1000, surface: 'terre', taille_tableau: 96, semaine_debut: 17, duree: 2, bareme: 'ATP_1000_96' },
     { id: 'atp-rome', circuit: 'ATP', nom: 'Rome Masters', pays: 'Italie', categorie: 1000, surface: 'terre', taille_tableau: 96, semaine_debut: 19, duree: 2, bareme: 'ATP_1000_96' },
-    { id: 'atp-hambourg', circuit: 'ATP', nom: 'Hamburg Open', pays: 'Allemagne', categorie: 500, surface: 'terre', taille_tableau: 32, semaine_debut: 21, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-geneve', circuit: 'ATP', nom: 'Geneva Open', pays: 'Suisse', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 21, duree: 1, bareme: 'ATP_250' },
+    { id: 'atp-hambourg', circuit: 'ATP', nom: 'Hamburg Open', pays: 'Allemagne', categorie: 500, surface: 'terre', taille_tableau: 32, semaine_debut: 21, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-geneve', circuit: 'ATP', nom: 'Geneva Open', pays: 'Suisse', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 21, duree: 1, bareme: 'ATP_250_32' },
     { id: 'atp-rg', circuit: 'ATP', nom: 'Roland-Garros', pays: 'France', categorie: 'slam', surface: 'terre', taille_tableau: 128, semaine_debut: 22, duree: 2, bareme: 'ATP_SLAM' },
 
     // --- ATP : swing herbe ---
-    { id: 'atp-queens', circuit: 'ATP', nom: 'Queen\'s Club Championships', pays: 'Royaume-Uni', categorie: 500, surface: 'herbe', taille_tableau: 32, semaine_debut: 25, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-halle', circuit: 'ATP', nom: 'Halle Open', pays: 'Allemagne', categorie: 500, surface: 'herbe', taille_tableau: 32, semaine_debut: 25, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-stuttgart', circuit: 'ATP', nom: 'Stuttgart Open', pays: 'Allemagne', categorie: 250, surface: 'herbe', taille_tableau: 28, semaine_debut: 24, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-s-hertogenbosch', circuit: 'ATP', nom: 'Libema Open (\'s-Hertogenbosch)', pays: 'Pays-Bas', categorie: 250, surface: 'herbe', taille_tableau: 28, semaine_debut: 24, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-mallorca', circuit: 'ATP', nom: 'Mallorca Open', pays: 'Espagne', categorie: 250, surface: 'herbe', taille_tableau: 28, semaine_debut: 26, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-eastbourne', circuit: 'ATP', nom: 'Eastbourne International', pays: 'Royaume-Uni', categorie: 250, surface: 'herbe', taille_tableau: 28, semaine_debut: 26, duree: 1, bareme: 'ATP_250' },
+    { id: 'atp-queens', circuit: 'ATP', nom: 'Queen\'s Club Championships', pays: 'Royaume-Uni', categorie: 500, surface: 'herbe', taille_tableau: 32, semaine_debut: 25, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-halle', circuit: 'ATP', nom: 'Halle Open', pays: 'Allemagne', categorie: 500, surface: 'herbe', taille_tableau: 32, semaine_debut: 25, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-stuttgart', circuit: 'ATP', nom: 'Stuttgart Open', pays: 'Allemagne', categorie: 250, surface: 'herbe', taille_tableau: 28, semaine_debut: 24, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-s-hertogenbosch', circuit: 'ATP', nom: 'Libema Open (\'s-Hertogenbosch)', pays: 'Pays-Bas', categorie: 250, surface: 'herbe', taille_tableau: 28, semaine_debut: 24, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-mallorca', circuit: 'ATP', nom: 'Mallorca Open', pays: 'Espagne', categorie: 250, surface: 'herbe', taille_tableau: 28, semaine_debut: 26, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-eastbourne', circuit: 'ATP', nom: 'Eastbourne International', pays: 'Royaume-Uni', categorie: 250, surface: 'herbe', taille_tableau: 28, semaine_debut: 26, duree: 1, bareme: 'ATP_250_32' },
     { id: 'atp-wimbledon', circuit: 'ATP', nom: 'Wimbledon', pays: 'Royaume-Uni', categorie: 'slam', surface: 'herbe', taille_tableau: 128, semaine_debut: 27, duree: 2, bareme: 'ATP_SLAM' },
 
     // --- ATP : ete europeen + swing dur US ---
-    { id: 'atp-los-cabos', circuit: 'ATP', nom: 'Los Cabos Open', pays: 'Mexique', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 29, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-bastad', circuit: 'ATP', nom: 'Swedish Open (Bastad)', pays: 'Suede', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 29, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-gstaad', circuit: 'ATP', nom: 'Swiss Open (Gstaad)', pays: 'Suisse', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 29, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-umag', circuit: 'ATP', nom: 'Croatia Open (Umag)', pays: 'Croatie', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 30, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-kitzbuhel', circuit: 'ATP', nom: 'Generali Open (Kitzbuhel)', pays: 'Autriche', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 30, duree: 1, bareme: 'ATP_250' },
+    { id: 'atp-los-cabos', circuit: 'ATP', nom: 'Los Cabos Open', pays: 'Mexique', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 29, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-bastad', circuit: 'ATP', nom: 'Swedish Open (Bastad)', pays: 'Suede', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 29, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-gstaad', circuit: 'ATP', nom: 'Swiss Open (Gstaad)', pays: 'Suisse', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 29, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-umag', circuit: 'ATP', nom: 'Croatia Open (Umag)', pays: 'Croatie', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 30, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-kitzbuhel', circuit: 'ATP', nom: 'Generali Open (Kitzbuhel)', pays: 'Autriche', categorie: 250, surface: 'terre', taille_tableau: 28, semaine_debut: 30, duree: 1, bareme: 'ATP_250_32' },
     { id: 'atp-washington', circuit: 'ATP', nom: 'Washington Open', pays: 'Etats-Unis', categorie: 500, surface: 'dur', taille_tableau: 48, semaine_debut: 30, duree: 1, bareme: 'ATP_500' },
     { id: 'atp-canada', circuit: 'ATP', nom: 'Canada Masters (Montreal/Toronto)', pays: 'Canada', categorie: 1000, surface: 'dur', taille_tableau: 96, semaine_debut: 31, duree: 2, bareme: 'ATP_1000_96' },
     { id: 'atp-cincinnati', circuit: 'ATP', nom: 'Cincinnati Masters', pays: 'Etats-Unis', categorie: 1000, surface: 'dur', taille_tableau: 96, semaine_debut: 33, duree: 2, bareme: 'ATP_1000_96' },
@@ -128,18 +138,18 @@ const CALENDRIER_TOURNOIS = [
     { id: 'atp-us-open', circuit: 'ATP', nom: 'US Open', pays: 'Etats-Unis', categorie: 'slam', surface: 'dur', taille_tableau: 128, semaine_debut: 36, duree: 2, bareme: 'ATP_SLAM' },
 
     // --- ATP : swing asiatique ---
-    { id: 'atp-chengdu', circuit: 'ATP', nom: 'Chengdu Open', pays: 'Chine', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 39, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-hangzhou', circuit: 'ATP', nom: 'Hangzhou Open', pays: 'Chine', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 39, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-beijing', circuit: 'ATP', nom: 'China Open (Pekin)', pays: 'Chine', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 40, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-tokyo', circuit: 'ATP', nom: 'Japan Open (Tokyo)', pays: 'Japon', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 40, duree: 1, bareme: 'ATP_500' },
+    { id: 'atp-chengdu', circuit: 'ATP', nom: 'Chengdu Open', pays: 'Chine', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 39, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-hangzhou', circuit: 'ATP', nom: 'Hangzhou Open', pays: 'Chine', categorie: 250, surface: 'dur', taille_tableau: 28, semaine_debut: 39, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-beijing', circuit: 'ATP', nom: 'China Open (Pekin)', pays: 'Chine', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 40, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-tokyo', circuit: 'ATP', nom: 'Japan Open (Tokyo)', pays: 'Japon', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 40, duree: 1, bareme: 'ATP_500_32' },
     { id: 'atp-shanghai', circuit: 'ATP', nom: 'Shanghai Masters', pays: 'Chine', categorie: 1000, surface: 'dur', taille_tableau: 96, semaine_debut: 41, duree: 2, bareme: 'ATP_1000_96' },
 
     // --- ATP : swing indoor ---
-    { id: 'atp-almaty', circuit: 'ATP', nom: 'Almaty Open', pays: 'Kazakhstan', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 43, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-bruxelles', circuit: 'ATP', nom: 'European Open (Bruxelles)', pays: 'Belgique', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 43, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-stockholm', circuit: 'ATP', nom: 'BNP Paribas Nordic Open (Stockholm)', pays: 'Suede', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 46, duree: 1, bareme: 'ATP_250' },
-    { id: 'atp-vienne', circuit: 'ATP', nom: 'Vienna Open', pays: 'Autriche', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 44, duree: 1, bareme: 'ATP_500' },
-    { id: 'atp-bale', circuit: 'ATP', nom: 'Swiss Indoors (Bale)', pays: 'Suisse', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 44, duree: 1, bareme: 'ATP_500' },
+    { id: 'atp-almaty', circuit: 'ATP', nom: 'Almaty Open', pays: 'Kazakhstan', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 43, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-bruxelles', circuit: 'ATP', nom: 'European Open (Bruxelles)', pays: 'Belgique', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 43, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-stockholm', circuit: 'ATP', nom: 'BNP Paribas Nordic Open (Stockholm)', pays: 'Suede', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 46, duree: 1, bareme: 'ATP_250_32' },
+    { id: 'atp-vienne', circuit: 'ATP', nom: 'Vienna Open', pays: 'Autriche', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 44, duree: 1, bareme: 'ATP_500_32' },
+    { id: 'atp-bale', circuit: 'ATP', nom: 'Swiss Indoors (Bale)', pays: 'Suisse', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 44, duree: 1, bareme: 'ATP_500_32' },
     { id: 'atp-paris', circuit: 'ATP', nom: 'Paris Masters', pays: 'France', categorie: 1000, surface: 'dur', indoor: true, taille_tableau: 56, semaine_debut: 45, duree: 1, bareme: 'ATP_1000_56' },
 
     // --- ATP : Masters de fin de saison (format poules) ---
@@ -148,20 +158,20 @@ const CALENDRIER_TOURNOIS = [
     // --- WTA : swing australien ---
     { id: 'wta-brisbane', circuit: 'WTA', nom: 'Brisbane International', pays: 'Australie', categorie: 500, surface: 'dur', taille_tableau: 48, semaine_debut: 1, duree: 1, bareme: 'WTA_500' },
     { id: 'wta-auckland', circuit: 'WTA', nom: 'Auckland Open', pays: 'Nouvelle-Zelande', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 1, duree: 1, bareme: 'WTA_250' },
-    { id: 'wta-adelaide', circuit: 'WTA', nom: 'Adelaide International', pays: 'Australie', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 2, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-adelaide', circuit: 'WTA', nom: 'Adelaide International', pays: 'Australie', categorie: 500, surface: 'dur', taille_tableau: 32, semaine_debut: 2, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-hobart', circuit: 'WTA', nom: 'Hobart International', pays: 'Australie', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 2, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-ao', circuit: 'WTA', nom: 'Open d\'Australie', pays: 'Australie', categorie: 'slam', surface: 'dur', taille_tableau: 128, semaine_debut: 3, duree: 2, bareme: 'WTA_SLAM' },
 
     // --- WTA : swing indoor / hiver ---
-    { id: 'wta-linz', circuit: 'WTA', nom: 'Linz Open', pays: 'Autriche', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 6, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-linz', circuit: 'WTA', nom: 'Linz Open', pays: 'Autriche', categorie: 500, surface: 'dur', indoor: true, taille_tableau: 28, semaine_debut: 6, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-singapour', circuit: 'WTA', nom: 'Singapore Open', pays: 'Singapour', categorie: 250, surface: 'dur', indoor: true, taille_tableau: 32, semaine_debut: 6, duree: 1, bareme: 'WTA_250' },
-    { id: 'wta-abou-dabi', circuit: 'WTA', nom: 'Abu Dhabi Open', pays: 'Emirats arabes unis', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 6, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-abou-dabi', circuit: 'WTA', nom: 'Abu Dhabi Open', pays: 'Emirats arabes unis', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 6, duree: 1, bareme: 'WTA_500_32' },
     // Transylvania Open (Cluj-Napoca) retire du calendrier le 2026-09-03 (demande de l'utilisateur).
 
     // --- WTA : Moyen-Orient + pre-Sunshine ---
     { id: 'wta-doha', circuit: 'WTA', nom: 'Qatar Open (Doha)', pays: 'Qatar', categorie: 1000, surface: 'dur', taille_tableau: 56, semaine_debut: 7, duree: 1, bareme: 'WTA_1000_56' },
     { id: 'wta-dubai', circuit: 'WTA', nom: 'Dubai Championships', pays: 'Emirats arabes unis', categorie: 1000, surface: 'dur', taille_tableau: 56, semaine_debut: 8, duree: 1, bareme: 'WTA_1000_56' },
-    { id: 'wta-merida', circuit: 'WTA', nom: 'Merida Open', pays: 'Mexique', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 9, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-merida', circuit: 'WTA', nom: 'Merida Open', pays: 'Mexique', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 9, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-austin', circuit: 'WTA', nom: 'ATX Open (Austin)', pays: 'Etats-Unis', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 9, duree: 1, bareme: 'WTA_250' },
 
     // --- WTA : Sunshine Double ---
@@ -172,17 +182,17 @@ const CALENDRIER_TOURNOIS = [
     { id: 'wta-charleston', circuit: 'WTA', nom: 'Charleston Open', pays: 'Etats-Unis', categorie: 500, surface: 'terre', taille_tableau: 48, semaine_debut: 15, duree: 1, bareme: 'WTA_500' },
     { id: 'wta-bogota', circuit: 'WTA', nom: 'Copa Colsanitas (Bogota)', pays: 'Colombie', categorie: 250, surface: 'terre', taille_tableau: 32, semaine_debut: 15, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-rouen', circuit: 'WTA', nom: 'Open de Rouen', pays: 'France', categorie: 250, surface: 'terre', indoor: true, taille_tableau: 32, semaine_debut: 16, duree: 1, bareme: 'WTA_250' },
-    { id: 'wta-stuttgart', circuit: 'WTA', nom: 'Stuttgart Open', pays: 'Allemagne', categorie: 500, surface: 'terre', indoor: true, taille_tableau: 28, semaine_debut: 16, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-stuttgart', circuit: 'WTA', nom: 'Stuttgart Open', pays: 'Allemagne', categorie: 500, surface: 'terre', indoor: true, taille_tableau: 28, semaine_debut: 16, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-rabat', circuit: 'WTA', nom: 'Morocco Open (Rabat)', pays: 'Maroc', categorie: 250, surface: 'terre', taille_tableau: 32, semaine_debut: 21, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-madrid', circuit: 'WTA', nom: 'Madrid Open', pays: 'Espagne', categorie: 1000, surface: 'terre', taille_tableau: 96, semaine_debut: 17, duree: 2, bareme: 'WTA_1000_96' },
     { id: 'wta-rome', circuit: 'WTA', nom: 'Italian Open (Rome)', pays: 'Italie', categorie: 1000, surface: 'terre', taille_tableau: 96, semaine_debut: 19, duree: 2, bareme: 'WTA_1000_96' },
-    { id: 'wta-strasbourg', circuit: 'WTA', nom: 'Strasbourg Open', pays: 'France', categorie: 500, surface: 'terre', taille_tableau: 28, semaine_debut: 21, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-strasbourg', circuit: 'WTA', nom: 'Strasbourg Open', pays: 'France', categorie: 500, surface: 'terre', taille_tableau: 28, semaine_debut: 21, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-rg', circuit: 'WTA', nom: 'Roland-Garros', pays: 'France', categorie: 'slam', surface: 'terre', taille_tableau: 128, semaine_debut: 22, duree: 2, bareme: 'WTA_SLAM' },
 
     // --- WTA : swing herbe ---
-    { id: 'wta-berlin', circuit: 'WTA', nom: 'Berlin Open', pays: 'Allemagne', categorie: 500, surface: 'herbe', taille_tableau: 28, semaine_debut: 25, duree: 1, bareme: 'WTA_500' },
-    { id: 'wta-queens', circuit: 'WTA', nom: 'Queen\'s Club (HSBC Championships)', pays: 'Royaume-Uni', categorie: 500, surface: 'herbe', taille_tableau: 28, semaine_debut: 24, duree: 1, bareme: 'WTA_500' },
-    { id: 'wta-bad-homburg', circuit: 'WTA', nom: 'Bad Homburg Open', pays: 'Allemagne', categorie: 500, surface: 'herbe', taille_tableau: 32, semaine_debut: 26, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-berlin', circuit: 'WTA', nom: 'Berlin Open', pays: 'Allemagne', categorie: 500, surface: 'herbe', taille_tableau: 28, semaine_debut: 25, duree: 1, bareme: 'WTA_500_32' },
+    { id: 'wta-queens', circuit: 'WTA', nom: 'Queen\'s Club (HSBC Championships)', pays: 'Royaume-Uni', categorie: 500, surface: 'herbe', taille_tableau: 28, semaine_debut: 24, duree: 1, bareme: 'WTA_500_32' },
+    { id: 'wta-bad-homburg', circuit: 'WTA', nom: 'Bad Homburg Open', pays: 'Allemagne', categorie: 500, surface: 'herbe', taille_tableau: 32, semaine_debut: 26, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-rosmalen', circuit: 'WTA', nom: 'Rosmalen Open (Libema)', pays: 'Pays-Bas', categorie: 250, surface: 'herbe', taille_tableau: 32, semaine_debut: 24, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-nottingham', circuit: 'WTA', nom: 'Nottingham Open', pays: 'Royaume-Uni', categorie: 250, surface: 'herbe', taille_tableau: 32, semaine_debut: 25, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-eastbourne', circuit: 'WTA', nom: 'Eastbourne Open', pays: 'Royaume-Uni', categorie: 250, surface: 'herbe', taille_tableau: 32, semaine_debut: 26, duree: 1, bareme: 'WTA_250' },
@@ -192,23 +202,23 @@ const CALENDRIER_TOURNOIS = [
     { id: 'wta-hambourg', circuit: 'WTA', nom: 'Hamburg Open', pays: 'Allemagne', categorie: 250, surface: 'terre', taille_tableau: 32, semaine_debut: 29, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-iasi', circuit: 'WTA', nom: 'Iasi Open', pays: 'Roumanie', categorie: 250, surface: 'terre', taille_tableau: 32, semaine_debut: 29, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-prague', circuit: 'WTA', nom: 'Prague Open', pays: 'Republique tcheque', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 30, duree: 1, bareme: 'WTA_250' },
-    { id: 'wta-washington', circuit: 'WTA', nom: 'Washington Open', pays: 'Etats-Unis', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 30, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-washington', circuit: 'WTA', nom: 'Washington Open', pays: 'Etats-Unis', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 30, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-canada', circuit: 'WTA', nom: 'Canadian Open (Montreal/Toronto)', pays: 'Canada', categorie: 1000, surface: 'dur', taille_tableau: 96, semaine_debut: 31, duree: 2, bareme: 'WTA_1000_96' },
     { id: 'wta-cincinnati', circuit: 'WTA', nom: 'Cincinnati Open', pays: 'Etats-Unis', categorie: 1000, surface: 'dur', taille_tableau: 96, semaine_debut: 33, duree: 2, bareme: 'WTA_1000_96' },
     { id: 'wta-cleveland', circuit: 'WTA', nom: 'Tennis in the Land (Cleveland)', pays: 'Etats-Unis', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 35, duree: 1, bareme: 'WTA_250' },
-    { id: 'wta-monterrey', circuit: 'WTA', nom: 'Monterrey Open', pays: 'Mexique', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 35, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-monterrey', circuit: 'WTA', nom: 'Monterrey Open', pays: 'Mexique', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 35, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-us-open', circuit: 'WTA', nom: 'US Open', pays: 'Etats-Unis', categorie: 'slam', surface: 'dur', taille_tableau: 128, semaine_debut: 36, duree: 2, bareme: 'WTA_SLAM' },
 
     // --- WTA : swing asiatique ---
     { id: 'wta-sao-paulo', circuit: 'WTA', nom: 'SP Open (Sao Paulo)', pays: 'Bresil', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 39, duree: 1, bareme: 'WTA_250' },
-    { id: 'wta-guadalajara', circuit: 'WTA', nom: 'Guadalajara Open', pays: 'Mexique', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 39, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-guadalajara', circuit: 'WTA', nom: 'Guadalajara Open', pays: 'Mexique', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 39, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-seoul', circuit: 'WTA', nom: 'Korea Open (Seoul)', pays: 'Coree du Sud', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 39, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-beijing', circuit: 'WTA', nom: 'China Open (Pekin)', pays: 'Chine', categorie: 1000, surface: 'dur', taille_tableau: 96, semaine_debut: 40, duree: 2, bareme: 'WTA_1000_96' },
     { id: 'wta-wuhan', circuit: 'WTA', nom: 'Wuhan Open', pays: 'Chine', categorie: 1000, surface: 'dur', taille_tableau: 56, semaine_debut: 42, duree: 1, bareme: 'WTA_1000_56' },
-    { id: 'wta-ningbo', circuit: 'WTA', nom: 'Ningbo Open', pays: 'Chine', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 43, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-ningbo', circuit: 'WTA', nom: 'Ningbo Open', pays: 'Chine', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 43, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-osaka', circuit: 'WTA', nom: 'Japan Open (Osaka)', pays: 'Japon', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 43, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-guangzhou', circuit: 'WTA', nom: 'Guangzhou Open', pays: 'Chine', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 44, duree: 1, bareme: 'WTA_250' },
-    { id: 'wta-tokyo', circuit: 'WTA', nom: 'Tokyo Open (Pan Pacific)', pays: 'Japon', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 44, duree: 1, bareme: 'WTA_500' },
+    { id: 'wta-tokyo', circuit: 'WTA', nom: 'Tokyo Open (Pan Pacific)', pays: 'Japon', categorie: 500, surface: 'dur', taille_tableau: 28, semaine_debut: 44, duree: 1, bareme: 'WTA_500_32' },
     { id: 'wta-hong-kong', circuit: 'WTA', nom: 'Hong Kong Open', pays: 'Hong Kong', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 45, duree: 1, bareme: 'WTA_250' },
     { id: 'wta-chennai', circuit: 'WTA', nom: 'Chennai Open', pays: 'Inde', categorie: 250, surface: 'dur', taille_tableau: 32, semaine_debut: 45, duree: 1, bareme: 'WTA_250' },
 

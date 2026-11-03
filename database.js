@@ -1921,4 +1921,45 @@ if (db.prepare('SELECT patch_baremes_complets_20261007 AS p FROM jeu_etat WHERE 
     db.prepare('UPDATE jeu_etat SET patch_baremes_complets_20261007 = 1 WHERE id = 1').run();
 }
 
+// Points "comme en vrai" (2026-11-03, demande explicite de l'utilisateur, a partir du
+// cas du tournoi de Marrakech) :
+// 1) Tableaux de 28/32 : vrai 1er tour - ATP 250 0 (au lieu de 13), ATP 500 0 (au lieu
+//    de 25), WTA 500 1 (au lieu de 30). Les editions deja creees passent sur les baremes
+//    dedies ATP_250_32 / ATP_500_32 / WTA_500_32 (les tableaux de 48 gardent l'ancien).
+// Une tete de serie exemptee du 1er tour (BYE) qui perd son premier match garde les
+// points du tour atteint (ex. 25 en 8e d'un ATP 250) : choix explicite de l'utilisateur,
+// differente de la vraie regle ATP (0).
+// Recalcule tournoi_joueurs.points_gagnes deja attribues (reels comme bots, toutes
+// saisons) ; un forfait (0 point) reste a 0. Les instantanes de classement_historique
+// ne sont pas recalcules (meme choix que patch_baremes_complets_20261007).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_points_comme_en_vrai_20261103 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_points_comme_en_vrai_20261103 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const { BAREME_POINTS, CALENDRIER_TOURNOIS } = require('./calendrier-tournois');
+    // Tableaux de 28/32 : bareme dedie avec le vrai 1er tour (ancien bareme -> nouveau,
+    // points du 1er tour avant -> apres).
+    const BASCULES = [
+        { nouveau: 'ATP_250_32', ancien: 'ATP_250', avant: 13, apres: 0 },
+        { nouveau: 'ATP_500_32', ancien: 'ATP_500', avant: 25, apres: 0 },
+        { nouveau: 'WTA_500_32', ancien: 'WTA_500', avant: 30, apres: 1 }
+    ];
+    const PROFONDEUR = { 'Finale': 1, '1/2 finale': 2, '1/4 finale': 3, '8e de finale': 4, '16e de finale': 5, '32e de finale': 6, '64e de finale': 7 };
+    const bilan = {};
+    const noter = function (cle) { bilan[cle] = (bilan[cle] || 0) + 1; };
+    db.transaction(function () {
+        BASCULES.forEach(function (b) {
+            const ids = CALENDRIER_TOURNOIS.filter(function (t) { return t.bareme === b.nouveau; }).map(function (t) { return t.id; });
+            if (ids.length === 0) return;
+            const ph = ids.map(function () { return '?'; }).join(',');
+            const r = db.prepare('UPDATE tournois SET bareme = ? WHERE bareme = ? AND calendrier_id IN (' + ph + ')').run(b.nouveau, b.ancien, ...ids);
+            if (r.changes) bilan['editions passees sur ' + b.nouveau] = r.changes;
+            const lignes = db.prepare("SELECT tj.id FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id WHERE t.bareme = ? AND tj.tour_elimine = '16e de finale' AND tj.nom != 'BYE' AND tj.points_gagnes = ?").all(b.nouveau, b.avant);
+            const maj = db.prepare('UPDATE tournoi_joueurs SET points_gagnes = ? WHERE id = ?');
+            lignes.forEach(function (l) { maj.run(b.apres, l.id); noter(b.nouveau + ' defaite au 1er tour : ' + b.avant + ' -> ' + b.apres); });
+        });
+    })();
+    Object.keys(bilan).forEach(function (cle) { console.log('[patch_points_comme_en_vrai_20261103] ' + cle + ' (' + bilan[cle] + ')'); });
+    if (Object.keys(bilan).length === 0) console.log('[patch_points_comme_en_vrai_20261103] aucun point a corriger');
+    db.prepare('UPDATE jeu_etat SET patch_points_comme_en_vrai_20261103 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
