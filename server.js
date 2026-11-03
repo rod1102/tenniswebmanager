@@ -6221,11 +6221,17 @@ function estTournoiObligatoireTop30(circuit, calendrierId, categorie) {
 // comptes, jamais negatif). La fenetre (52 semaines, FENETRE_LIVE) chevauche
 // quasi-systematiquement 2 saisons (LONGUEUR_SAISON=51) : le Top 30 et le
 // calendrier obligatoire sont donc verifies saison par saison, pas globalement.
-function pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle) {
+// semainePhoto (optionnel) : reproduit le classement tel qu'il etait photographie a la
+// fin de cette semaine passee (recalcul retroactif de classement_historique) - un
+// tournoi de 2 semaines qui y DEBUTAIT n'etait alors pas encore termine, il est exclu.
+function pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle, semainePhoto) {
+    const ids2Semaines = semainePhoto === undefined ? null
+        : new Set(CALENDRIER_TOURNOIS.filter(function (t) { return t.duree > 1; }).map(function (t) { return t.id; }));
+    const pasEncoreFini = function (t) { return ids2Semaines !== null && t.semaine === semainePhoto && ids2Semaines.has(t.calendrier_id); };
     const tournois = db.prepare(`
         SELECT id, semaine, categorie, calendrier_id FROM tournois
         WHERE circuit = ? AND semaine > ? AND semaine <= ? AND statut = 'termine'
-    `).all(circuit, semaineMin, semaineActuelle);
+    `).all(circuit, semaineMin, semaineActuelle).filter(function (t) { return !pasEncoreFini(t); });
     const infoTournoi = new Map(tournois.map(function (t) { return [t.id, t]; }));
 
     const tournoisObligatoires = tournois
@@ -6244,7 +6250,7 @@ function pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle) {
         WHERE t.circuit = ? AND t.semaine > ? AND t.semaine <= ? AND t.statut = 'termine'
           AND tj.points_gagnes IS NOT NULL
           AND ((tj.player_id IS NOT NULL AND tj.est_reel = 1) OR tj.rival_id IS NOT NULL)
-    `).all(circuit, semaineMin, semaineActuelle);
+    `).all(circuit, semaineMin, semaineActuelle).filter(function (r) { return infoTournoi.has(r.tournoi_id); });
 
     const parEntite = new Map();
     resultats.forEach(function (r) {
@@ -6376,8 +6382,8 @@ function invaliderCachesLourds() {
     _memoLourd.clear();
 }
 
-function calculerClassementGlobal(circuit, semaineMin, semaineActuelle) {
-    const pointsRetenus = pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle);
+function calculerClassementGlobal(circuit, semaineMin, semaineActuelle, semainePhoto) {
+    const pointsRetenus = pointsRetenusParEntiteCircuit(circuit, semaineMin, semaineActuelle, semainePhoto);
 
     const rivaux = db.prepare('SELECT id, nom, nationalite, niveau FROM classement_joueurs WHERE circuit = ?').all(circuit);
     const liste = rivaux.map(function (r) {
@@ -13649,6 +13655,43 @@ if (MODE_STAGING) {
 // exact de chaque creneau (bien plus intrusif pour un gain marginal au-dela de
 // cette frequence).
 const INTERVALLE_VERIFICATION_MS = 60 * 1000;
+
+// Recalcul RETROACTIF de classement_historique (2026-11-03, demande explicite de
+// l'utilisateur) apres la correction des baremes du 1er tour (ATP 250/500 et WTA 500 a
+// 28/32, patch_points_comme_en_vrai_20261103) : chaque photo hebdomadaire passee est
+// refaite avec les points corriges, sur les MEMES entites qu'a l'epoque (un joueur cree
+// plus tard n'y apparait pas), tournois de 2 semaines pas encore finis exclus
+// (semainePhoto). Meilleur classement, semaines n°1/top 10, badges et Pantheon en
+// dependent. Une seule fois (jeu_etat.patch_historique_classement_20261103).
+function recalculerHistoriqueClassementRetroactif() {
+    const etat = db.prepare('SELECT patch_historique_classement_20261103 AS p FROM jeu_etat WHERE id = 1').get();
+    if (etat.p) return;
+    const debut = Date.now();
+    let rangsModifies = 0, lignes = 0;
+    db.transaction(function () {
+        ['ATP', 'WTA'].forEach(function (circuit) {
+            const semaines = db.prepare('SELECT DISTINCT semaine FROM classement_historique WHERE circuit = ? ORDER BY semaine').all(circuit).map(function (r) { return r.semaine; });
+            semaines.forEach(function (semaine) {
+                const anciens = new Map(db.prepare('SELECT cle, rang FROM classement_historique WHERE circuit = ? AND semaine = ?').all(circuit, semaine).map(function (r) { return [r.cle, r.rang]; }));
+                const liste = calculerClassementGlobal(circuit, semaine - FENETRE_LIVE, semaine, semaine).filter(function (j) { return anciens.has(j.cle); });
+                const vus = new Set(liste.map(function (j) { return j.cle; }));
+                // Garde-fou : une entite de l'ancienne photo introuvable aujourd'hui garde sa place en fin de liste.
+                anciens.forEach(function (rang, cle) { if (!vus.has(cle)) liste.push({ cle: cle }); });
+                db.prepare('DELETE FROM classement_historique WHERE circuit = ? AND semaine = ?').run(circuit, semaine);
+                const ins = db.prepare('INSERT INTO classement_historique (circuit, cle, semaine, rang) VALUES (?, ?, ?, ?)');
+                liste.forEach(function (j, i) {
+                    ins.run(circuit, j.cle, semaine, i + 1);
+                    lignes++;
+                    if (anciens.get(j.cle) !== i + 1) rangsModifies++;
+                });
+            });
+        });
+        db.prepare('UPDATE jeu_etat SET patch_historique_classement_20261103 = 1 WHERE id = 1').run();
+    })();
+    invaliderCachesLourds();
+    console.log('[patch_historique_classement_20261103] ' + lignes + ' rangs recalcules, ' + rangsModifies + ' modifies (' + (Date.now() - debut) + ' ms)');
+}
+try { recalculerHistoriqueClassementRetroactif(); } catch (e) { console.error('[patch_historique_classement_20261103] echec :', e); }
 
 verifierAvancementAuto();
 const intervalleSemaine = setInterval(verifierAvancementAuto, INTERVALLE_VERIFICATION_MS);

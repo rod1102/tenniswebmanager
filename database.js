@@ -1933,6 +1933,8 @@ if (db.prepare('SELECT patch_baremes_complets_20261007 AS p FROM jeu_etat WHERE 
 // saisons) ; un forfait (0 point) reste a 0. Les instantanes de classement_historique
 // ne sont pas recalcules (meme choix que patch_baremes_complets_20261007).
 try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_points_comme_en_vrai_20261103 INTEGER DEFAULT 0"); } catch (e) {}
+// Marqueur du recalcul retroactif de classement_historique (fait par server.js au demarrage).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_historique_classement_20261103 INTEGER DEFAULT 0"); } catch (e) {}
 if (db.prepare('SELECT patch_points_comme_en_vrai_20261103 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
     const { BAREME_POINTS, CALENDRIER_TOURNOIS } = require('./calendrier-tournois');
     // Tableaux de 28/32 : bareme dedie avec le vrai 1er tour (ancien bareme -> nouveau,
