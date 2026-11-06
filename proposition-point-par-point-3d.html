@@ -742,7 +742,7 @@ body { font-family: var(--texte); color: var(--gris); }
       const pa = c.axe === 'z' ? allees.z : allees.x;
       const blocCentral = c.axe === 'x' && c.signe === 1 && th.bloc === 'paris';
       const rangee = (top, dist, prof, r, k, len) => {
-        const h = r === 0 ? (k === 0 ? top : 1.2) : niveaux[k].monte + 0.4;
+        const h = k === 0 ? top : top - (niveaux[k].y0 - 1.2);
         poser(c, 0, len, h, prof, dist, top - h / 2, matSieges(len));
         for (const a of pa) poser(c, a, 1.2, h + 0.02, prof + 0.02, dist, top - h / 2, matAllee);
         const n = Math.floor(len / 0.55);
