@@ -828,6 +828,13 @@ body { font-family: var(--texte); color: var(--gris); }
         poser(c, e.t, 9.2, 4.8, 0.08, dFin - 4.05, yTop + 1.2, new THREE.MeshStandardMaterial({ color: '#2B6FD6', emissive: '#1D4FA8', emissiveIntensity: 0.9, roughness: 0.3 }));
       }
     }
+    // Mur d'enceinte tout autour, jusqu'à la couronne : on ne voit plus le ciel
+    // à travers les jonctions des gradins dans les angles.
+    const aM = x0 + profTotale + 1.0, bM = z0 + profTotale + 1.0, hM = yTop + 3.6;
+    const matEnceinte = new THREE.MeshStandardMaterial({ color: th.beton, roughness: 0.95 });
+    [[0, -bM, 2 * aM + 0.8, 0.8], [0, bM, 2 * aM + 0.8, 0.8], [-aM, 0, 0.8, 2 * bM], [aM, 0, 0.8, 2 * bM]].forEach(([x, z, sx, sz]) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, hM, sz), matEnceinte); m.position.set(x, hM / 2, z); tribunes.add(m);
+    });
   }
 
   function rondRect(a, b, R, f) {
