@@ -6,7 +6,8 @@
 <link rel="icon" type="image/png" href="ball.png">
 <title>Maquette Live 3D — Tennis Web Manager</title>
 <meta name="robots" content="noindex">
-<script>if (window.self !== window.top) document.documentElement.classList.add('integre');</script>
+<script>if (window.self !== window.top) document.documentElement.classList.add('integre');
+if (/[?&]rg=1/.test(location.search)) document.documentElement.classList.add('rg-seul');</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -135,6 +136,8 @@ body { font-family: var(--texte); color: var(--gris); }
 .vue3d canvas:focus-visible { outline: 2px solid #D4F000; outline-offset: -2px; }
 .aide-camera { font-size: 0.76rem; color: var(--gris-doux); line-height: 1.5; }
 
+.rg-seul #groupe-tournoi, .rg-seul #groupe-categorie, .rg-seul #groupe-ambiance, .rg-seul #groupe-surface, .rg-seul .couleurs { display: none; }
+.rg-seul .controles:has(#groupe-tournoi) { display: none; }
 .integre, .integre body { background: transparent; }
 .integre .dashboard-page { background: none; padding: 0; min-height: 0; }
 .integre .dashboard-header, .integre .dashboard-title, .integre .statut, .integre .regle-intro { display: none; }
@@ -336,7 +339,8 @@ body { font-family: var(--texte); color: var(--gris); }
     ['Vert', '#3DDC5A'], ['Bordeaux', '#8E1E3A'], ['Blanc', '#F5F7FA'], ['Noir', '#1B1F27']
   ];
   const couleurs = { A: '#D4F000', B: '#F5F7FA' };
-  try { const m = JSON.parse(localStorage.getItem('twm-maquette-couleurs') || 'null'); if (m && m.A && m.B) { couleurs.A = m.A; couleurs.B = m.B; } } catch (e) {}
+  const RG_SEUL = /[?&]rg=1/.test(location.search);
+  if (!RG_SEUL) { try { const m = JSON.parse(localStorage.getItem('twm-maquette-couleurs') || 'null'); if (m && m.A && m.B) { couleurs.A = m.A; couleurs.B = m.B; } } catch (e) {} }
   function rgb(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
   function luminosite(hex) { const [r, g, b] = rgb(hex); return (0.299 * r + 0.587 * g + 0.114 * b) / 255; }
   function tropProches(h1, h2) { const a = rgb(h1), b = rgb(h2); return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 70; }
@@ -1813,6 +1817,7 @@ body { font-family: var(--texte); color: var(--gris); }
 
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) { pause = true; btnPause.textContent = 'Lecture'; }
 
+  if (RG_SEUL) choisirTournoi('rg');
   if (window.THREE) initialiser3D(); else document.getElementById('erreur3d').style.display = 'flex';
   requestAnimationFrame(boucle);
   jouerMatch(matchId);
@@ -1821,7 +1826,7 @@ body { font-family: var(--texte); color: var(--gris); }
 <script>
 (function () {
   if (window.self === window.top) return;
-  function envoyer() { try { parent.postMessage({ twmHauteur3d: document.documentElement.scrollHeight }, '*'); } catch (e) {} }
+  function envoyer() { try { const page = document.querySelector('.dashboard-page'); parent.postMessage({ twmHauteur3d: page ? page.offsetHeight : document.body.scrollHeight }, '*'); } catch (e) {} }
   if (window.ResizeObserver) new ResizeObserver(envoyer).observe(document.body);
   window.addEventListener('load', envoyer);
   envoyer();
