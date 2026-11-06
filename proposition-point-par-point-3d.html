@@ -252,6 +252,11 @@ body { font-family: var(--texte); color: var(--gris); }
             <button class="tab-btn" data-t="us" type="button">New York</button>
             <button class="tab-btn" data-t="tw" type="button">Autres tournois</button>
           </div>
+          <div class="groupe" id="groupe-ambiance">
+            <span class="groupe-label">Ambiance</span>
+            <button class="tab-btn active" data-amb="ext" type="button">Extérieur</button>
+            <button class="tab-btn" data-amb="indoor" type="button">Indoor</button>
+          </div>
           <div class="groupe" id="groupe-categorie">
             <span class="groupe-label">Catégorie</span>
             <button class="tab-btn" data-cat="250" type="button">250</button>
@@ -390,7 +395,7 @@ body { font-family: var(--texte); color: var(--gris); }
     '1000': { rangs: 8, remplissage: 0.8 },
     gc: { rangs: 11, remplissage: 0.96 }
   };
-  let categorie = 'gc', tribunes = null, foule = null, excitation = -10, hemi = null, solStade = null;
+  let categorie = 'gc', tribunes = null, foule = null, excitation = -10, hemi = null, solStade = null, soleilLum = null, indoor = false;
 
   const SURFACES = {
     dur: { ext: '#2E6B55', int: '#2B5FA6', ligne: '#F5F7FA' },
@@ -589,7 +594,7 @@ body { font-family: var(--texte); color: var(--gris); }
     camera = new THREE.PerspectiveCamera(36, 16 / 9, 0.1, 300);
 
     hemi = new THREE.HemisphereLight(0xdfe9ff, 0x1a2a40, 0.75); scene.add(hemi);
-    const soleil = new THREE.DirectionalLight(0xffffff, 0.9);
+    const soleil = new THREE.DirectionalLight(0xffffff, 0.9); soleilLum = soleil;
     soleil.position.set(-8, 26, 10); soleil.castShadow = true;
     soleil.shadow.mapSize.set(2048, 2048);
     Object.assign(soleil.shadow.camera, { left: -22, right: 22, top: 14, bottom: -14, near: 1, far: 70 });
@@ -1096,6 +1101,44 @@ body { font-family: var(--texte); color: var(--gris); }
     }
   }
 
+  // Indoor : on retire le décor extérieur (arbres, immeubles), puis on ferme le stade
+  // avec des murs et un plafond sombre garni de panneaux lumineux.
+  function fermerStade() {
+    scene.background.set('#0B1018'); scene.fog.color.set('#0B1018');
+    if (hemi) hemi.intensity = 0.6;
+    for (const o of tribunes.children.slice()) {
+      const exterieur = (o.isInstancedMesh && o.geometry.type === 'IcosahedronGeometry');
+      let loin = false;
+      if (!o.isInstancedMesh && o.geometry) {
+        o.geometry.computeBoundingBox();
+        o.updateMatrix(); const bb = o.geometry.boundingBox.clone().applyMatrix4(o.matrix);
+        const c = bb.getCenter(new THREE.Vector3());
+        loin = Math.abs(c.x) > 62 || Math.abs(c.z) > 52 || bb.max.y > 32;
+      }
+      if (exterieur || loin) tribunes.remove(o);
+    }
+    const bb = new THREE.Box3();
+    for (const o of tribunes.children) if (!o.isInstancedMesh && o.geometry) { o.updateMatrix(); o.geometry.computeBoundingBox(); bb.union(o.geometry.boundingBox.clone().applyMatrix4(o.matrix)); }
+    const minX = Math.min(bb.min.x, -34) - 2, maxX = Math.max(bb.max.x, 34) + 2, minZ = Math.min(bb.min.z, -22) - 2, maxZ = Math.max(bb.max.z, 22) + 2;
+    const haut = Math.max(bb.max.y + 2.5, 17);
+    const lx = maxX - minX, lz = maxZ - minZ, cx = (minX + maxX) / 2, cz = (minZ + maxZ) / 2;
+    const matMur = new THREE.MeshStandardMaterial({ color: '#141B25', roughness: 0.95 });
+    const matPlafond = new THREE.MeshStandardMaterial({ color: '#1A222D', roughness: 0.9 });
+    const plafond = new THREE.Mesh(new THREE.BoxGeometry(lx, 0.6, lz), matPlafond); plafond.position.set(cx, haut, cz); tribunes.add(plafond);
+    [[cx, minZ, lx, 0.6], [cx, maxZ, lx, 0.6], [minX, cz, 0.6, lz], [maxX, cz, 0.6, lz]].forEach(([x, z, sx, sz]) => {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(sx, haut, sz), matMur); m.position.set(x, haut / 2, z); tribunes.add(m);
+    });
+    // poutres et panneaux lumineux sous le plafond
+    const matPoutre = new THREE.MeshStandardMaterial({ color: '#2A3440', roughness: 0.6, metalness: 0.4 });
+    const matLum = new THREE.MeshStandardMaterial({ color: '#FFFFFF', emissive: '#FFF6E2', emissiveIntensity: 1.3 });
+    for (let x = minX + 6; x < maxX - 3; x += 8) {
+      const p = new THREE.Mesh(new THREE.BoxGeometry(0.5, 1.2, lz), matPoutre); p.position.set(x, haut - 0.9, cz); tribunes.add(p);
+      for (let z = minZ + 5; z < maxZ - 3; z += 7) {
+        const l = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.15, 1.2), matLum); l.position.set(x + 4, haut - 0.4, z); tribunes.add(l);
+      }
+    }
+  }
+
   // Stade + foule (la foule est instanciée : un seul objet pour des milliers de spectateurs)
   function construireTribunes() {
     if (tribunes) {
@@ -1215,6 +1258,8 @@ body { font-family: var(--texte); color: var(--gris); }
     if (nb) { corps.instanceColor.needsUpdate = true; tetes.instanceColor.needsUpdate = true; }
     tribunes.add(corps, tetes);
     foule = { corps, tetes, places, phases: places.map(() => Math.random() * 6.28), calme: true };
+    if (soleilLum) { soleilLum.position.set(indoor ? 2 : -8, indoor ? 40 : 26, indoor ? 3 : 10); soleilLum.intensity = indoor ? 0.75 : 0.9; }
+    if (indoor) fermerStade();
   }
 
   // La foule se lève un instant à la fin de chaque point
@@ -1678,6 +1723,7 @@ body { font-family: var(--texte); color: var(--gris); }
     majMarqueur();
   }
   groupe('groupe-tournoi', 't', choisirTournoi);
+  groupe('groupe-ambiance', 'amb', a => { indoor = a === 'indoor'; if (renderer) construireTribunes(); });
   groupe('groupe-categorie', 'cat', choisirCategorie);
   const curseurZoom = document.getElementById('zoom');
   function regleZoom(v) {
