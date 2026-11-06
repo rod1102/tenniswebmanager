@@ -1,0 +1,1084 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<link rel="icon" type="image/png" href="ball.png">
+<title>Proposition : matchs point par point</title>
+<meta name="robots" content="noindex">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* Reprend la direction artistique de Tennis Web Manager (style.css) :
+   photo du court sous un voile bleu nuit, Big Shoulders Display + IBM Plex Sans,
+   jaune balle #D4F000, cartes translucides, telétexte des matchs. Theme sombre unique, comme le site. */
+:root {
+  --nuit: #0A1628;
+  --blanc: #F5F7FA;
+  --gris: #C4CDD6;
+  --gris-doux: #8B98A5;
+  --balle: #D4F000;
+  --vert: #5CC57F;
+  --alerte: #F5B942;
+  --display: 'Big Shoulders Display', 'Arial Narrow', sans-serif;
+  --texte: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  color-scheme: dark;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { background: var(--nuit); }
+body { font-family: var(--texte); background: var(--nuit); color: var(--gris); }
+
+.dashboard-page {
+  min-height: 100%;
+  background-image: linear-gradient(180deg, rgba(8, 18, 32, 0.75) 0%, rgba(8, 18, 32, 0.92) 100%), url('court.jpg');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+  padding: 60px 20px;
+}
+.dashboard-inner { max-width: 1180px; margin: 0 auto; }
+
+.dashboard-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 40px; flex-wrap: wrap; gap: 16px; }
+.dashboard-brand { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
+.auth-logo { font-family: var(--display); font-weight: 900; font-size: 1.6rem; letter-spacing: 0.05em; color: var(--blanc); text-decoration: none; }
+.pilule {
+  font-family: var(--texte); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+  color: var(--gris); background: transparent; border: 1px solid rgba(245, 247, 250, 0.3);
+  border-radius: 999px; display: inline-flex; align-items: center; gap: 8px;
+}
+.btn-retour { font-size: 0.72rem; padding: 5px 13px; }
+.nav-menu-toggle { font-size: 0.85rem; padding: 10px 20px; }
+.nav-menu-caret { font-size: 0.6rem; }
+
+.dashboard-title { font-family: var(--display); font-weight: 900; font-size: clamp(2.2rem, 6vw, 3.2rem); color: var(--blanc); margin-bottom: 18px; text-align: center; text-wrap: balance; line-height: 1.05; }
+.statut {
+  display: block; width: fit-content; margin: 0 auto 20px; padding: 8px 18px; border-radius: 10px;
+  background: rgba(212, 240, 0, 0.12); border: 1px solid rgba(212, 240, 0, 0.4);
+  color: var(--balle); font-weight: 600; font-size: 0.85rem; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.regle-intro { max-width: 640px; margin: 0 auto 44px; color: var(--gris); font-size: 1.05rem; line-height: 1.75; text-align: center; }
+.regle-intro b { color: var(--blanc); }
+
+.regle-section { max-width: 900px; margin: 0 auto 44px; }
+.regle-titre { font-family: var(--display); font-weight: 900; font-size: 1.6rem; letter-spacing: 0.03em; color: var(--balle); margin-bottom: 14px; }
+.regle-texte { color: var(--gris); font-size: 0.98rem; line-height: 1.75; margin-bottom: 16px; max-width: 680px; }
+
+.carte {
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.12);
+  backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
+  border-radius: 18px; padding: 22px 22px 20px;
+}
+.duo { display: grid; grid-template-columns: 1fr; gap: 18px; }
+@media (min-width: 760px) { .duo { grid-template-columns: 1fr 1fr; } }
+
+.carte-label { font-family: var(--display); font-weight: 900; font-size: 1.35rem; letter-spacing: 0.05em; color: var(--blanc); margin-bottom: 4px; }
+.carte.demain { border-color: rgba(212, 240, 0, 0.45); }
+.carte.demain .carte-label { color: var(--balle); }
+.carte-sous { font-size: 0.82rem; color: var(--gris-doux); margin-bottom: 12px; }
+
+.live-score {
+  background: rgba(212, 240, 0, 0.1); color: var(--balle);
+  font-family: var(--display); font-weight: 900; font-size: 1.3rem; letter-spacing: 0.03em;
+  text-align: center; padding: 10px; border-radius: 10px;
+}
+.live-log { background: rgba(0, 0, 0, 0.25); border-radius: 8px; padding: 10px 14px; margin-top: 10px; font-size: 0.85rem; line-height: 1.8; color: var(--gris); }
+.ligne { padding: 3px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); display: flex; gap: 12px; }
+.ligne:last-child { border-bottom: none; }
+.ligne .pts { font-family: var(--display); font-weight: 700; font-size: 1.05rem; color: var(--blanc); min-width: 54px; font-variant-numeric: tabular-nums; }
+.ligne.important { color: #F5B942; font-weight: 600; }
+.ligne.jeu { color: var(--blanc); font-weight: 600; }
+.carte-note { margin-top: 12px; font-size: 0.88rem; line-height: 1.6; color: var(--gris); }
+
+.liste { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.liste li { display: flex; gap: 12px; align-items: baseline; font-size: 0.95rem; line-height: 1.55; }
+.liste li::before { content: ''; flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--balle); transform: translateY(-1px); }
+.carte.garde { border-left: 3px solid var(--vert); background: rgba(46, 139, 74, 0.16); }
+.carte.garde .carte-label { color: var(--vert); }
+.carte.garde .liste li::before { background: var(--vert); }
+.carte.change { border-left: 3px solid var(--balle); }
+.carte.change .carte-label { color: var(--balle); }
+
+.classement-table { width: 100%; border-collapse: collapse; }
+.classement-table th { text-align: left; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--gris-doux); padding: 10px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.15); }
+.classement-table td { padding: 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); font-size: 0.95rem; color: var(--gris); }
+.classement-table tr:last-child td { border-bottom: none; }
+.classement-table th.num, .classement-table td.num { text-align: center; }
+.classement-table td.num { font-family: var(--display); font-weight: 900; font-size: 1.5rem; color: var(--blanc); font-variant-numeric: tabular-nums; }
+.classement-table td.num.demain { color: var(--balle); }
+.table-wrap { overflow-x: auto; }
+.regle-table-note { color: var(--gris-doux); font-size: 0.82rem; line-height: 1.6; margin-top: 12px; }
+
+.formules-def { display: flex; flex-direction: column; gap: 8px; font-size: 0.92rem; line-height: 1.65; }
+.formules-def b { color: var(--balle); }
+.classement-table.formules { min-width: 640px; }
+.classement-table.formules td { vertical-align: top; line-height: 1.6; font-size: 0.9rem; }
+.classement-table.formules td:first-child { color: var(--blanc); font-weight: 600; width: 19%; }
+.classement-table.formules td:nth-child(2) { width: 38%; }
+code { font-family: var(--texte); font-weight: 600; color: var(--balle); background: rgba(212, 240, 0, 0.08); padding: 1px 6px; border-radius: 5px; white-space: normal; }
+
+.stats-titre { font-size: 0.78rem; color: var(--balle); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin: 22px 0 10px; }
+.classement-table.simu { min-width: 620px; }
+.classement-table.simu td { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.classement-table.simu td:first-child { color: var(--blanc); font-weight: 600; white-space: normal; }
+td.cmp { color: var(--blanc); }
+td.cmp span { display: block; color: var(--balle); font-weight: 600; }
+.leg-av { color: var(--blanc); }
+.leg-dm { color: var(--balle); }
+
+.regle-section.large { max-width: 1180px; }
+.nav-menu { position: relative; }
+button.pilule { cursor: pointer; }
+.pilule:hover, .pilule:focus-visible { border-color: var(--balle); color: var(--balle); outline: none; }
+.nav-menu-dropdown { display: none; position: absolute; top: calc(100% + 8px); right: 0; min-width: 210px; background: #0F2438; border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 12px; padding: 8px; z-index: 20; }
+.nav-menu-dropdown.open { display: block; }
+.nav-menu-dropdown a { display: block; padding: 10px 14px; border-radius: 8px; color: var(--blanc); text-decoration: none; font-size: 0.9rem; font-weight: 500; }
+.nav-menu-dropdown a:hover, .nav-menu-dropdown a:focus-visible { background: rgba(212, 240, 0, 0.1); color: var(--balle); outline: none; }
+
+.scene { display: grid; grid-template-columns: 1fr; gap: 18px; align-items: start; }
+@media (min-width: 980px) { .scene { grid-template-columns: minmax(0, 1.65fr) minmax(300px, 1fr); } }
+
+.court-carte { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.court-cadre { position: relative; border-radius: 12px; overflow: hidden; }
+canvas { display: block; width: 100%; }
+
+.controles { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.groupe { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.groupe-label { font-size: 0.7rem; color: var(--gris-doux); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-right: 2px; }
+.tab-btn {
+  background: rgba(255, 255, 255, 0.06); border: 1px solid rgba(255, 255, 255, 0.15); color: var(--gris);
+  font-family: var(--texte); font-size: 0.78rem; font-weight: 600; padding: 8px 14px; border-radius: 999px; cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, background 0.2s ease;
+}
+.tab-btn:hover, .tab-btn:focus-visible { border-color: var(--balle); color: var(--balle); outline: none; }
+.tab-btn.active { background: rgba(212, 240, 0, 0.15); border-color: var(--balle); color: var(--balle); }
+.cta { background: var(--balle); color: var(--nuit); border: 2px solid var(--balle); font-family: var(--texte); font-weight: 700; font-size: 0.78rem; letter-spacing: 0.05em; text-transform: uppercase; padding: 8px 18px; border-radius: 999px; cursor: pointer; }
+.cta:focus-visible { outline: 2px solid var(--blanc); outline-offset: 2px; }
+
+.couleurs { display: flex; flex-direction: column; gap: 12px; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 12px; }
+.couleur-mq-ligne { display: flex; flex-direction: column; gap: 7px; }
+.couleur-mq-ligne em { font-style: normal; text-transform: none; letter-spacing: 0; color: var(--gris-doux); font-weight: 400; }
+.palette { display: flex; flex-wrap: wrap; gap: 8px; }
+.pastille-btn { width: 30px; height: 30px; border-radius: 50%; border: 2px solid rgba(10, 22, 40, 0.9); cursor: pointer; box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25); transition: transform 0.15s ease; }
+.pastille-btn:hover { transform: scale(1.1); }
+.pastille-btn:focus-visible { outline: 2px solid var(--blanc); outline-offset: 2px; }
+.pastille-btn[aria-checked="true"] { box-shadow: 0 0 0 3px var(--nuit), 0 0 0 5px var(--balle); }
+.pastille-libre { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.76rem; font-weight: 600; color: var(--gris); border: 1px solid rgba(255, 255, 255, 0.15); border-radius: 999px; padding: 2px 12px 2px 3px; background: rgba(255, 255, 255, 0.06); }
+.pastille-libre:hover, .pastille-libre:focus-within { border-color: var(--balle); color: var(--balle); }
+.pastille-libre.actif { border-color: var(--balle); color: var(--balle); background: rgba(212, 240, 0, 0.15); }
+.pastille-libre input { width: 26px; height: 26px; border: none; border-radius: 50%; padding: 0; cursor: pointer; background: conic-gradient(red, yellow, lime, cyan, blue, magenta, red); }
+.pastille-libre input::-webkit-color-swatch-wrapper { padding: 0; }
+.pastille-libre input::-webkit-color-swatch { border: 2px solid rgba(10, 22, 40, 0.9); border-radius: 50%; }
+.pastille-libre input::-moz-color-swatch { border: 2px solid rgba(10, 22, 40, 0.9); border-radius: 50%; }
+.couleur-note { font-size: 0.78rem; line-height: 1.55; color: var(--gris-doux); }
+.pastille { display: inline-block; width: 11px; height: 11px; border-radius: 50%; margin-right: 7px; border: 1px solid rgba(255,255,255,0.4); vertical-align: 0; }
+@media (prefers-reduced-motion: reduce) { .pastille-btn { transition: none; } }
+
+.cote { display: flex; flex-direction: column; gap: 14px; }
+
+.tableau-score { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.tableau-score td { padding: 8px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.08); color: var(--blanc); }
+.tableau-score tr:last-child td { border-bottom: none; }
+.tableau-score .srv { width: 18px; }
+.tableau-score .srv span { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--balle); visibility: hidden; }
+.tableau-score .srv span.on { visibility: visible; }
+.tableau-score .nom { font-weight: 600; width: 100%; }
+.tableau-score .nom small { display: block; color: var(--gris-doux); font-weight: 400; font-size: 0.74rem; }
+.tableau-score .set { font-family: var(--display); font-weight: 700; font-size: 1.35rem; text-align: center; min-width: 26px; color: var(--gris); }
+.tableau-score .set.courant { color: var(--blanc); }
+.tableau-score .set sup { font-size: 0.7rem; }
+.tableau-score .pts { font-family: var(--display); font-weight: 900; font-size: 1.5rem; text-align: center; min-width: 52px; color: var(--balle); background: rgba(212, 240, 0, 0.1); border-radius: 8px; }
+
+.bandeau { min-height: 40px; display: flex; align-items: center; justify-content: center; text-align: center; border-radius: 10px; font-family: var(--display); font-weight: 900; font-size: 1.25rem; letter-spacing: 0.04em; text-transform: uppercase; padding: 6px 10px; background: rgba(255, 255, 255, 0.04); color: var(--gris-doux); }
+.bandeau.important { background: rgba(245, 185, 66, 0.16); color: var(--alerte); }
+.bandeau.tb { background: rgba(212, 240, 0, 0.12); color: var(--balle); }
+.bandeau.fin { background: var(--balle); color: var(--nuit); }
+
+.proba { font-size: 0.86rem; line-height: 1.55; }
+.proba b { color: var(--blanc); font-size: 1.05rem; }
+.proba small { display: block; color: var(--gris-doux); font-size: 0.76rem; margin-top: 2px; }
+.jauge { height: 8px; border-radius: 99px; background: rgba(255, 255, 255, 0.1); overflow: hidden; margin-top: 8px; }
+.jauge div { height: 100%; background: var(--balle); width: 50%; transition: width 0.3s ease; }
+
+.stats-header { font-size: 0.72rem; color: var(--balle); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 8px; }
+.mq-log { height: 260px; overflow-y: auto; background: rgba(0, 0, 0, 0.25); border-radius: 8px; padding: 8px 12px; font-size: 0.8rem; line-height: 1.75; }
+.mq-ligne { display: block; gap: 0; padding: 2px 0; border-bottom: 1px solid rgba(255, 255, 255, 0.06); }
+.mq-ligne.important { color: var(--alerte); font-weight: 600; }
+.mq-ligne.jeu { color: var(--blanc); font-weight: 600; }
+.mq-ligne.set { color: var(--balle); font-weight: 600; }
+.mq-ligne.fin { color: var(--balle); font-weight: 700; }
+
+.niveaux { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.8rem; }
+.niveaux div { background: rgba(0, 0, 0, 0.2); border-radius: 8px; padding: 8px 10px; }
+.niveaux b { color: var(--blanc); display: block; font-size: 0.86rem; }
+
+.mq-note { max-width: 760px; margin: 26px auto 0; text-align: center; color: var(--gris-doux); font-size: 0.82rem; line-height: 1.6; }
+
+
+.pied { max-width: 900px; margin: 0 auto; text-align: center; color: var(--gris-doux); font-size: 0.82rem; line-height: 1.6; border-top: 1px solid rgba(255, 255, 255, 0.1); padding-top: 20px; }
+.pied img { width: 26px; height: 26px; display: block; margin: 0 auto 10px; opacity: 0.8; }
+
+@media (max-width: 480px) {
+  .dashboard-page { padding: 36px 16px; }
+  .carte { padding: 18px 16px; }
+}
+</style>
+</head>
+<body>
+<div class="dashboard-page">
+  <div class="dashboard-inner">
+
+    <div class="dashboard-header">
+      <div class="dashboard-brand">
+        <a class="auth-logo" href="https://www.tenniswebmanager.com/">TENNIS WEB MANAGER</a>
+        <button class="pilule btn-retour" id="btn-retour-page" type="button"><span aria-hidden="true">←</span> Retour</button>
+      </div>
+      <div class="nav-menu">
+        <button class="pilule nav-menu-toggle" id="nav-toggle" type="button" aria-expanded="false" aria-controls="nav-dropdown">Menu <span class="nav-menu-caret">▾</span></button>
+        <div class="nav-menu-dropdown" id="nav-dropdown">
+          <a href="https://www.tenniswebmanager.com/accueil.html">Accueil</a>
+          <a href="https://www.tenniswebmanager.com/joueur.html">Mes joueurs</a>
+          <a href="https://www.tenniswebmanager.com/tournois.html">Calendrier</a>
+          <a href="https://www.tenniswebmanager.com/matchs.html">Matchs</a>
+          <a href="https://www.tenniswebmanager.com/classements.html">Classements</a>
+          <a href="https://www.tenniswebmanager.com/regles.html">Règles</a>
+          <a href="https://discord.gg/G4NrCJQaxC" target="_blank" rel="noopener">Discord</a>
+        </div>
+      </div>
+    </div>
+
+    <h1 class="dashboard-title">Les matchs, point par point</h1>
+    <span class="statut">Projet · pas encore dans le jeu</span>
+    <p class="regle-intro">
+      Aujourd'hui, l'ordinateur décide <b>d'un coup</b> qui gagne chaque jeu.
+      Demain, il décidera <b>chaque point</b>, comme dans un vrai match.
+      Le joueur le plus fort gagnera exactement aussi souvent qu'avant.
+    </p>
+
+    <div class="regle-section">
+      <h2 class="regle-titre">Dans le télétexte</h2>
+      <div class="duo">
+        <div class="carte">
+          <div class="carte-label">Aujourd'hui</div>
+          <div class="carte-sous">Un jeu de service, tel qu'il s'affiche</div>
+          <div class="live-score">Set 1 · 2-2</div>
+          <div class="live-log">
+            <div class="ligne">Service : Toi</div>
+            <div class="ligne important">Balle de break pour Adversaire</div>
+            <div class="ligne important">Break sauvé par Toi</div>
+            <div class="ligne jeu">Jeu remporté par Toi (score du set : 3-2)</div>
+          </div>
+          <p class="carte-note">On sait qu'il y a eu une balle de break, mais pas comment le jeu s'est déroulé.</p>
+        </div>
+
+        <div class="carte demain">
+          <div class="carte-label">Demain</div>
+          <div class="carte-sous">Le même jeu, point par point</div>
+          <div class="live-score">Set 1 · 2-2</div>
+          <div class="live-log">
+            <div class="ligne">Service : Toi</div>
+            <div class="ligne"><span class="pts">15-0</span></div>
+            <div class="ligne"><span class="pts">15-15</span></div>
+            <div class="ligne"><span class="pts">15-30</span></div>
+            <div class="ligne"><span class="pts">30-30</span></div>
+            <div class="ligne important"><span class="pts">30-40</span>Balle de break pour Adversaire</div>
+            <div class="ligne important"><span class="pts">40-40</span>Break sauvé par Toi</div>
+            <div class="ligne"><span class="pts">Av.</span>Avantage Toi</div>
+            <div class="ligne jeu"><span class="pts">Jeu</span>Jeu remporté par Toi (score du set : 3-2)</div>
+          </div>
+          <p class="carte-note">Tu suis tout le jeu : les points perdus, la balle de break sauvée, l'égalité, l'avantage.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="regle-section">
+      <h2 class="regle-titre">Pour ton joueur, qu'est-ce que ça change ?</h2>
+      <div class="duo">
+        <div class="carte change">
+          <div class="carte-label">Ce qui change</div>
+          <ul class="liste">
+            <li>Le score de chaque jeu s'affiche en direct.</li>
+            <li>Un peu plus de balles de break par match, comme au vrai tennis.</li>
+            <li>Un match long et accroché fatigue plus ton joueur qu'un match vite plié.</li>
+          </ul>
+        </div>
+        <div class="carte garde">
+          <div class="carte-label">Ce qui ne change pas</div>
+          <ul class="liste">
+            <li>Tes chances de gagner un match.</li>
+            <li>L'importance du mental sur les balles de break.</li>
+            <li>La progression de ton mental et la fatigue, en moyenne.</li>
+            <li>Les tie-breaks, les styles de jeu et les blessures.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="regle-section">
+      <h2 class="regle-titre">La preuve : les mêmes chances qu'avant</h2>
+      <p class="regle-texte">100 000 matchs simulés par cas, avec les deux façons de jouer. Voici combien de fois le joueur le plus fort l'emporte.</p>
+      <div class="carte table-wrap">
+        <table class="classement-table">
+          <thead>
+            <tr><th>Le plus fort est…</th><th class="num">Aujourd'hui</th><th class="num">Demain</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Un peu plus fort</td><td class="num">74 %</td><td class="num demain">74 %</td></tr>
+            <tr><td>Nettement plus fort</td><td class="num">85 %</td><td class="num demain">85 %</td></tr>
+            <tr><td>Beaucoup plus fort</td><td class="num">92 %</td><td class="num demain">92 %</td></tr>
+            <tr><td>Seulement plus solide mentalement</td><td class="num">69 %</td><td class="num demain">69 %</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="regle-table-note">Les réglages du moteur ont été ajustés pour compenser le passage au point par point : aucune différence dans les résultats, seulement dans la façon dont le match est raconté.</p>
+    </div>
+
+    <div class="regle-section large" id="maquette">
+      <h2 class="regle-titre">Essaie-le : un match en direct</h2>
+      <p class="regle-texte">Voici à quoi pourrait ressembler un match vu en direct avec le nouveau moteur : un court vu de dessus, le score point par point et le télétexte. Le vainqueur de chaque point est tiré avec la formule du projet ; l&#39;échange dessiné est décoratif. Tu peux aussi choisir la couleur de ton joueur.</p>
+    <div class="scene">
+      <div class="carte court-carte">
+        <div class="court-cadre"><canvas id="court" aria-label="Court de tennis vu de dessus, animation du point en cours"></canvas></div>
+        <div class="controles">
+          <div class="groupe">
+            <button class="cta" id="btn-pause" type="button">Pause</button>
+            <button class="tab-btn" id="btn-nouveau" type="button">Nouveau match</button>
+          </div>
+          <div class="groupe" id="groupe-vitesse">
+            <span class="groupe-label">Vitesse</span>
+            <button class="tab-btn active" data-v="1" type="button">×1</button>
+            <button class="tab-btn" data-v="2" type="button">×2</button>
+            <button class="tab-btn" data-v="4" type="button">×4</button>
+          </div>
+          <div class="groupe" id="groupe-surface">
+            <span class="groupe-label">Surface</span>
+            <button class="tab-btn active" data-s="dur" type="button">Dur</button>
+            <button class="tab-btn" data-s="terre" type="button">Terre</button>
+            <button class="tab-btn" data-s="herbe" type="button">Herbe</button>
+          </div>
+        </div>
+        <div class="couleurs">
+          <div class="couleur-mq-ligne">
+            <span class="groupe-label">Couleur de ton joueur</span>
+            <div class="palette" id="palette-A" role="radiogroup" aria-label="Couleur de ton joueur"></div>
+          </div>
+          <div class="couleur-mq-ligne">
+            <span class="groupe-label">Couleur de l&#39;adversaire <em>(choisie par son coach)</em></span>
+            <div class="palette" id="palette-B" role="radiogroup" aria-label="Couleur de l&#39;adversaire"></div>
+          </div>
+          <div class="couleur-mq-ligne vue-mq-ligne">
+            <span class="groupe-label">Match vu par</span>
+            <div class="groupe" id="groupe-vue">
+              <button class="tab-btn active" data-vue="moi" type="button">Moi</button>
+              <button class="tab-btn" data-vue="autre" type="button">Un autre coach</button>
+            </div>
+          </div>
+          <p class="couleur-note">Dans le jeu, la couleur serait choisie une fois sur la fiche du joueur et enregistrée : tous les coachs verraient ton joueur de cette couleur, dans tous ses matchs. Si les deux couleurs sont trop proches, l&#39;adversaire garde la sienne avec un anneau au centre pour qu&#39;on les distingue.</p>
+        </div>
+      </div>
+
+      <div class="cote">
+        <div class="carte">
+          <table class="tableau-score" id="tableau"></table>
+        </div>
+        <div class="bandeau" id="bandeau">Échauffement</div>
+        <div class="carte proba" id="proba">
+          <span id="proba-texte">Chance au service : <b>—</b></span>
+          <div class="jauge"><div id="jauge"></div></div>
+          <small id="proba-detail">Calculée avant chaque point avec les formules du projet.</small>
+        </div>
+        <div class="carte">
+          <div class="stats-header">Télétexte</div>
+          <div class="mq-log" id="log" aria-live="polite"></div>
+        </div>
+        <div class="niveaux">
+          <div><b>Toi</b>Niveau 525 · Points importants 525</div>
+          <div><b>Adversaire (bot)</b>Niveau 500 · Points importants 540</div>
+        </div>
+      </div>
+    </div>
+
+    <p class="mq-note">Les trajectoires, la longueur des échanges, les aces et les fautes sont tirés au hasard pour l'image : ils n'ont aucun effet sur le résultat. Seul le vainqueur du point est décidé par le moteur, avec la même formule que dans la présentation du projet.</p>
+    </div>
+
+    <div class="regle-section">
+      <h2 class="regle-titre">Les formules exactes</h2>
+      <div class="carte formules-def">
+        <p><b>N</b> = niveau de jeu (normal) · <b>M</b> = niveau « points importants » (N − forme + mental courant) · <b>s</b> = serveur, <b>r</b> = relanceur</p>
+        <p><b>R(écart)</b> = chance de gagner selon la règle : 50 % + écart × 0,16 jusqu'à 25 · 54 % + (écart − 25) × 0,1 jusqu'à 50 · 56,5 % + (écart − 50) × 0,05 jusqu'à 100 · 59 % + (écart − 100) × 0,025 au-delà · 95 % maximum</p>
+      </div>
+      <div class="carte table-wrap" style="margin-top:14px;">
+        <table class="classement-table formules">
+          <thead>
+            <tr><th></th><th>Aujourd'hui</th><th>Demain</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>Point normal</td>
+              <td>Pas de point. Chaque jeu commence par un tirage « service » : le serveur le gagne avec <code>R(Ns − Nr)</code> et remporte alors le jeu. S'il le perd : balle de break.</td>
+              <td>Chaque point : le serveur le gagne avec <code>50 % + 0,58 × (R(Ns − Nr) − 50 %) + 6,9 %</code></td>
+            </tr>
+            <tr>
+              <td>Point important</td>
+              <td>Le serveur le gagne avec <code>R(Ms − Mr)</code></td>
+              <td>Le serveur le gagne avec <code>(point normal) + 1,2 × (R(Ms − Mr) − R(Ns − Nr))</code></td>
+            </tr>
+            <tr>
+              <td>Quels points sont importants</td>
+              <td>Chaque balle de break (après un tirage « service » perdu) ; le tirage « service » lui-même si le jeu donnerait le set ou le match au serveur.</td>
+              <td>Chaque point où le relanceur peut gagner le jeu (0-40, 15-40, 30-40, avantage relanceur) ; chaque point où le serveur peut gagner le jeu, si ce jeu lui donnerait le set ou le match.</td>
+            </tr>
+            <tr>
+              <td>Tie-break</td>
+              <td colspan="2">Identique : chaque point se gagne avec <code>R(Ma − Mb)</code>, sans avantage au service. 7 points, 10 au set décisif (2 points d'écart). Seuls les points qui peuvent conclure le tie-break comptent comme points importants.</td>
+            </tr>
+            <tr>
+              <td>Gain de mental max</td>
+              <td><code>+ 0,10 × points importants joués</code><br>Mental d'acier : 0,15</td>
+              <td><code>+ 0,09 × points importants joués</code><br>Mental d'acier : 0,135</td>
+            </tr>
+            <tr>
+              <td>Perte de forme</td>
+              <td><code>− 0,10 × jeux joués</code><br>Prudence 0,08 · En avant 0,12 · × 1,5 si l'adversaire joue Marathonien</td>
+              <td><code>− 0,015 × points joués</code> (tie-break compris)<br>Prudence 0,012 · En avant 0,018 · × 1,5 si l'adversaire joue Marathonien</td>
+            </tr>
+            <tr>
+              <td>Perte de mental courant</td>
+              <td colspan="2">Identique : montant fixe par match selon le tournoi et le tour (Grand Chelem 1,5 / 2,5 / 4 / 6 · Masters 1000 et Finals 1 / 1,5 / 2 / 3 · 500 0,5 / 1 / 1,5 / 2 · 250 0,5 / 1 / 1 / 1,5 pour 1ers tours / quarts / demies / finale).</td>
+            </tr>
+            <tr>
+              <td>Usure, automatismes, kiné, styles</td>
+              <td colspan="2">Identiques : +1 usure par match, +3 automatismes sur la surface (6 en Repérage), tirage kiné avant chaque jeu, bonus et malus de styles inchangés.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="regle-table-note">Exemple, à niveau égal : aujourd'hui le serveur gagne 50 % des tirages « service » ; demain il gagne 50 % + 0 + 6,9 % = 56,9 % des points. Dans les deux cas, il remporte 66,7 % de ses jeux de service.</p>
+    </div>
+
+    <div class="regle-section">
+      <h2 class="regle-titre">Simulations effectuées</h2>
+      <p class="regle-texte">Les deux moteurs ont tourné sur le vrai code du jeu avec les formules ci-dessus, 100 000 matchs par ligne (niveau de base 500, sans styles ni blessures). Dans chaque case : <b class="leg-av">aujourd&#39;hui</b> en blanc, <b class="leg-dm">demain</b> en jaune.</p>
+
+      <div class="stats-titre">2 sets gagnants · moyennes par match</div>
+      <div class="carte table-wrap">
+        <table class="classement-table simu">
+          <thead><tr><th>Écart de niveau</th><th>Victoires du plus fort</th><th>Jeux</th><th>Tie-breaks</th><th>Balles de break</th><th>Points importants</th><th>Jeux de service gagnés</th></tr></thead>
+          <tbody>
+            <tr><td>10</td><td class="cmp">60,4 %<span>60,4 %</span></td><td class="cmp">24,4<span>24,4</span></td><td class="cmp">0,36<span>0,36</span></td><td class="cmp">16,0<span>18,5</span></td><td class="cmp">19,3<span>21,5</span></td><td class="cmp">66,7 %<span>66,8 %</span></td></tr>
+            <tr><td>25</td><td class="cmp">74,0 %<span>74,0 %</span></td><td class="cmp">23,6<span>23,7</span></td><td class="cmp">0,33<span>0,33</span></td><td class="cmp">15,5<span>18,0</span></td><td class="cmp">18,7<span>20,9</span></td><td class="cmp">66,7 %<span>66,7 %</span></td></tr>
+            <tr><td>50</td><td class="cmp">85,2 %<span>85,3 %</span></td><td class="cmp">22,5<span>22,5</span></td><td class="cmp">0,28<span>0,29</span></td><td class="cmp">14,7<span>17,1</span></td><td class="cmp">17,6<span>19,7</span></td><td class="cmp">66,4 %<span>66,5 %</span></td></tr>
+            <tr><td>60</td><td class="cmp">87,1 %<span>86,8 %</span></td><td class="cmp">22,2<span>22,2</span></td><td class="cmp">0,27<span>0,27</span></td><td class="cmp">14,5<span>16,8</span></td><td class="cmp">17,4<span>19,5</span></td><td class="cmp">66,4 %<span>66,5 %</span></td></tr>
+            <tr><td>75</td><td class="cmp">89,4 %<span>89,3 %</span></td><td class="cmp">21,8<span>21,8</span></td><td class="cmp">0,26<span>0,25</span></td><td class="cmp">14,2<span>16,5</span></td><td class="cmp">17,0<span>19,0</span></td><td class="cmp">66,4 %<span>66,5 %</span></td></tr>
+            <tr><td>100</td><td class="cmp">92,6 %<span>92,4 %</span></td><td class="cmp">21,1<span>21,2</span></td><td class="cmp">0,23<span>0,23</span></td><td class="cmp">13,8<span>16,0</span></td><td class="cmp">16,4<span>18,4</span></td><td class="cmp">66,2 %<span>66,3 %</span></td></tr>
+            <tr><td>150</td><td class="cmp">95,0 %<span>94,8 %</span></td><td class="cmp">20,4<span>20,4</span></td><td class="cmp">0,20<span>0,20</span></td><td class="cmp">13,2<span>15,4</span></td><td class="cmp">15,7<span>17,7</span></td><td class="cmp">66,1 %<span>66,1 %</span></td></tr>
+            <tr><td>200</td><td class="cmp">96,7 %<span>96,6 %</span></td><td class="cmp">19,7<span>19,7</span></td><td class="cmp">0,17<span>0,17</span></td><td class="cmp">12,7<span>14,8</span></td><td class="cmp">15,1<span>17,1</span></td><td class="cmp">65,9 %<span>65,9 %</span></td></tr>
+            <tr><td>250</td><td class="cmp">97,8 %<span>97,8 %</span></td><td class="cmp">19,0<span>19,1</span></td><td class="cmp">0,14<span>0,15</span></td><td class="cmp">12,2<span>14,3</span></td><td class="cmp">14,5<span>16,5</span></td><td class="cmp">65,7 %<span>65,7 %</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="stats-titre">3 sets gagnants (Grand Chelem hommes) · moyennes par match</div>
+      <div class="carte table-wrap">
+        <table class="classement-table simu">
+          <thead><tr><th>Écart de niveau</th><th>Victoires du plus fort</th><th>Jeux</th><th>Tie-breaks</th><th>Balles de break</th><th>Points importants</th><th>Jeux de service gagnés</th></tr></thead>
+          <tbody>
+            <tr><td>10</td><td class="cmp">62,6 %<span>62,6 %</span></td><td class="cmp">40,1<span>40,1</span></td><td class="cmp">0,59<span>0,59</span></td><td class="cmp">26,4<span>30,5</span></td><td class="cmp">31,9<span>35,4</span></td><td class="cmp">66,7 %<span>66,8 %</span></td></tr>
+            <tr><td>25</td><td class="cmp">78,8 %<span>78,7 %</span></td><td class="cmp">38,5<span>38,4</span></td><td class="cmp">0,54<span>0,54</span></td><td class="cmp">25,2<span>29,1</span></td><td class="cmp">30,4<span>33,8</span></td><td class="cmp">66,6 %<span>66,7 %</span></td></tr>
+            <tr><td>50</td><td class="cmp">90,4 %<span>90,4 %</span></td><td class="cmp">35,7<span>35,7</span></td><td class="cmp">0,45<span>0,45</span></td><td class="cmp">23,3<span>27,1</span></td><td class="cmp">28,0<span>31,3</span></td><td class="cmp">66,5 %<span>66,5 %</span></td></tr>
+            <tr><td>60</td><td class="cmp">92,0 %<span>91,9 %</span></td><td class="cmp">35,1<span>35,2</span></td><td class="cmp">0,43<span>0,43</span></td><td class="cmp">23,0<span>26,6</span></td><td class="cmp">27,6<span>30,8</span></td><td class="cmp">66,3 %<span>66,4 %</span></td></tr>
+            <tr><td>75</td><td class="cmp">93,9 %<span>94,0 %</span></td><td class="cmp">34,3<span>34,3</span></td><td class="cmp">0,40<span>0,40</span></td><td class="cmp">22,3<span>25,9</span></td><td class="cmp">26,8<span>30,0</span></td><td class="cmp">66,3 %<span>66,4 %</span></td></tr>
+            <tr><td>100</td><td class="cmp">96,4 %<span>96,4 %</span></td><td class="cmp">32,8<span>32,8</span></td><td class="cmp">0,35<span>0,35</span></td><td class="cmp">21,3<span>24,8</span></td><td class="cmp">25,5<span>28,6</span></td><td class="cmp">66,1 %<span>66,2 %</span></td></tr>
+            <tr><td>150</td><td class="cmp">97,9 %<span>97,9 %</span></td><td class="cmp">31,3<span>31,5</span></td><td class="cmp">0,30<span>0,31</span></td><td class="cmp">20,3<span>23,7</span></td><td class="cmp">24,2<span>27,4</span></td><td class="cmp">66,0 %<span>66,0 %</span></td></tr>
+            <tr><td>200</td><td class="cmp">98,9 %<span>98,9 %</span></td><td class="cmp">30,1<span>30,2</span></td><td class="cmp">0,26<span>0,26</span></td><td class="cmp">19,5<span>22,7</span></td><td class="cmp">23,1<span>26,2</span></td><td class="cmp">65,8 %<span>65,8 %</span></td></tr>
+            <tr><td>250</td><td class="cmp">99,4 %<span>99,4 %</span></td><td class="cmp">28,9<span>29,0</span></td><td class="cmp">0,22<span>0,22</span></td><td class="cmp">18,6<span>21,8</span></td><td class="cmp">22,1<span>25,1</span></td><td class="cmp">65,6 %<span>65,6 %</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="stats-titre">Effet du mental · 2 sets gagnants</div>
+      <div class="carte table-wrap">
+        <table class="classement-table simu">
+          <thead><tr><th>Écart sur N (niveau de jeu)</th><th>Écart sur M (points importants)</th><th>Victoires du joueur</th></tr></thead>
+          <tbody>
+<tr><td>0</td><td>+25</td><td class="cmp">61,9 %<span>61,6 %</span></td></tr>
+<tr><td>0</td><td>+50</td><td class="cmp">68,9 %<span>68,5 %</span></td></tr>
+<tr><td>0</td><td>+100</td><td class="cmp">74,9 %<span>75,2 %</span></td></tr>
+<tr><td>0</td><td>+200</td><td class="cmp">80,5 %<span>81,1 %</span></td></tr>
+<tr><td>0</td><td>−40 (bot)</td><td class="cmp">34,2 %<span>34,5 %</span></td></tr>
+<tr><td>+25</td><td>−15 (bot)</td><td class="cmp">56,5 %<span>56,9 %</span></td></tr>
+<tr><td>+50</td><td>+10 (bot)</td><td class="cmp">75,4 %<span>75,1 %</span></td></tr>
+<tr><td>+100</td><td>+60 (bot)</td><td class="cmp">90,4 %<span>90,0 %</span></td></tr>
+<tr><td>−25</td><td>−65 (bot)</td><td class="cmp">19,1 %<span>19,0 %</span></td></tr>
+<tr><td>−50</td><td>−90 (bot)</td><td class="cmp">11,7 %<span>11,8 %</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="regle-table-note">« (bot) » : cas d&#39;un joueur réel face à un bot, qui a toujours +40 sur M.</p>
+
+      <div class="stats-titre">Bilan par match, à niveau égal</div>
+      <div class="carte table-wrap">
+        <table class="classement-table simu">
+          <thead><tr><th></th><th>2 sets gagnants</th><th>3 sets gagnants</th></tr></thead>
+          <tbody>
+            <tr><td>Points joués (demain seulement)</td><td class="cmp"><span>165</span></td><td class="cmp"><span>271</span></td></tr>
+            <tr><td>Gain de mental max</td><td class="cmp">19,5 × 0,10 = 1,95<span>21,7 × 0,09 = 1,95</span></td><td class="cmp">32,1 × 0,10 = 3,21<span>35,8 × 0,09 = 3,22</span></td></tr>
+            <tr><td>Perte de forme</td><td class="cmp">24,6 × 0,10 = 2,46<span>165 × 0,015 = 2,48</span></td><td class="cmp">40,4 × 0,10 = 4,04<span>271 × 0,015 = 4,07</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="pied">
+      <img src="ball.png" alt="">
+      Étude du 4 novembre. Rien n'est encore modifié dans le jeu.<br>
+      Avant la mise en service, il reste un dernier test avec les styles de jeu et les blessures.
+    </div>
+
+  </div>
+</div>
+<script>
+(function () {
+  var t = document.getElementById('nav-toggle'), d = document.getElementById('nav-dropdown');
+  t.addEventListener('click', function (e) { e.stopPropagation(); var o = d.classList.toggle('open'); t.setAttribute('aria-expanded', o ? 'true' : 'false'); });
+  document.addEventListener('click', function () { d.classList.remove('open'); t.setAttribute('aria-expanded', 'false'); });
+  document.getElementById('btn-retour-page').addEventListener('click', function () {
+    if (window.history.length > 1) window.history.back(); else window.location.href = 'https://www.tenniswebmanager.com/';
+  });
+})();
+</script>
+<script>
+(function () {
+  // ---------- Dimensions du court (mètres) ----------
+  const L = 23.77, W = 10.97, SX = 1.37, NET = L / 2, SVC = 6.40;
+  const MX = 4.6, MY = 2.6;
+  const LW = L + 2 * MX, HW = W + 2 * MY;
+
+  // ---------- Niveaux de la maquette ----------
+  const NIV = { A: { N: 525, M: 525 }, B: { N: 500, M: 540 } };
+  let vue = 'moi';
+  const NOMS = { moi: { A: 'Toi', B: 'Adversaire' }, autre: { A: 'L. Martin', B: 'K. Osei' } };
+  const ETIQ = { moi: { A: 'TOI', B: 'ADV.' }, autre: { A: 'L. MARTIN', B: 'K. OSEI' } };
+  const nom = c => NOMS[vue][c];
+  const PALETTE = [
+    ['Jaune balle', '#D4F000'], ['Orange', '#FF8A1F'], ['Rouge', '#E2403B'], ['Rose', '#FF5FA2'],
+    ['Violet', '#9B6BFF'], ['Bleu roi', '#2F6BFF'], ['Bleu ciel', '#4FC3F7'], ['Turquoise', '#1FD1B2'],
+    ['Vert', '#3DDC5A'], ['Bordeaux', '#8E1E3A'], ['Blanc', '#F5F7FA'], ['Noir', '#1B1F27']
+  ];
+  const couleurs = { A: '#D4F000', B: '#F5F7FA' };
+  try { const m = JSON.parse(localStorage.getItem('twm-maquette-couleurs') || 'null'); if (m && m.A && m.B) { couleurs.A = m.A; couleurs.B = m.B; } } catch (e) {}
+  function rgb(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+  function luminosite(hex) { const [r, g, b] = rgb(hex); return (0.299 * r + 0.587 * g + 0.114 * b) / 255; }
+  function tropProches(h1, h2) { const a = rgb(h1), b = rgb(h2); return Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]) < 70; }
+  let gauche = 'A';
+  const cote = c => (c === gauche ? 'A' : 'B');
+
+  // ---------- Règle des probabilités ----------
+  function R(diff) {
+    const d = Math.abs(diff); let p;
+    if (d <= 25) p = 50 + (d / 25) * 4;
+    else if (d <= 50) p = 54 + ((d - 25) / 25) * 2.5;
+    else if (d <= 100) p = 56.5 + ((d - 50) / 50) * 2.5;
+    else p = 59 + ((d - 100) / 100) * 2.5;
+    p = Math.min(p, 95) / 100;
+    return diff >= 0 ? p : 1 - p;
+  }
+  const autre = c => (c === 'A' ? 'B' : 'A');
+  const pct = x => (x * 100).toFixed(1).replace('.', ',') + ' %';
+
+  // ---------- Canvas ----------
+  const canvas = document.getElementById('court');
+  const ctx = canvas.getContext('2d');
+  let s = 20, dpr = 1;
+  function redim() {
+    dpr = window.devicePixelRatio || 1;
+    const w = canvas.parentElement.clientWidth;
+    canvas.width = Math.round(w * dpr);
+    canvas.height = Math.round(w * dpr * HW / LW);
+    canvas.style.height = (w * HW / LW) + 'px';
+    s = canvas.width / LW;
+  }
+  window.addEventListener('resize', redim);
+  const X = x => (x + MX) * s, Y = y => (y + MY) * s;
+
+  const SURFACES = {
+    dur: { ext: '#2E6B55', int: '#2B5FA6', ligne: '#F5F7FA' },
+    terre: { ext: '#B4552C', int: '#C66A3D', ligne: '#F7EDE4' },
+    herbe: { ext: '#3C7F3A', int: '#4A9444', ligne: '#F5F7FA' }
+  };
+  let surface = 'dur';
+
+  // ---------- État visuel ----------
+  const J = { A: { x: -1, y: W / 2 }, B: { x: L + 1, y: W / 2 } };
+  const balle = { x: 0, y: 0, h: 0, visible: false };
+  let marques = [];
+  let etiquette = null;
+
+  // ---------- Horloge et animations (respectent pause et vitesse) ----------
+  let vitesse = 1, pause = false, horloge = 0, dernier = performance.now();
+  let anims = new Set();
+  function boucle(now) {
+    const dt = Math.min(0.05, (now - dernier) / 1000); dernier = now;
+    if (!pause) {
+      horloge += dt * vitesse;
+      for (const a of Array.from(anims)) a.step(dt * vitesse);
+    }
+    dessiner();
+    requestAnimationFrame(boucle);
+  }
+  function tween(dur, fn) {
+    return new Promise(res => {
+      const a = { e: 0, step(d) { this.e += d; const t = Math.min(1, this.e / dur); fn(t); if (t >= 1) { anims.delete(a); res(); } } };
+      anims.add(a); fn(0);
+    });
+  }
+  const attendre = d => tween(d, () => {});
+  const doux = t => t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+  function deplacer(p, cible, dur, frac) {
+    const f = frac === undefined ? 1 : frac, x0 = p.x, y0 = p.y;
+    return tween(dur, t => { const e = doux(t) * f; p.x = x0 + (cible.x - x0) * e; p.y = y0 + (cible.y - y0) * e; });
+  }
+  function vol(de, a, dur, hauteur, hFin) {
+    const hf = hFin || 0;
+    return tween(dur, t => {
+      balle.x = de.x + (a.x - de.x) * t; balle.y = de.y + (a.y - de.y) * t;
+      balle.h = 4 * hauteur * t * (1 - t) + hf * t;
+    });
+  }
+  const alea = (a, b) => a + Math.random() * (b - a);
+  const marquer = (p, faute) => marques.push({ x: p.x, y: p.y, t: horloge, faute });
+  const afficher = (texte, couleur) => { etiquette = { texte, couleur, t: horloge }; };
+
+  // ---------- Dessin ----------
+  function dessiner() {
+    const c = SURFACES[surface];
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = c.ext; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    if (surface === 'herbe') {
+      ctx.fillStyle = 'rgba(255,255,255,0.05)';
+      for (let i = 0; i < 14; i += 2) ctx.fillRect(X(-MX + i * LW / 14), 0, LW / 14 * s, canvas.height);
+    }
+    ctx.fillStyle = c.int; ctx.fillRect(X(0), Y(0), L * s, W * s);
+    if (surface === 'herbe') {
+      ctx.fillStyle = 'rgba(255,255,255,0.06)';
+      for (let i = 0; i < 12; i += 2) ctx.fillRect(X(i * L / 12), Y(0), L / 12 * s, W * s);
+    }
+    ctx.strokeStyle = c.ligne; ctx.lineWidth = Math.max(1.5, 0.07 * s);
+    ctx.strokeRect(X(0), Y(0), L * s, W * s);
+    ligne(0, SX, L, SX); ligne(0, W - SX, L, W - SX);
+    ligne(NET - SVC, SX, NET - SVC, W - SX); ligne(NET + SVC, SX, NET + SVC, W - SX);
+    ligne(NET - SVC, W / 2, NET + SVC, W / 2);
+    ligne(0, W / 2, 0.3, W / 2); ligne(L - 0.3, W / 2, L, W / 2);
+    // filet
+    ctx.strokeStyle = 'rgba(10,22,40,0.85)'; ctx.lineWidth = Math.max(3, 0.16 * s);
+    ligne(NET, -0.9, NET, W + 0.9);
+    ctx.strokeStyle = c.ligne; ctx.lineWidth = Math.max(1, 0.05 * s);
+    ligne(NET, -0.9, NET, W + 0.9);
+    ctx.fillStyle = '#0A1628';
+    for (const yy of [-0.9, W + 0.9]) { ctx.beginPath(); ctx.arc(X(NET), Y(yy), 0.18 * s, 0, 7); ctx.fill(); }
+
+    // marques de rebond
+    marques = marques.filter(m => horloge - m.t < 1.6);
+    for (const m of marques) {
+      const a = 1 - (horloge - m.t) / 1.6;
+      ctx.strokeStyle = m.faute ? 'rgba(226,75,74,' + a + ')' : 'rgba(255,255,255,' + (a * 0.8) + ')';
+      ctx.lineWidth = Math.max(1.5, 0.06 * s);
+      ctx.beginPath(); ctx.ellipse(X(m.x), Y(m.y), 0.32 * s, 0.22 * s, 0, 0, 7); ctx.stroke();
+    }
+
+    joueur(J.A, couleurs.A, ETIQ[vue].A, false);
+    joueur(J.B, couleurs.B, ETIQ[vue].B, tropProches(couleurs.A, couleurs.B));
+
+    if (balle.visible) {
+      ctx.fillStyle = 'rgba(0,0,0,0.3)';
+      ctx.beginPath(); ctx.ellipse(X(balle.x), Y(balle.y), 0.2 * s, 0.13 * s, 0, 0, 7); ctx.fill();
+      const r = (0.17 + balle.h * 0.035) * s;
+      ctx.fillStyle = '#D4F000'; ctx.strokeStyle = 'rgba(10,22,40,0.6)'; ctx.lineWidth = Math.max(1, 0.03 * s);
+      ctx.beginPath(); ctx.arc(X(balle.x), Y(balle.y) - balle.h * 0.55 * s, r, 0, 7); ctx.fill(); ctx.stroke();
+    }
+
+    if (etiquette && horloge - etiquette.t < 1.3) {
+      const a = Math.min(1, 1.6 * (1.3 - (horloge - etiquette.t)));
+      ctx.globalAlpha = a;
+      ctx.font = '900 ' + Math.round(1.7 * s) + 'px "Big Shoulders Display", sans-serif';
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillStyle = 'rgba(10,22,40,0.75)';
+      const tw = ctx.measureText(etiquette.texte).width;
+      ctx.fillRect(X(NET) - tw / 2 - 0.6 * s, Y(-MY / 2 - 0.2) - 0.9 * s, tw + 1.2 * s, 1.8 * s);
+      ctx.fillStyle = etiquette.couleur;
+      ctx.fillText(etiquette.texte, X(NET), Y(-MY / 2 - 0.2));
+      ctx.globalAlpha = 1;
+    }
+  }
+  function ligne(x1, y1, x2, y2) { ctx.beginPath(); ctx.moveTo(X(x1), Y(y1)); ctx.lineTo(X(x2), Y(y2)); ctx.stroke(); }
+  function joueur(p, couleur, nom, anneau) {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath(); ctx.ellipse(X(p.x) + 0.12 * s, Y(p.y) + 0.15 * s, 0.6 * s, 0.42 * s, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = couleur; ctx.strokeStyle = '#0A1628'; ctx.lineWidth = Math.max(1.5, 0.08 * s);
+    ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), 0.5 * s, 0, 7); ctx.fill(); ctx.stroke();
+    if (anneau) {
+      ctx.strokeStyle = luminosite(couleur) > 0.6 ? '#1B1F27' : '#F5F7FA'; ctx.lineWidth = Math.max(2, 0.12 * s);
+      ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), 0.27 * s, 0, 7); ctx.stroke();
+    }
+    ctx.font = '700 ' + Math.max(10, Math.round(0.62 * s)) + 'px "IBM Plex Sans", sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'bottom'; ctx.fillStyle = '#F5F7FA';
+    ctx.fillText(nom, X(p.x), Y(p.y) - 0.65 * s);
+  }
+
+  // ---------- Géométrie des coups ----------
+  const versLeFond = c => (c === 'A' ? -1 : 1);
+  function boiteY(recv, deuce) {
+    const haut = [SX, W / 2], bas = [W / 2, W - SX];
+    if (recv === 'A') return deuce ? bas : haut;
+    return deuce ? haut : bas;
+  }
+  function cibleService(recv, deuce, ace) {
+    const [y1, y2] = boiteY(recv, deuce);
+    const prof = ace ? alea(0.15, 0.8) : alea(0.4, 2.4);
+    const x = recv === 'A' ? NET - SVC + prof : NET + SVC - prof;
+    const y = ace ? (Math.random() < 0.5 ? y1 + 0.2 : y2 - 0.2) : alea(y1 + 0.5, y2 - 0.5);
+    return { x, y };
+  }
+  function cibleEchange(cote) {
+    const p = alea(1.0, 7.0);
+    return { x: cote === 'A' ? p : L - p, y: alea(SX + 0.6, W - SX - 0.6) };
+  }
+  function cibleGagnante(cote) {
+    const p = Math.random() < 0.75 ? alea(0.4, 3.5) : alea(5, 7.5);
+    const y = Math.random() < 0.5 ? SX + alea(0.15, 0.8) : W - SX - alea(0.15, 0.8);
+    return { x: cote === 'A' ? p : L - p, y };
+  }
+  function cibleFaute(cote) {
+    if (Math.random() < 0.5) {
+      const p = alea(-2.0, -0.35);
+      return { x: cote === 'A' ? p : L - p, y: alea(SX + 0.6, W - SX - 0.6) };
+    }
+    const p = alea(1, 8);
+    return { x: cote === 'A' ? p : L - p, y: Math.random() < 0.5 ? SX - alea(0.3, 1.2) : W - SX + alea(0.3, 1.2) };
+  }
+  function interception(cote, t) {
+    const x = t.x + versLeFond(cote) * alea(1.4, 2.8);
+    return { x: cote === 'A' ? Math.max(-MX + 1, Math.min(NET - 1.5, x)) : Math.min(L + MX - 1, Math.max(NET + 1.5, x)), y: t.y + alea(-0.4, 0.4) };
+  }
+  const replacement = cote => ({ x: cote === 'A' ? -1.2 : L + 1.2, y: W / 2 + alea(-0.8, 0.8) });
+
+  function placer(serveur, deuce) {
+    const recv = autre(serveur);
+    const cs = cote(serveur), cr = cote(recv);
+    const sy = cs === 'A' ? (deuce ? W / 2 + 0.9 : W / 2 - 0.9) : (deuce ? W / 2 - 0.9 : W / 2 + 0.9);
+    const ry = cr === 'A' ? (deuce ? W / 2 + 2.9 : W / 2 - 2.9) : (deuce ? W / 2 - 2.9 : W / 2 + 2.9);
+    const ps = { x: cs === 'A' ? -0.4 : L + 0.4, y: sy };
+    const pr = { x: cr === 'A' ? -1.0 : L + 1.0, y: ry };
+    return Promise.all([deplacer(J[serveur], ps, 0.45), deplacer(J[recv], pr, 0.45)]);
+  }
+
+  // Anime un point déjà décidé par le moteur : seul "vainqueur" compte.
+  async function animerPoint(serveur, vainqueur, deuce) {
+    const recv = autre(serveur), perdant = autre(vainqueur);
+    const ace = vainqueur === serveur && Math.random() < 0.08;
+    const fin = ace ? 'ace' : (Math.random() < 0.55 ? 'gagnant' : 'faute');
+    const frappeurFinal = fin === 'faute' ? perdant : vainqueur;
+    let f = 0;
+    if (!ace) {
+      const parite = frappeurFinal === serveur ? 0 : 1;
+      f = parite + 2 * Math.floor(Math.random() * 4);
+      if (frappeurFinal === serveur && f === 0) f = 2;
+    }
+    let pos = { x: J[serveur].x, y: J[serveur].y };
+    balle.visible = true; balle.x = pos.x; balle.y = pos.y; balle.h = 1.2;
+
+    for (let i = 0; i <= f; i++) {
+      const h = i % 2 === 0 ? serveur : recv, o = autre(h);
+      const dernier = i === f;
+      let t, typeFin = null;
+      if (i === 0) t = cibleService(cote(o), deuce, ace);
+      else if (dernier && fin === 'gagnant') t = cibleGagnante(cote(o));
+      else if (dernier && fin === 'faute') {
+        if (Math.random() < 0.3) { t = { x: NET + (cote(h) === 'A' ? -0.12 : 0.12), y: alea(SX + 1, W - SX - 1) }; typeFin = 'filet'; }
+        else { t = cibleFaute(cote(o)); typeFin = 'faute'; }
+      } else t = cibleEchange(cote(o));
+      if (i === 0 && dernier && fin === 'gagnant') typeFin = null;
+
+      const dur = i === 0 ? alea(0.5, 0.6) : alea(0.68, 0.9);
+      const I = interception(cote(o), t);
+      const rate = dernier;
+      const mouvements = [deplacer(J[o], I, dur * 1.25, rate ? (typeFin ? 0.3 : 0.55) : 1)];
+      if (i > 0) mouvements.push(deplacer(J[h], replacement(cote(h)), dur * 1.1, 0.6));
+
+      if (typeFin === 'filet') {
+        await Promise.all([vol(pos, t, dur * 0.8, 1.2, 0.6)].concat(mouvements.slice(1)));
+        await tween(0.2, k => { balle.h = 0.6 * (1 - k); });
+        afficher('FILET', '#E24B4A');
+        break;
+      }
+      const volBalle = vol(pos, t, dur, i === 0 ? 1.1 : alea(1.6, 2.6)).then(() => marquer(t, typeFin === 'faute'));
+      if (dernier) {
+        await Promise.all([volBalle].concat(mouvements));
+        if (typeFin === 'faute') afficher('FAUTE', '#E24B4A');
+        else afficher(ace ? 'ACE' : 'COUP GAGNANT', '#D4F000');
+        const loin = { x: t.x + versLeFond(cote(o)) * 3.5, y: t.y + (t.y - pos.y) * 0.15 };
+        await vol(t, loin, 0.35, 0.5);
+        break;
+      }
+      await volBalle;
+      await Promise.all([vol(t, I, dur * 0.3, 0.7)].concat(mouvements));
+      pos = { x: I.x, y: I.y };
+    }
+    await attendre(0.25);
+    balle.visible = false;
+  }
+
+  // ---------- Score et moteur ----------
+  let etat, matchId = 0;
+  const PTS = ['0', '15', '30', '40'];
+
+  function nouvelEtat() {
+    return { changement: false, sets: [], sg: { A: 0, B: 0 }, jeux: { A: 0, B: 0 }, pts: { A: 0, B: 0 }, serveur: Math.random() < 0.5 ? 'A' : 'B', tb: false, seuil: 7, tbPremier: null, tbIndex: 0, fini: false, numSet: 1 };
+  }
+  function serveurCourant() {
+    if (!etat.tb) return etat.serveur;
+    const k = etat.tbIndex;
+    if (k === 0) return etat.tbPremier;
+    return Math.floor((k - 1) / 2) % 2 === 0 ? autre(etat.tbPremier) : etat.tbPremier;
+  }
+  function situation() {
+    const S = serveurCourant(), Rv = autre(S);
+    const deuce = etat.tb ? etat.tbIndex % 2 === 0 : (etat.pts.A + etat.pts.B) % 2 === 0;
+    let label = null, menace = null;
+    if (etat.tb) {
+      for (const c of ['A', 'B']) {
+        const p = etat.pts[c], q = etat.pts[autre(c)];
+        if (p + 1 >= etat.seuil && p + 1 - q >= 2) { menace = c; label = etat.sg[c] + 1 === 2 ? 'Balle de match' : 'Balle de set'; }
+      }
+    } else {
+      const s = etat.pts[S], r = etat.pts[Rv], gS = etat.jeux[S], gR = etat.jeux[Rv];
+      const setS = gS + 1 >= 6 && gS + 1 - gR >= 2, setR = gR + 1 >= 6 && gR + 1 - gS >= 2;
+      const matchS = setS && etat.sg[S] + 1 === 2, matchR = setR && etat.sg[Rv] + 1 === 2;
+      if (r >= 3 && r - s >= 1) { menace = Rv; label = matchR ? 'Balle de break / Balle de match' : setR ? 'Balle de break / Balle de set' : 'Balle de break'; }
+      else if (setS && s >= 3 && s - r >= 1) { menace = S; label = matchS ? 'Balle de match' : 'Balle de set'; }
+    }
+    let q, detail;
+    if (etat.tb) {
+      const pA = R(NIV.A.M - NIV.B.M);
+      q = S === 'A' ? pA : 1 - pA;
+      detail = 'Tie-break : règle sur les niveaux « points importants », sans avantage au service.';
+    } else {
+      const rn = R(NIV[S].N - NIV[Rv].N), rm = R(NIV[S].M - NIV[Rv].M);
+      q = 0.5 + 0.58 * (rn - 0.5) + 0.069;
+      detail = 'Point normal : 50 % + 0,58 × (R(Ns − Nr) − 50 %) + 6,9 %.';
+      if (label) { q += 1.2 * (rm - rn); detail = 'Point important : point normal + 1,2 × (R(Ms − Mr) − R(Ns − Nr)).'; }
+    }
+    return { S, Rv, deuce, label, menace, q, detail };
+  }
+
+  const elLog = document.getElementById('log');
+  function log(texte, cls) {
+    const d = document.createElement('div'); d.className = 'mq-ligne' + (cls ? ' ' + cls : ''); d.textContent = texte;
+    elLog.appendChild(d); elLog.scrollTop = elLog.scrollHeight;
+  }
+  function scorePoints() {
+    if (etat.tb) return etat.pts.A + '-' + etat.pts.B;
+    const a = etat.pts.A, b = etat.pts.B;
+    if (a >= 3 && b >= 3) return a === b ? 'Égalité' : 'Avantage ' + nom(a > b ? 'A' : 'B');
+    return PTS[Math.min(a, 3)] + '-' + PTS[Math.min(b, 3)];
+  }
+  function affichePoints(c) {
+    if (etat.fini) return '';
+    if (etat.tb) return String(etat.pts[c]);
+    const a = etat.pts[c], b = etat.pts[autre(c)];
+    if (a >= 3 && b >= 3) return a > b ? 'AV' : '40';
+    return PTS[Math.min(a, 3)];
+  }
+
+  function majTableau() {
+    const srv = etat.fini ? null : serveurCourant();
+    let h = '';
+    for (const c of ['A', 'B']) {
+      h += '<tr><td class="srv"><span class="' + (srv === c ? 'on' : '') + '"></span></td>';
+      h += '<td class="nom"><span class="pastille" style="background:' + couleurs[c] + '"></span>' + nom(c) + '<small>' + (c === 'A' ? 'Joueur réel' : 'Bot (+40 points importants)') + '</small></td>';
+      for (const st of etat.sets) h += '<td class="set">' + st[c] + (st.tb && st[c] < st[autre(c)] ? '<sup>' + st.tb[c] + '</sup>' : '') + '</td>';
+      if (!etat.fini) h += '<td class="set courant">' + etat.jeux[c] + '</td>';
+      h += '<td class="pts">' + affichePoints(c) + '</td></tr>';
+    }
+    document.getElementById('tableau').innerHTML = h;
+  }
+  function majInfos(sit) {
+    const b = document.getElementById('bandeau');
+    if (etat.fini) return;
+    if (sit.label) { b.className = 'bandeau important'; b.textContent = sit.label + ' · ' + nom(sit.menace); }
+    else if (etat.tb) { b.className = 'bandeau tb'; b.textContent = etat.seuil === 10 ? 'Super tie-break' : 'Tie-break'; }
+    else { b.className = 'bandeau'; b.textContent = 'Set ' + etat.numSet + ' · Service ' + nom(sit.S); }
+    document.getElementById('proba-texte').innerHTML = 'Chance que ' + nom(sit.S) + ' gagne ce point : <b>' + pct(sit.q) + '</b>';
+    document.getElementById('jauge').style.width = (sit.q * 100) + '%';
+    document.getElementById('proba-detail').textContent = sit.detail;
+  }
+
+  function finirSet(vainqueurSet, tbScore) {
+    const st = { A: etat.jeux.A, B: etat.jeux.B };
+    if (tbScore) st.tb = tbScore;
+    etat.sets.push(st);
+    etat.sg[vainqueurSet]++;
+    log('Set ' + etat.numSet + ' remporté par ' + nom(vainqueurSet) + ' (' + st.A + '-' + st.B + ')', 'set');
+    if (etat.sg[vainqueurSet] === 2) {
+      etat.fini = true;
+      const score = etat.sets.map(x => x.A + '-' + x.B + (x.tb ? '(' + Math.min(x.tb.A, x.tb.B) + ')' : '')).join(', ');
+      log('Match terminé : ' + (vainqueurSet === 'A' ? 'Victoire ' : 'Défaite ') + score, 'fin');
+      const b = document.getElementById('bandeau'); b.className = 'bandeau fin'; b.textContent = (vainqueurSet === 'A' ? 'Victoire · ' : 'Défaite · ') + score;
+      return;
+    }
+    etat.numSet++;
+    etat.jeux = { A: 0, B: 0 };
+    log('Set ' + etat.numSet + ' · Service : ' + nom(etat.serveur));
+  }
+
+  function marquerPoint(vainqueur, sit) {
+    const mot = sit.label ? (sit.label.indexOf('break') >= 0 ? 'break' : sit.label.indexOf('match') >= 0 ? 'match' : 'set') : null;
+    if (sit.label) {
+      if (vainqueur === sit.menace) log((mot === 'break' ? 'Break ' : mot === 'match' ? 'Match ' : 'Set ') + nom(vainqueur), 'important');
+      else log((mot === 'break' ? 'Break sauvé' : mot === 'match' ? 'Balle de match sauvée' : 'Balle de set sauvée') + ' par ' + nom(vainqueur), 'important');
+    }
+    etat.pts[vainqueur]++;
+    if (etat.tb) {
+      etat.tbIndex++;
+      const a = etat.pts.A, b = etat.pts.B;
+      if ((a + b) % 6 === 0) etat.changement = true;
+      if ((a >= etat.seuil || b >= etat.seuil) && Math.abs(a - b) >= 2) {
+        const v = a > b ? 'A' : 'B';
+        const tbScore = { A: a, B: b };
+        log((etat.seuil === 10 ? 'Super tie-break' : 'Tie-break') + ' remporté par ' + nom(v) + ' (' + a + '-' + b + ')', 'jeu');
+        etat.jeux[v]++;
+        etat.changement = (etat.jeux.A + etat.jeux.B) % 2 === 1;
+        etat.serveur = autre(etat.tbPremier);
+        etat.tb = false; etat.pts = { A: 0, B: 0 };
+        finirSet(v, tbScore);
+      } else log(scorePoints());
+      return;
+    }
+    const a = etat.pts.A, b = etat.pts.B;
+    if ((a >= 4 || b >= 4) && Math.abs(a - b) >= 2) {
+      const v = a > b ? 'A' : 'B';
+      etat.jeux[v]++;
+      etat.pts = { A: 0, B: 0 };
+      log('Jeu remporté par ' + nom(v) + ' (score du set : ' + etat.jeux.A + '-' + etat.jeux.B + ')', 'jeu');
+      etat.serveur = autre(etat.serveur);
+      const ja = etat.jeux.A, jb = etat.jeux.B;
+      etat.changement = (ja + jb) % 2 === 1;
+      if ((ja >= 6 || jb >= 6) && Math.abs(ja - jb) >= 2) { finirSet(ja > jb ? 'A' : 'B'); return; }
+      if (ja === 6 && jb === 6) {
+        etat.tb = true; etat.tbIndex = 0; etat.tbPremier = etat.serveur;
+        etat.seuil = etat.numSet === 3 ? 10 : 7;
+        log(etat.seuil === 10 ? '--- Super tie-break (10 points) ---' : '--- Jeu décisif (tie-break) ---', 'set');
+        return;
+      }
+      if (!etat.fini) log('Service : ' + nom(etat.serveur));
+    } else log(scorePoints());
+  }
+
+  async function changerDeCote() {
+    log('Changement de côté', 'set');
+    const b = document.getElementById('bandeau'); b.className = 'bandeau tb'; b.textContent = 'Changement de côté';
+    const g = gauche, d = autre(gauche);
+    await Promise.all([deplacer(J[g], { x: NET - 1.2, y: -1.6 }, 0.7), deplacer(J[d], { x: NET + 1.2, y: W + 1.6 }, 0.7)]);
+    await Promise.all([deplacer(J[g], { x: NET + 1.2, y: -1.6 }, 0.4), deplacer(J[d], { x: NET - 1.2, y: W + 1.6 }, 0.4)]);
+    gauche = d;
+    await Promise.all([deplacer(J[g], { x: L + 1, y: W / 2 }, 0.7), deplacer(J[d], { x: -1, y: W / 2 }, 0.7)]);
+  }
+
+  async function jouerMatch(id) {
+    gauche = 'A'; J.A.x = -1; J.A.y = W / 2; J.B.x = L + 1; J.B.y = W / 2;
+    etat = nouvelEtat();
+    elLog.innerHTML = '';
+    log('--- Set 1 (Service : ' + nom(etat.serveur) + ') ---', 'set');
+    majTableau();
+    while (!etat.fini) {
+      const sit = situation();
+      majInfos(sit);
+      majTableau();
+      if (sit.label) log(sit.label + ' pour ' + nom(sit.menace), 'important');
+      await placer(sit.S, sit.deuce);
+      if (id !== matchId) return;
+      const vainqueur = Math.random() < sit.q ? sit.S : sit.Rv;
+      await animerPoint(sit.S, vainqueur, sit.deuce);
+      if (id !== matchId) return;
+      marquerPoint(vainqueur, sit);
+      majTableau();
+      if (etat.changement && !etat.fini) {
+        etat.changement = false;
+        await changerDeCote();
+        if (id !== matchId) return;
+      }
+      etat.changement = false;
+      await attendre(etat.fini ? 0 : 0.45);
+      if (id !== matchId) return;
+    }
+    majTableau();
+  }
+
+  // ---------- Contrôles ----------
+  const btnPause = document.getElementById('btn-pause');
+  btnPause.addEventListener('click', () => { pause = !pause; btnPause.textContent = pause ? 'Lecture' : 'Pause'; });
+  document.getElementById('btn-nouveau').addEventListener('click', () => {
+    matchId++; anims = new Set(); balle.visible = false; marques = []; etiquette = null;
+    jouerMatch(matchId);
+  });
+  document.querySelectorAll('#groupe-vitesse .tab-btn').forEach(b => b.addEventListener('click', () => {
+    vitesse = Number(b.dataset.v);
+    document.querySelectorAll('#groupe-vitesse .tab-btn').forEach(x => x.classList.toggle('active', x === b));
+  }));
+  document.querySelectorAll('#groupe-surface .tab-btn').forEach(b => b.addEventListener('click', () => {
+    surface = b.dataset.s;
+    document.querySelectorAll('#groupe-surface .tab-btn').forEach(x => x.classList.toggle('active', x === b));
+  }));
+
+  function construirePalette(c) {
+    const cont = document.getElementById('palette-' + c);
+    cont.innerHTML = '';
+    for (const [libelle, hex] of PALETTE) {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'pastille-btn'; b.style.background = hex;
+      b.setAttribute('role', 'radio'); b.setAttribute('aria-label', libelle); b.title = libelle;
+      b.setAttribute('aria-checked', couleurs[c] === hex ? 'true' : 'false');
+      b.addEventListener('click', () => {
+        couleurs[c] = hex;
+        try { localStorage.setItem('twm-maquette-couleurs', JSON.stringify(couleurs)); } catch (e) {}
+        cont.querySelectorAll('.pastille-btn').forEach(x => x.setAttribute('aria-checked', x === b ? 'true' : 'false'));
+        const l = cont.querySelector('.pastille-libre'); if (l) { l.classList.remove('actif'); l.querySelector('input').value = hex; }
+        if (etat) majTableau();
+      });
+      cont.appendChild(b);
+    }
+    const lab = document.createElement('label');
+    lab.className = 'pastille-libre'; lab.title = 'Toutes les couleurs';
+    const inp = document.createElement('input');
+    inp.type = 'color'; inp.id = 'couleur-libre-' + c; inp.value = couleurs[c];
+    inp.setAttribute('aria-label', 'Choisir n’importe quelle couleur');
+    const txt = document.createElement('span'); txt.textContent = 'Toutes les couleurs';
+    lab.appendChild(inp); lab.appendChild(txt);
+    inp.addEventListener('input', () => {
+      couleurs[c] = inp.value.toUpperCase();
+      try { localStorage.setItem('twm-maquette-couleurs', JSON.stringify(couleurs)); } catch (e) {}
+      cont.querySelectorAll('.pastille-btn').forEach(x => x.setAttribute('aria-checked', PALETTE.some(p => p[0] === x.title && p[1] === couleurs[c]) ? 'true' : 'false'));
+      lab.classList.toggle('actif', !PALETTE.some(p => p[1] === couleurs[c]));
+      if (etat) majTableau();
+    });
+    lab.classList.toggle('actif', !PALETTE.some(p => p[1] === couleurs[c]));
+    cont.appendChild(lab);
+  }
+  construirePalette('A'); construirePalette('B');
+  document.querySelectorAll('#groupe-vue .tab-btn').forEach(b => b.addEventListener('click', () => {
+    vue = b.dataset.vue;
+    document.querySelectorAll('#groupe-vue .tab-btn').forEach(x => x.classList.toggle('active', x === b));
+    if (etat) majTableau();
+  }));
+
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    pause = true; btnPause.textContent = 'Lecture';
+  }
+
+  redim();
+  requestAnimationFrame(boucle);
+  jouerMatch(matchId);
+})();
+</script>
+</body>
+</html>

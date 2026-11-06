@@ -190,6 +190,11 @@ div{max-width:480px;}h1{font-size:1.6rem;}p{color:#8B98A5;}</style></head>
 });
 
 app.use('/uploads', express.static(path.join(DOSSIER_DONNEES, 'uploads')));
+// Page publique de presentation du projet "moteur point par point" (2026-11-06) :
+// adresse courte sans .html, + la variante avec la faute de frappe donnee au depart.
+app.get(['/proposition-point-par-point', '/proposiiton-point-par-point'], function (req, res) {
+    res.sendFile(path.join(__dirname, 'proposition-point-par-point.html'));
+});
 app.use(express.static(__dirname));
 app.use(express.json());
 
