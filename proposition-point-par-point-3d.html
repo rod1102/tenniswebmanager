@@ -129,6 +129,10 @@ body { font-family: var(--texte); color: var(--gris); }
 .zoom { display: flex; align-items: center; gap: 8px; }
 .zoom input[type="range"] { width: 140px; accent-color: #D4F000; cursor: pointer; }
 .zoom .tab-btn { width: 34px; padding: 6px 0; text-align: center; font-size: 0.95rem; line-height: 1; }
+.vitesse input[type="range"] { width: 130px; accent-color: #D4F000; cursor: pointer; }
+.vitesse input[type="range"]:disabled { opacity: 0.4; cursor: not-allowed; }
+.vitesse output { min-width: 2.6em; font-size: 0.82rem; font-weight: 700; color: var(--balle); font-variant-numeric: tabular-nums; }
+#btn-important[aria-pressed="true"] { background: rgba(212, 240, 0, 0.15); border-color: var(--balle); color: var(--balle); }
 .zoom output { min-width: 3.2em; font-size: 0.78rem; font-weight: 600; color: var(--gris); font-variant-numeric: tabular-nums; }
 
 .vue3d canvas { touch-action: none; cursor: grab; }
@@ -269,12 +273,13 @@ body { font-family: var(--texte); color: var(--gris); }
           </div>
         </div>
         <div class="controles">
-          <div class="groupe" id="groupe-vitesse">
-            <span class="groupe-label">Vitesse</span>
-            <button class="tab-btn active" data-v="1" type="button">×1</button>
-            <button class="tab-btn" data-v="2" type="button">×2</button>
-            <button class="tab-btn" data-v="4" type="button">×4</button>
+          <div class="groupe vitesse">
+            <label class="groupe-label" for="vitesse">Vitesse</label>
+            <input type="range" id="vitesse" min="0" max="4" step="1" value="0" aria-valuetext="×1" list="paliers-vitesse">
+            <datalist id="paliers-vitesse"><option value="0"></option><option value="1"></option><option value="2"></option><option value="3"></option><option value="4"></option></datalist>
+            <output id="vitesse-valeur" for="vitesse">×1</output>
           </div>
+          <button class="tab-btn" id="btn-important" type="button" aria-pressed="false">Arrêter la simulation à chaque point important</button>
           <div class="groupe" id="groupe-surface">
             <span class="groupe-label">Surface</span>
             <button class="tab-btn active" data-s="dur" type="button">Dur</button>
@@ -282,7 +287,7 @@ body { font-family: var(--texte); color: var(--gris); }
             <button class="tab-btn" data-s="herbe" type="button">Herbe</button>
           </div>
         </div>
-        <p class="aide-camera">Fais glisser l'image pour tourner autour du court et choisir ton angle · molette ou curseur pour zoomer · flèches du clavier quand l'image est sélectionnée.</p>
+        <p class="aide-camera">Fais glisser l'image pour tourner autour du court et choisir ton angle · molette ou curseur pour zoomer · flèches du clavier quand l'image est sélectionnée. Avec « Arrêter la simulation à chaque point important », le match défile en ×50 et se met en pause avant chaque balle de break, de set ou de match : clique sur Lecture pour la voir en ×1.</p>
         <div class="couleurs">
           <div class="couleur-ligne">
             <span class="groupe-label">Couleur de ton joueur</span>
@@ -1685,6 +1690,10 @@ body { font-family: var(--texte); color: var(--gris); }
       const sit = situation();
       majInfos(sit); majTableau();
       if (sit.label) log(sit.label + ' pour ' + nom(sit.menace), 'important');
+      if (modeImportant) {
+        if (sit.label) { vitesse = 1; pause = true; btnPause.textContent = 'Lecture'; }
+        else vitesse = 50;
+      }
       await placer(sit.S, sit.deuce); if (id !== matchId) return;
       const v = Math.random() < sit.q ? sit.S : sit.Rv;
       await animerPoint(sit.S, v, sit.deuce); if (id !== matchId) return;
@@ -1782,7 +1791,23 @@ body { font-family: var(--texte); color: var(--gris); }
     else if (e.key === '-') regleZoom(Number(curseurZoom.value) - 5);
   });
 
-  groupe('groupe-vitesse', 'v', v => { vitesse = Number(v); });
+  const PALIERS = [1, 2, 4, 10, 20];
+  let vitesseChoisie = 1, modeImportant = false;
+  const curseurVitesse = document.getElementById('vitesse');
+  const btnImportant = document.getElementById('btn-important');
+  curseurVitesse.addEventListener('input', () => {
+    vitesseChoisie = PALIERS[Number(curseurVitesse.value)];
+    document.getElementById('vitesse-valeur').textContent = '×' + vitesseChoisie;
+    curseurVitesse.setAttribute('aria-valuetext', '×' + vitesseChoisie);
+    if (!modeImportant) vitesse = vitesseChoisie;
+  });
+  btnImportant.addEventListener('click', () => {
+    modeImportant = !modeImportant;
+    btnImportant.setAttribute('aria-pressed', modeImportant ? 'true' : 'false');
+    curseurVitesse.disabled = modeImportant;
+    document.getElementById('vitesse-valeur').textContent = modeImportant ? '×50' : '×' + vitesseChoisie;
+    vitesse = modeImportant ? 50 : vitesseChoisie;
+  });
   groupe('groupe-surface', 's', s => {
     surface = s;
     if (renderer) { dessinerTexture(); if (themeActuel().petit || themeActuel().club || themeActuel().masters) construireTribunes(); }
