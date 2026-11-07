@@ -287,7 +287,7 @@ body { font-family: var(--texte); color: var(--gris); }
             <button class="tab-btn" data-s="herbe" type="button">Herbe</button>
           </div>
         </div>
-        <p class="aide-camera">Fais glisser l'image pour tourner autour du court et choisir ton angle · molette ou curseur pour zoomer · flèches du clavier quand l'image est sélectionnée. Avec « Arrêter la simulation à chaque point important », le match défile en ×50 et se met en pause avant chaque balle de break, de set ou de match : clique sur Lecture pour la voir en ×1.</p>
+        <p class="aide-camera">Fais glisser l'image pour tourner autour du court et choisir ton angle · molette ou curseur pour zoomer · flèches du clavier quand l'image est sélectionnée. Avec « Arrêter la simulation à chaque point important », le match défile en ×50 et repasse en ×1 pour chaque balle de break, de set ou de match.</p>
         <div class="couleurs">
           <div class="couleur-ligne">
             <span class="groupe-label">Couleur de ton joueur</span>
@@ -1691,7 +1691,7 @@ body { font-family: var(--texte); color: var(--gris); }
       majInfos(sit); majTableau();
       if (sit.label) log(sit.label + ' pour ' + nom(sit.menace), 'important');
       if (modeImportant) {
-        if (sit.label) { vitesse = 1; pause = true; btnPause.textContent = 'Lecture'; }
+        if (sit.label) vitesse = 1;
         else vitesse = 50;
       }
       await placer(sit.S, sit.deuce); if (id !== matchId) return;
