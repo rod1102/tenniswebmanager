@@ -323,7 +323,7 @@ body { font-family: var(--texte); color: var(--gris); }
       </div>
     </div>
 
-    <p class="note">Les trajectoires, la longueur des échanges, les aces et les fautes sont tirés au hasard pour l'image et n'ont aucun effet sur le résultat. Seul le vainqueur du point est décidé par le moteur. Niveaux de la maquette : toi 525 (points importants 525), Justin Volée 500 (points importants 540), soit exactement les stats d'un bot.</p>
+    <p class="note">Les trajectoires, la longueur des échanges, les aces et les fautes sont tirés au hasard pour l'image et n'ont aucun effet sur le résultat. Seul le vainqueur du point est décidé par le moteur. Niveaux de la maquette : David Heinzo 525 (points importants 525), Justin Volée 500 (points importants 540), soit exactement les stats d'un bot.</p>
   </div>
 </div>
 
@@ -336,15 +336,15 @@ body { font-family: var(--texte); color: var(--gris); }
 
   const NIV = { A: { N: 525, M: 525 }, B: { N: 500, M: 540 } };
   let vue = 'moi';
-  const NOMS = { moi: { A: 'Toi', B: 'Justin Volée' }, autre: { A: 'L. Martin', B: 'Justin Volée' } };
-  const ETIQ = { moi: { A: 'TOI', B: 'J. VOLÉE' }, autre: { A: 'L. MARTIN', B: 'J. VOLÉE' } };
+  const NOMS = { moi: { A: 'David Heinzo', B: 'Justin Volée' }, autre: { A: 'David Heinzo', B: 'Justin Volée' } };
+  const ETIQ = { moi: { A: 'D. HEINZO', B: 'J. VOLÉE' }, autre: { A: 'D. HEINZO', B: 'J. VOLÉE' } };
   const nom = c => NOMS[vue][c];
   const PALETTE = [
     ['Jaune balle', '#D4F000'], ['Orange', '#FF8A1F'], ['Rouge', '#E2403B'], ['Rose', '#FF5FA2'],
     ['Violet', '#9B6BFF'], ['Bleu roi', '#2F6BFF'], ['Bleu ciel', '#4FC3F7'], ['Turquoise', '#1FD1B2'],
     ['Vert', '#3DDC5A'], ['Bordeaux', '#8E1E3A'], ['Blanc', '#F5F7FA'], ['Noir', '#1B1F27']
   ];
-  const couleurs = { A: '#D4F000', B: '#F5F7FA' };
+  const couleurs = { A: '#74ACDF', B: '#F5F7FA' };
   const RG_SEUL = /[?&]rg=1/.test(location.search);
   if (!RG_SEUL) { try { const m = JSON.parse(localStorage.getItem('twm-maquette-couleurs') || 'null'); if (m && m.A && m.B) { couleurs.A = m.A; couleurs.B = m.B; } } catch (e) {} }
   function rgb(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
@@ -466,9 +466,17 @@ body { font-family: var(--texte); color: var(--gris); }
   function creerJoueur(c) {
     const g = new THREE.Group();
     const matMaillot = new THREE.MeshStandardMaterial({ color: couleurs[c], roughness: 0.65 });
-    const volee = c === 'B';
-    const matPeau = new THREE.MeshStandardMaterial({ color: volee ? '#3E2617' : '#B4835C', roughness: 0.7 });
-    const matShort = new THREE.MeshStandardMaterial({ color: volee ? '#EEF0EE' : '#1B2433', roughness: 0.85 });
+    const volee = c === 'B', heinzo = c === 'A';
+    const matPeau = new THREE.MeshStandardMaterial({ color: volee ? '#3E2617' : heinzo ? '#C99A74' : '#B4835C', roughness: 0.7 });
+    const matShort = new THREE.MeshStandardMaterial({ color: (volee || heinzo) ? '#EEF0EE' : '#1B2433', roughness: 0.85 });
+    if (heinzo) {
+      // maillot à rayures verticales bleu ciel et blanc
+      const cv = document.createElement('canvas'); cv.width = 64; cv.height = 8;
+      const gc = cv.getContext('2d'); gc.fillStyle = '#FFFFFF'; gc.fillRect(0, 0, 64, 8); gc.fillStyle = '#74ACDF'; gc.fillRect(0, 0, 32, 8);
+      const tx = new THREE.CanvasTexture(cv); tx.wrapS = THREE.RepeatWrapping; tx.repeat.set(5, 1);
+      if (THREE.sRGBEncoding) tx.encoding = THREE.sRGBEncoding;
+      matMaillot.map = tx; matMaillot.color.set('#FFFFFF');
+    }
     const matManche = volee ? matPeau : matMaillot;
     const matChaussette = new THREE.MeshStandardMaterial({ color: '#F2F2F2', roughness: 0.9 });
     const matChaussure = new THREE.MeshStandardMaterial({ color: '#E3E7EC', roughness: 0.55 });
@@ -495,7 +503,21 @@ body { font-family: var(--texte); color: var(--gris); }
     m(new THREE.SphereGeometry(0.215, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), matMaillot, buste, 0, 0.55, 0).scale.set(1, 0.42, 0.7);
     m(new THREE.CylinderGeometry(0.052, 0.058, 0.1, 10), matPeau, buste, 0, 0.64, 0);
     m(new THREE.SphereGeometry(0.112, 18, 14), matPeau, buste, 0, 0.78, 0.01).scale.set(0.9, 1.1, 1);
-    if (!volee) {
+    if (heinzo) {
+      // cheveux bruns bouclés mi-longs + barbe
+      const matCh = new THREE.MeshStandardMaterial({ color: '#3A2416', roughness: 0.95 });
+      const matBarbe = new THREE.MeshStandardMaterial({ color: '#4A3020', roughness: 0.95 });
+      m(new THREE.SphereGeometry(0.126, 18, 10, 0, Math.PI * 2, 0, Math.PI / 1.7), matCh, buste, 0, 0.8, -0.012).scale.set(1.02, 1.0, 1.08);
+      for (let i = 0; i < 30; i++) {
+        const a = -2.5 + (i / 29) * 5.0, y = 0.7 + Math.random() * 0.15, r = 0.112;
+        m(new THREE.IcosahedronGeometry(0.045 + Math.random() * 0.025, 0), matCh, buste, Math.sin(a) * r, y, -Math.cos(a) * r * 1.05);
+      }
+      for (let i = 0; i < 12; i++) {
+        const a = -1.7 + (i / 11) * 3.4;
+        m(new THREE.CylinderGeometry(0.032, 0.02, 0.17, 5), matCh, buste, Math.sin(a) * 0.1, 0.65, -Math.cos(a) * 0.1);
+      }
+      m(new THREE.SphereGeometry(0.104, 14, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), matBarbe, buste, 0, 0.775, 0.02).scale.set(0.86, 0.75, 0.92);
+    } else if (!volee) {
       m(new THREE.SphereGeometry(0.118, 18, 8, 0, Math.PI * 2, 0, Math.PI / 2), matMaillot, buste, 0, 0.815, 0.005).scale.set(0.95, 0.9, 1.02);
       m(new THREE.BoxGeometry(0.15, 0.014, 0.12), matMaillot, buste, 0, 0.82, 0.12);
     } else {
@@ -503,14 +525,14 @@ body { font-family: var(--texte); color: var(--gris); }
       const matCheveux = new THREE.MeshStandardMaterial({ color: '#2B1A10', roughness: 0.95 });
       const matPointes = new THREE.MeshStandardMaterial({ color: '#6B4A2B', roughness: 0.95 });
       m(new THREE.SphereGeometry(0.122, 18, 10, 0, Math.PI * 2, 0, Math.PI / 1.8), matCheveux, buste, 0, 0.8, -0.005).scale.set(0.98, 0.95, 1.05);
-      for (let i = 0; i < 40; i++) {
-        const a = -2.6 + (i / 39) * 5.2 + (Math.random() - 0.5) * 0.12;
-        const long = 0.38 + Math.random() * 0.36;
+      for (let i = 0; i < 56; i++) {
+        const a = -2.7 + (i / 55) * 5.4 + (Math.random() - 0.5) * 0.12;
+        const long = 0.62 + Math.random() * 0.4;
         const meche = new THREE.Group();
         meche.position.set(Math.sin(a) * 0.105, 0.84 + Math.random() * 0.03, -Math.cos(a) * 0.105);
-        meche.rotation.set(-Math.cos(a) * 0.5, 0, -Math.sin(a) * 0.55);
+        meche.rotation.set(-Math.cos(a) * 0.36, 0, -Math.sin(a) * 0.4);
         buste.add(meche);
-        const brin = m(new THREE.CylinderGeometry(0.024, 0.017, long, 5), matCheveux, meche, 0, -long / 2, 0);
+        const brin = m(new THREE.CylinderGeometry(0.03, 0.02, long, 5), matCheveux, meche, 0, -long / 2, 0);
         m(new THREE.CylinderGeometry(0.018, 0.012, 0.1, 5), matPointes, meche, 0, -long - 0.03, 0);
         brin.rotation.z = (Math.random() - 0.5) * 0.25;
       }
@@ -547,7 +569,7 @@ body { font-family: var(--texte); color: var(--gris); }
 
     const etiq = etiquetteSprite(ETIQ[vue][c]); etiq.position.y = 2.35; g.add(etiq);
     scene.add(g);
-    return { g, matCorps: matMaillot, anneau, etiq, jambes, bras, buste, bassin, texte: ETIQ[vue][c], frappe: null, phase: c === 'A' ? 0 : 1.7 };
+    return { g, matCorps: heinzo ? new THREE.MeshStandardMaterial() : matMaillot, anneau, etiq, jambes, bras, buste, bassin, texte: ETIQ[vue][c], frappe: null, phase: c === 'A' ? 0 : 1.7 };
   }
 
   // Geste de raquette : "coup" (coup droit) ou "service".
@@ -1568,7 +1590,7 @@ body { font-family: var(--texte); color: var(--gris); }
     let h = '', mini = '';
     for (const c of ['A', 'B']) {
       h += '<tr><td class="srv"><span class="' + (srv === c ? 'on' : '') + '"></span></td>';
-      h += '<td class="nom"><span class="pastille" style="background:' + couleurs[c] + '"></span>' + nom(c) + '<small>' + (c === 'A' ? 'Joueur réel' : 'Jamaïque · niveau d\'un bot (+40 points importants)') + '</small></td>';
+      h += '<td class="nom"><span class="pastille" style="background:' + couleurs[c] + '"></span>' + nom(c) + '<small>' + (c === 'A' ? 'Argentine · joueur réel' : 'Jamaïque · niveau d\'un bot (+40 points importants)') + '</small></td>';
       for (const st of etat.sets) h += '<td class="set">' + st[c] + (st.tb && st[c] < st[autre(c)] ? '<sup>' + st.tb[c] + '</sup>' : '') + '</td>';
       if (!etat.fini) h += '<td class="set courant">' + etat.jeux[c] + '</td>';
       h += '<td class="pts">' + affichePoints(c) + '</td></tr>';
@@ -1578,7 +1600,7 @@ body { font-family: var(--texte); color: var(--gris); }
     majMarqueur();
   }
   let tournoi = 'au';
-  const ID = { A: { nom: 'MARTIN', complet: 'Louis Martin', tete: 1, pays: 'FRA' }, B: { nom: 'VOLÉE', complet: 'Justin Volée', tete: 3, pays: 'JAM' } };
+  const ID = { A: { nom: 'HEINZO', complet: 'David Heinzo', tete: 1, pays: 'ARG' }, B: { nom: 'VOLÉE', complet: 'Justin Volée', tete: 3, pays: 'JAM' } };
   function duree(sec) { const t = Math.floor(sec), h = Math.floor(t / 3600), m = Math.floor(t / 60) % 60, x = t % 60; return [h, m, x].map(v => String(v).padStart(2, '0')).join(':'); }
   function carteAutresTournois() {
     const srv = etat.fini ? null : serveurCourant();
@@ -1602,6 +1624,7 @@ body { font-family: var(--texte); color: var(--gris); }
       + '<div class="tw-pied"><span>8e de finale&nbsp;&nbsp;|&nbsp;&nbsp;Court central</span><span><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M8 4.5V8l2.4 1.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>' + duree(etat.duree || 0) + '</span></div>';
   }
   function drapeau(p) {
+    if (p === 'ARG') return '<span class="drap jam"><svg viewBox="0 0 12 6" preserveAspectRatio="none" aria-hidden="true"><rect width="12" height="6" fill="#74ACDF"/><rect y="2" width="12" height="2" fill="#FFFFFF"/><circle cx="6" cy="3" r="0.7" fill="#F6B40E"/></svg></span>';
     if (p === 'JAM') return '<span class="drap jam"><svg viewBox="0 0 12 6" preserveAspectRatio="none" aria-hidden="true"><rect width="12" height="6" fill="#009B3A"/><path d="M0 0L6 3L0 6Z M12 0L6 3L12 6Z" fill="#111"/><path d="M0 0L12 6M12 0L0 6" stroke="#FED100" stroke-width="1.2"/></svg></span>';
     return p === 'FRA' ? '<span class="drap fra"><i></i><i></i><i></i></span>' : '<span class="drap gha"><i></i><i></i><i></i><b>★</b></span>';
   }
