@@ -527,7 +527,7 @@ body { font-family: var(--texte); color: var(--gris); }
       m(new THREE.SphereGeometry(0.122, 18, 10, 0, Math.PI * 2, 0, Math.PI / 1.8), matCheveux, buste, 0, 0.8, -0.005).scale.set(0.98, 0.95, 1.05);
       for (let i = 0; i < 56; i++) {
         const a = -2.7 + (i / 55) * 5.4 + (Math.random() - 0.5) * 0.12;
-        const long = 0.62 + Math.random() * 0.4;
+        const long = 0.32 + Math.random() * 0.2;
         const meche = new THREE.Group();
         meche.position.set(Math.sin(a) * 0.105, 0.84 + Math.random() * 0.03, -Math.cos(a) * 0.105);
         meche.rotation.set(-Math.cos(a) * 0.36, 0, -Math.sin(a) * 0.4);
