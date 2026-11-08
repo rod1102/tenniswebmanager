@@ -1964,4 +1964,21 @@ if (db.prepare('SELECT patch_points_comme_en_vrai_20261103 AS p FROM jeu_etat WH
     db.prepare('UPDATE jeu_etat SET patch_points_comme_en_vrai_20261103 = 1 WHERE id = 1').run();
 }
 
+// Correctif unique demande par l'utilisateur (admin) le 2026-11-08 : Ella FRISK
+// intervertit sa Puissance (24) et sa Resistance (40). Garde-fous : une seule joueuse
+// avec ce prenom/nom ET exactement 24/40 - sinon rien n'est modifie (log explicite).
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_frisk_puissance_resistance_20261108 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_frisk_puissance_resistance_20261108 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const candidats = db.prepare("SELECT id, puissance, resistance FROM players WHERE prenom = 'Ella' AND UPPER(TRIM(nom)) = 'FRISK'").all();
+    if (candidats.length !== 1) {
+        console.log('[patch_frisk_puissance_resistance_20261108] non applique : ' + candidats.length + ' joueuse(s) Ella FRISK trouvee(s)');
+    } else if (candidats[0].puissance !== 24 || candidats[0].resistance !== 40) {
+        console.log('[patch_frisk_puissance_resistance_20261108] non applique : valeurs inattendues (Puissance ' + candidats[0].puissance + ', Resistance ' + candidats[0].resistance + ')');
+    } else {
+        db.prepare('UPDATE players SET puissance = 40, resistance = 24 WHERE id = ?').run(candidats[0].id);
+        console.log('[patch_frisk_puissance_resistance_20261108] joueuse ' + candidats[0].id + ' : Puissance 24 -> 40, Resistance 40 -> 24');
+    }
+    db.prepare('UPDATE jeu_etat SET patch_frisk_puissance_resistance_20261108 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
