@@ -1981,4 +1981,23 @@ if (db.prepare('SELECT patch_frisk_puissance_resistance_20261108 AS p FROM jeu_e
     db.prepare('UPDATE jeu_etat SET patch_frisk_puissance_resistance_20261108 = 1 WHERE id = 1').run();
 }
 
+// 2e tentative (le 1er correctif n'a trouve personne en prod : nom ecrit autrement).
+// Recherche tolerante (sans accents/majuscules/espaces) : prenom commencant par ELLA,
+// nom contenant FRISK, ET exactement 24 Puissance / 40 Resistance.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_frisk_puissance_resistance_v2_20261108 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_frisk_puissance_resistance_v2_20261108 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const normaliser = function (s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, '').toUpperCase(); };
+    const parNom = db.prepare('SELECT id, prenom, nom, puissance, resistance FROM players').all()
+        .filter(function (p) { return normaliser(p.prenom).indexOf('ELLA') === 0 && normaliser(p.nom).indexOf('FRISK') !== -1; });
+    parNom.forEach(function (p) { console.log('[patch_frisk_v2] candidate ' + p.id + ' : ' + JSON.stringify(p.prenom) + ' ' + JSON.stringify(p.nom) + ' P=' + p.puissance + ' R=' + p.resistance); });
+    const cibles = parNom.filter(function (p) { return p.puissance === 24 && p.resistance === 40; });
+    if (cibles.length !== 1) {
+        console.log('[patch_frisk_v2] non applique : ' + cibles.length + ' joueuse(s) correspondante(s) avec 24/40');
+    } else {
+        db.prepare('UPDATE players SET puissance = 40, resistance = 24 WHERE id = ?').run(cibles[0].id);
+        console.log('[patch_frisk_v2] joueuse ' + cibles[0].id + ' : Puissance 24 -> 40, Resistance 40 -> 24');
+    }
+    db.prepare('UPDATE jeu_etat SET patch_frisk_puissance_resistance_v2_20261108 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
