@@ -207,7 +207,7 @@
             let xpCumule = xpCumuleSaisonInitial;
             const detail = [];
 
-            semainesData.forEach(function (s) {
+            semainesData.forEach(function (s, indexSemaine) {
                 const c = choix[s.semaine] || { action: 'generique' };
 
                 // Regeneration d'energie : +5 (plafonne 100) a l'entree de la S5 puis
@@ -228,25 +228,6 @@
                 // Etat des competences en debut de semaine (bouton "?" de la ligne) - avant
                 // l'erosion de cette semaine, donc apres l'XP de toutes les semaines d'avant.
                 const compDebut = Object.assign({}, competences);
-
-                // Semaine "verrouillee" (2e semaine d'un tournoi 2 semaines deja compte sur
-                // la semaine de debut) : seule l'erosion s'applique, aucun nouvel effet.
-                if (c.action === 'verrou') {
-                    let erosionSemaine = 0;
-                    COMPETENCES.forEach(function (comp) {
-                        const perte = Math.floor(competences[comp] * 0.04);
-                        erosionSemaine += perte;
-                        competences[comp] = Math.max(0, competences[comp] - perte);
-                    });
-                    SURFACES.forEach(function (surf) { automatismes[surf] = Math.max(0, automatismes[surf] - 5); });
-                    detail.push({
-                        semaine: s.semaine, xp: 0, xpCumule, energie,
-                        xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
-                        erosionSemaine: erosionSemaine, xpNonRepartie: 0, repartitionAppliquee: {},
-                        compDebut: compDebut, compApresErosion: Object.assign({}, competences), compFin: Object.assign({}, competences)
-                    });
-                    return;
-                }
 
                 // Erosion hebdomadaire (vraie formule -4%/floor, s'applique a chaque semaine
                 // de tournoi qu'on quitte - toutes les semaines simulees ici en sont).
@@ -273,22 +254,46 @@
                     automatismes[surf] = automatismes[surf] > 15 ? 30 : Math.min(30, automatismes[surf] + 15);
                 } else if (c.action === 'coaching_mental') {
                     xpSemaine = 0;
-                } else if (c.action.indexOf('tournoi:') === 0) {
-                    const tId = c.action.replace('tournoi:', '');
-                    const tournoi = s.tournois.find(function (t) { return t.id === tId; });
-                    if (tournoi && c.tourIndex !== null && c.tourIndex !== undefined) {
-                        const tourIndex = Number(c.tourIndex);
-                        const matchsJoues = tourIndex + 1;
-                        surfaceProtegee = tournoi.surface;
-
+                } else if (c.action.indexOf('tournoi:') === 0 || c.action === 'verrou') {
+                    // Tournoi 2 semaines, comme le vrai moteur : en semaine 1, seuls les 3
+                    // premiers tours sont joues et l'XP versee est le bonus fixe de
+                    // qualification (+7) ; en semaine 2 (ligne "verrou"), les tours suivants
+                    // sont joues et le complement (XP_TOURNOI) est verse a l'elimination/
+                    // victoire. Chaque semaine a donc sa propre XP a repartir, avec l'erosion
+                    // entre les deux (avant : tout etait compte en semaine 1).
+                    let tournoi = null, tourIndex = null;
+                    if (c.action === 'verrou') {
+                        const precedente = semainesData[indexSemaine - 1];
+                        const cPrec = precedente ? choix[precedente.semaine] : null;
+                        if (cPrec && cPrec.action.indexOf('tournoi:') === 0) {
+                            tournoi = precedente.tournois.find(function (t) { return t.id === cPrec.action.replace('tournoi:', ''); }) || null;
+                            tourIndex = Number(cPrec.tourIndex);
+                        }
+                    } else {
+                        tournoi = s.tournois.find(function (t) { return t.id === c.action.replace('tournoi:', ''); }) || null;
+                        tourIndex = (c.tourIndex !== null && c.tourIndex !== undefined) ? Number(c.tourIndex) : null;
+                    }
+                    if (tournoi && tourIndex !== null && !isNaN(tourIndex)) {
                         const table = XP_TOURNOI[tournoi.nbTours];
-                        xpSemaine = table ? (table[tourIndex] || 0) : 0;
-                        if (tournoi.nbTours === 7 && tourIndex >= TOURS_SEMAINE_1) xpSemaine += XP_QUALIFICATION_SEMAINE2;
+                        const enDeuxSemaines = tournoi.duree === 2 && tourIndex >= TOURS_SEMAINE_1;
+                        let rDebut, rFin, finDeParcours;
+                        if (c.action === 'verrou') {
+                            rDebut = TOURS_SEMAINE_1; rFin = tourIndex; finDeParcours = true;
+                            xpSemaine = table ? (table[tourIndex] || 0) : 0;
+                        } else if (enDeuxSemaines) {
+                            rDebut = 0; rFin = TOURS_SEMAINE_1 - 1; finDeParcours = false;
+                            xpSemaine = XP_QUALIFICATION_SEMAINE2;
+                        } else {
+                            rDebut = 0; rFin = tourIndex; finDeParcours = true;
+                            xpSemaine = table ? (table[tourIndex] || 0) : 0;
+                        }
+                        const matchsJoues = rFin - rDebut + 1;
+                        surfaceProtegee = tournoi.surface;
 
                         automatismes[tournoi.surface] = Math.min(30, automatismes[tournoi.surface] + 3 * matchsJoues);
 
                         let perteMental = 0;
-                        for (let r = 0; r <= tourIndex; r++) perteMental += perteMentalCourant(tournoi.categorie, tournoi.labelsTours[r]);
+                        for (let r = rDebut; r <= rFin; r++) perteMental += perteMentalCourant(tournoi.categorie, tournoi.labelsTours[r]);
                         mentalCourant = Math.max(0, Math.round((mentalCourant - perteMental) * 10) / 10);
 
                         const formePerdue = matchsJoues * JEUX_MOYENS_PAR_MATCH * 0.10;
@@ -298,8 +303,9 @@
                         mentalMax = Math.round((mentalMax + mentalMaxGagne) * 10) / 10;
 
                         usure += matchsJoues;
-                        // Cout fixe de 1 PE par participation (mise d'energie non simulee ici).
-                        energie = Math.max(0, energie - 1);
+                        // Cout fixe de 1 PE par participation (mise d'energie non simulee
+                        // ici), deduit en fin de parcours comme dans le vrai moteur.
+                        if (finDeParcours) energie = Math.max(0, energie - 1);
                     }
                 }
 
@@ -385,7 +391,10 @@
             const tId = c.action.indexOf('tournoi:') === 0 ? c.action.replace('tournoi:', '') : null;
             const tournoi = tId ? semaineInfo.tournois.find(function (t) { return t.id === tId; }) : null;
             if (tournoi && tournoi.duree === 2 && Number(c.tourIndex) >= TOURS_SEMAINE_1) {
-                choix[semaineSuivante.semaine] = { action: 'verrou', tourIndex: null };
+                // Garde la repartition deja saisie sur la 2e semaine si elle etait deja
+                // verrouillee (simple changement de tour vise).
+                const dejaVerrou = choix[semaineSuivante.semaine] && choix[semaineSuivante.semaine].action === 'verrou';
+                choix[semaineSuivante.semaine] = { action: 'verrou', tourIndex: null, repartition: dejaVerrou ? (choix[semaineSuivante.semaine].repartition || {}) : {} };
             } else if (choix[semaineSuivante.semaine] && choix[semaineSuivante.semaine].action === 'verrou') {
                 // Etait verrouillee par un ancien choix qu'on vient de changer -
                 // liberee, repart sur la valeur par defaut.
@@ -401,12 +410,19 @@
                 const d = resultat.detail[i];
                 const classeMentalCut = positionsReductionMental.indexOf(s.position) !== -1 ? ' sim-row-mental-cut' : '';
 
+                const casesRepartition = COMPETENCES.map(function (comp) {
+                    const valeur = (c.repartition && c.repartition[comp]) || '';
+                    return `<td class="num"><input type="number" class="sim-xp-input" data-semaine="${s.semaine}" data-comp="${comp}" min="0" max="${d.xp}" step="1" value="${valeur}" title="${COMPETENCES_LABELS[comp]}" ${d.xp > 0 ? '' : 'disabled'}></td>`;
+                }).join('');
+                const celluleXp = `<td class="num">${d.xp}${d.xp > 0 && d.xpNonRepartie > 0 ? ` <span class="sim-xp-reste" title="${d.xpNonRepartie} XP pas encore répartie(s) : perdue(s) si tu les laisses ainsi">(reste ${d.xpNonRepartie})</span>` : ''}</td>`;
+
                 if (c.action === 'verrou') {
                     return `
                         <tr class="sim-row-verrou${classeMentalCut}">
                             <td>S${s.position} <button type="button" class="sim-detail-btn" data-index="${i}" title="Où en seront les compétences cette semaine">?</button></td>
-                            <td colspan="10">Suite du tournoi (2e semaine, verrouillée)</td>
-                            <td class="num">0</td>
+                            <td colspan="2">Suite du tournoi (2e semaine)</td>
+                            ${casesRepartition}
+                            ${celluleXp}
                             <td class="num">${d.xpCumule}</td>
                             <td class="num">${d.energie}</td>
                             <td class="num">${d.xpTotal}</td>
@@ -436,11 +452,8 @@
                                 ${estTournoi ? optionsTour : '<option>—</option>'}
                             </select>
                         </td>
-                        ${COMPETENCES.map(function (comp) {
-                            const valeur = (c.repartition && c.repartition[comp]) || '';
-                            return `<td class="num"><input type="number" class="sim-xp-input" data-semaine="${s.semaine}" data-comp="${comp}" min="0" max="${d.xp}" step="1" value="${valeur}" title="${COMPETENCES_LABELS[comp]}" ${d.xp > 0 ? '' : 'disabled'}></td>`;
-                        }).join('')}
-                        <td class="num">${d.xp}${d.xp > 0 && d.xpNonRepartie > 0 ? ` <span class="sim-xp-reste" title="${d.xpNonRepartie} XP pas encore répartie(s) : perdue(s) si tu les laisses ainsi">(reste ${d.xpNonRepartie})</span>` : ''}</td>
+                        ${casesRepartition}
+                        ${celluleXp}
                         <td class="num">${d.xpCumule}</td>
                         <td class="num">${d.energie}</td>
                         <td class="num">${d.xpTotal}</td>
