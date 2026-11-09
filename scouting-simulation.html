@@ -216,6 +216,10 @@
                 // tous les 4 tours - S5/S9/.../S49, meme regle que le moteur reel,
                 // inconditionnelle (s'applique meme une semaine verrouillee).
                 if (s.position >= 5 && (s.position - 5) % 4 === 0) energie = Math.min(100, energie + 5);
+                // Energie affichee dans le tableau = celle du DEBUT de semaine (apres la
+                // regeneration, avant le cout du tournoi), comme le journal des semaines
+                // passees et le tableur de l utilisateur - le resume garde la valeur finale.
+                const energieDebut = energie;
 
                 // A l'issue de Miami/Wimbledon/US Open, le mental max de TOUS les
                 // joueurs reels perd les 2/3 de son exces au-dela de 100 (PDF) -
@@ -348,7 +352,7 @@
 
                 xpCumule += xpSemaine;
                 detail.push({
-                    semaine: s.semaine, xp: xpSemaine, xpCumule, energie,
+                    semaine: s.semaine, xp: xpSemaine, xpCumule, energie: energieDebut,
                     xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
                     erosionSemaine: erosionSemaine, xpNonRepartie: xpRestante, repartitionAppliquee: repartitionAppliquee, miseAppliquee: miseAppliquee,
                     compDebut: compDebut, compApresErosion: compApresErosion, compFin: Object.assign({}, competences)
