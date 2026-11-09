@@ -2372,7 +2372,14 @@ app.get('/api/admin/scouting/simulation-data/:playerId', (req, res) => {
                 return {
                     semaine: h.semaine, position: positionSemaineAffichee(h.semaine),
                     actionLibelle: h.action_prevue === 'tournoi' ? 'Tournoi : ' + h.tournoi_nom : (LABELS_ACTION_COURTS[h.action_prevue] || h.action_prevue || '?'),
-                    xp: h.xp_credite, xpCumule: xpCumuleSaison, energie: h.energie_apres, xpTotal, erosionSemaine
+                    // Energie en DEBUT de semaine (energie de fin de semaine precedente +
+                    // regeneration S5/S9/..., meme regle que executerAvancementSemaine) -
+                    // pas energie_apres "corrige" (= fin de semaine, cout du tournoi deja
+                    // deduit), pour rester coherent avec les semaines simulees.
+                    xp: h.xp_credite, xpCumule: xpCumuleSaison, xpTotal, erosionSemaine,
+                    energie: (h.energie_avant !== null && h.energie_avant !== undefined)
+                        ? Math.min(100, h.energie_avant + (function () { const p = positionSemaineAffichee(h.semaine); return (p !== null && p >= 5 && (p - 5) % 4 === 0) ? 5 : 0; })())
+                        : h.energie_apres
                 };
             });
 
