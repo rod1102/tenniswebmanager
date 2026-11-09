@@ -114,8 +114,8 @@
                     <table class="sim-table">
                         <thead>
                             <tr>
-                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th class="num" title="Points d'énergie misés sur le tournoi (plafond 10 en Grand Chelem/Masters/1000, 5 en 500/250), perdus en fin de parcours">Énergie misée</th><th class="num" title="Service">Serv.</th><th class="num" title="Retour">Ret.</th><th class="num" title="Coup droit / Revers">CD/R</th><th class="num" title="Effet">Effet</th><th class="num" title="Volée">Volée</th><th class="num" title="Déplacement">Dépl.</th><th class="num" title="Puissance">Puiss.</th><th class="num" title="Résistance">Rés.</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
-                                <th class="num">Énergie</th><th class="num">XP total</th><th class="num">Érosion semaine</th>
+                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th class="num" title="Service">Serv.</th><th class="num" title="Retour">Ret.</th><th class="num" title="Coup droit / Revers">CD/R</th><th class="num" title="Effet">Effet</th><th class="num" title="Volée">Volée</th><th class="num" title="Déplacement">Dépl.</th><th class="num" title="Puissance">Puiss.</th><th class="num" title="Résistance">Rés.</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
+                                <th class="num" title="Points d'énergie misés sur le tournoi (plafond 10 en Grand Chelem/Masters/1000, 5 en 500/250), perdus en fin de parcours">Énergie misée</th><th class="num">Énergie</th><th class="num">XP total</th><th class="num">Érosion semaine</th>
                             </tr>
                         </thead>
                         <tbody id="sim-tbody"></tbody>
@@ -384,9 +384,10 @@
                 return `
                     <tr class="sim-row-passe">
                         <td>S${h.position === null ? '—' : h.position}</td>
-                        <td colspan="11">${h.actionLibelle}</td>
+                        <td colspan="10">${h.actionLibelle}</td>
                         <td class="num">${h.xp}</td>
                         <td class="num">${h.xpCumule}</td>
+                        <td class="num">—</td>
                         <td class="num">${h.energie}</td>
                         <td class="num">${h.xpTotal}</td>
                         <td class="num">−${h.erosionSemaine}</td>
@@ -435,10 +436,10 @@
                         <tr class="sim-row-verrou${classeMentalCut}">
                             <td>S${s.position} <button type="button" class="sim-detail-btn" data-index="${i}" title="Où en seront les compétences cette semaine">?</button></td>
                             <td colspan="2">Suite du tournoi (2e semaine)</td>
-                            <td class="num" title="Mise de la semaine 1, verrouillée pendant le tournoi">${d.miseAppliquee || '—'}</td>
                             ${casesRepartition}
                             ${celluleXp}
                             <td class="num">${d.xpCumule}</td>
+                            <td class="num" title="Mise de la semaine 1, verrouillée pendant le tournoi">${d.miseAppliquee || '—'}</td>
                             <td class="num">${d.energie}</td>
                             <td class="num">${d.xpTotal}</td>
                             <td class="num">−${d.erosionSemaine}</td>
@@ -467,12 +468,12 @@
                                 ${estTournoi ? optionsTour : '<option>—</option>'}
                             </select>
                         </td>
-                        <td class="num">${estTournoi && tournoiChoisi
-                            ? `<input type="number" class="sim-xp-input sim-mise-input" data-semaine="${s.semaine}" min="0" max="${PLAFOND_MISE_ENERGIE[String(tournoiChoisi.categorie)] || 0}" step="1" value="${d.miseAppliquee || ''}" title="Plafond ${PLAFOND_MISE_ENERGIE[String(tournoiChoisi.categorie)] || 0} pour ce tournoi">`
-                            : '—'}</td>
                         ${casesRepartition}
                         ${celluleXp}
                         <td class="num">${d.xpCumule}</td>
+                        <td class="num">${estTournoi && tournoiChoisi
+                            ? `<input type="number" class="sim-xp-input sim-mise-input" data-semaine="${s.semaine}" min="0" max="${PLAFOND_MISE_ENERGIE[String(tournoiChoisi.categorie)] || 0}" step="1" value="${d.miseAppliquee || ''}" title="Plafond ${PLAFOND_MISE_ENERGIE[String(tournoiChoisi.categorie)] || 0} pour ce tournoi">`
+                            : '—'}</td>
                         <td class="num">${d.energie}</td>
                         <td class="num">${d.xpTotal}</td>
                         <td class="num">−${d.erosionSemaine}</td>
