@@ -114,7 +114,7 @@
                     <table class="sim-table">
                         <thead>
                             <tr>
-                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th class="num" title="Service">Serv.</th><th class="num" title="Retour">Ret.</th><th class="num" title="Coup droit / Revers">CD/R</th><th class="num" title="Effet">Effet</th><th class="num" title="Volée">Volée</th><th class="num" title="Déplacement">Dépl.</th><th class="num" title="Puissance">Puiss.</th><th class="num" title="Résistance">Rés.</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
+                                <th>Semaine</th><th>Action</th><th>Tour visé</th><th class="num" title="Points d'énergie misés sur le tournoi (plafond 10 en Grand Chelem/Masters/1000, 5 en 500/250), perdus en fin de parcours">Énergie misée</th><th class="num" title="Service">Serv.</th><th class="num" title="Retour">Ret.</th><th class="num" title="Coup droit / Revers">CD/R</th><th class="num" title="Effet">Effet</th><th class="num" title="Volée">Volée</th><th class="num" title="Déplacement">Dépl.</th><th class="num" title="Puissance">Puiss.</th><th class="num" title="Résistance">Rés.</th><th class="num">XP semaine</th><th class="num">XP cumulé</th>
                                 <th class="num">Énergie</th><th class="num">XP total</th><th class="num">Érosion semaine</th>
                             </tr>
                         </thead>
@@ -142,6 +142,8 @@
 
         // ---------- Constantes de regle (dupliquees du serveur, cf. server.js) ----------
         const XP_QUALIFICATION_SEMAINE2 = 7;
+        // Plafond de mise d'energie par categorie (identique a PLAFOND_MISE_ENERGIE de server.js).
+        const PLAFOND_MISE_ENERGIE = { slam: 10, finals: 10, '1000': 10, '500': 5, '250': 5 };
         // Tournoi 2 semaines : les tours 1 a 3 se jouent en semaine 1 (cf.
         // CRENEAUX_TOUR_2_SEMAINES_S1 cote serveur) - la 2e semaine n'est occupee que si
         // le joueur atteint le 4e tour (tourIndex >= 3), et le bonus de qualification
@@ -240,6 +242,11 @@
                 const compApresErosion = Object.assign({}, competences);
 
                 let xpSemaine = 0;
+                // Energie misee sur le tournoi de cette semaine (saisie en semaine 1, la
+                // ligne de 2e semaine reprend celle de la semaine 1) - bornee au plafond de
+                // la categorie et a l'energie disponible au moment de la saisie, comme la
+                // vraie route /api/tournois/mise-energie. Perdue en fin de parcours.
+                let miseAppliquee = 0;
                 let surfaceProtegee = null;
 
                 if (c.action === 'repos') {
@@ -305,7 +312,14 @@
                         usure += matchsJoues;
                         // Cout fixe de 1 PE par participation (mise d'energie non simulee
                         // ici), deduit en fin de parcours comme dans le vrai moteur.
-                        if (finDeParcours) energie = Math.max(0, energie - 1);
+                        if (c.action === 'verrou') {
+                            const dPrec = detail[indexSemaine - 1];
+                            miseAppliquee = dPrec ? (dPrec.miseAppliquee || 0) : 0;
+                        } else {
+                            const plafond = PLAFOND_MISE_ENERGIE[String(tournoi.categorie)] || 0;
+                            miseAppliquee = Math.max(0, Math.min(Math.floor(Number(c.mise) || 0), plafond, Math.floor(energie)));
+                        }
+                        if (finDeParcours) energie = Math.max(0, energie - 1 - miseAppliquee);
                     }
                 }
 
@@ -336,7 +350,7 @@
                 detail.push({
                     semaine: s.semaine, xp: xpSemaine, xpCumule, energie,
                     xpTotal: Math.round(COMPETENCES.reduce(function (sum, comp) { return sum + competences[comp]; }, 0)),
-                    erosionSemaine: erosionSemaine, xpNonRepartie: xpRestante, repartitionAppliquee: repartitionAppliquee,
+                    erosionSemaine: erosionSemaine, xpNonRepartie: xpRestante, repartitionAppliquee: repartitionAppliquee, miseAppliquee: miseAppliquee,
                     compDebut: compDebut, compApresErosion: compApresErosion, compFin: Object.assign({}, competences)
                 });
             });
@@ -370,7 +384,7 @@
                 return `
                     <tr class="sim-row-passe">
                         <td>S${h.position === null ? '—' : h.position}</td>
-                        <td colspan="10">${h.actionLibelle}</td>
+                        <td colspan="11">${h.actionLibelle}</td>
                         <td class="num">${h.xp}</td>
                         <td class="num">${h.xpCumule}</td>
                         <td class="num">${h.energie}</td>
@@ -421,6 +435,7 @@
                         <tr class="sim-row-verrou${classeMentalCut}">
                             <td>S${s.position} <button type="button" class="sim-detail-btn" data-index="${i}" title="Où en seront les compétences cette semaine">?</button></td>
                             <td colspan="2">Suite du tournoi (2e semaine)</td>
+                            <td class="num" title="Mise de la semaine 1, verrouillée pendant le tournoi">${d.miseAppliquee || '—'}</td>
                             ${casesRepartition}
                             ${celluleXp}
                             <td class="num">${d.xpCumule}</td>
@@ -452,6 +467,9 @@
                                 ${estTournoi ? optionsTour : '<option>—</option>'}
                             </select>
                         </td>
+                        <td class="num">${estTournoi && tournoiChoisi
+                            ? `<input type="number" class="sim-xp-input sim-mise-input" data-semaine="${s.semaine}" min="0" max="${PLAFOND_MISE_ENERGIE[String(tournoiChoisi.categorie)] || 0}" step="1" value="${d.miseAppliquee || ''}" title="Plafond ${PLAFOND_MISE_ENERGIE[String(tournoiChoisi.categorie)] || 0} pour ce tournoi">`
+                            : '—'}</td>
                         ${casesRepartition}
                         ${celluleXp}
                         <td class="num">${d.xpCumule}</td>
@@ -495,7 +513,18 @@
             // (XP de la semaine - deja saisi dans les 7 autres colonnes), recalcul
             // complet a la validation du champ (change) - pas a chaque frappe, pour ne
             // pas perdre le focus du champ en cours de saisie.
-            document.querySelectorAll('.sim-xp-input').forEach(function (input) {
+            // Energie misee : bornee au plafond de la categorie, recalcul a la validation.
+            document.querySelectorAll('.sim-mise-input').forEach(function (input) {
+                const s = Number(input.dataset.semaine);
+                input.addEventListener('change', function () {
+                    let v = Math.floor(Number(input.value) || 0);
+                    v = Math.max(0, Math.min(v, Number(input.max) || 0));
+                    choix[s].mise = v;
+                    rendreTableau();
+                    rendreResume(simuler());
+                });
+            });
+            document.querySelectorAll('.sim-xp-input:not(.sim-mise-input)').forEach(function (input) {
                 const s = Number(input.dataset.semaine);
                 const comp = input.dataset.comp;
                 const borner = function () {
@@ -614,7 +643,7 @@
             semainesData.forEach(function (s) {
                 const sauve = planSauvegarde[s.semaine];
                 choix[s.semaine] = sauve
-                    ? { action: sauve.action, tourIndex: sauve.tourIndex, repartition: sauve.repartition || {}, ancienneCible: sauve.repartition ? null : (sauve.competenceCible || null) }
+                    ? { action: sauve.action, tourIndex: sauve.tourIndex, repartition: sauve.repartition || {}, mise: sauve.mise || 0, ancienneCible: sauve.repartition ? null : (sauve.competenceCible || null) }
                     : { action: 'generique', tourIndex: null, repartition: {} };
             });
             // Plan sauvegarde avec l'ancien format ("Competence visee" = une seule
