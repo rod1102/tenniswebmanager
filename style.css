@@ -1931,6 +1931,13 @@ h1 {
     color: #D4F000;
 }
 
+/* Lien a l'interieur du nom (ex. palmares d'adversaire.html) : garde la couleur
+   du titre (blanc, jaune au survol) au lieu du bleu par defaut du navigateur. */
+.tournoi-card-name a {
+    color: inherit;
+    text-decoration: none;
+}
+
 /* Icone trophee (dessin generique, pas de reproduction d'un vrai trophee) - seule
    la couleur change pour identifier "leur" Grand Chelem, cf. adversaire.html. */
 .trophee {

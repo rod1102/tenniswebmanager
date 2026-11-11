@@ -3757,8 +3757,10 @@ app.get('/api/joueur/semaine-info/:playerId', (req, res) => {
             // Semaine 0 si son tour final tombe pile sur la derniere semaine de la saison -
             // priorite au tournoi (le joueur reste engage) avant de retomber sur le libelle
             // de phase neutre.
+            // `tournoi` (calendrierId/semaine de debut/nom) permet a joueur.html de
+            // rendre le nom cliquable vers la fiche du tournoi (2026-11-11).
             const tournoi = tournoiCouvrantSemaine(playerId, semaine);
-            if (tournoi) return { libelle: 'Tournoi : ' + tournoi.nom };
+            if (tournoi) return { libelle: 'Tournoi : ' + tournoi.nom, tournoi: { calendrierId: tournoi.calendrier_id, semaine: tournoi.semaine, nom: tournoi.nom } };
 
             const phase = phaseDeSemaine(semaine);
             if (phase.type === 'presaison') return { libelle: 'Pré-saison' };
@@ -3772,7 +3774,22 @@ app.get('/api/joueur/semaine-info/:playerId', (req, res) => {
             // (bug signale par l'utilisateur, 2026-08-21).
             const journal = db.prepare('SELECT action_prevue, tournoi_nom FROM journal_semaine_joueur WHERE player_id = ? AND semaine = ?').get(playerId, semaine);
             if (journal && journal.action_prevue) {
-                return { libelle: journal.action_prevue === 'tournoi' ? 'Tournoi : ' + journal.tournoi_nom : (LABELS_ACTION_COURTS[journal.action_prevue] || journal.action_prevue) };
+                if (journal.action_prevue === 'tournoi') {
+                    // Tournoi deja termine pour ce joueur (elimine) : on retrouve
+                    // l'edition jouee (la plus recente de ce nom ayant debute au plus
+                    // tard cette semaine) pour garder le lien cliquable.
+                    const edition = db.prepare(`
+                        SELECT t.calendrier_id, t.semaine FROM tournoi_joueurs tj
+                        JOIN tournois t ON t.id = tj.tournoi_id
+                        WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.nom = ? AND t.semaine <= ?
+                        ORDER BY t.semaine DESC LIMIT 1
+                    `).get(playerId, journal.tournoi_nom, semaine);
+                    return {
+                        libelle: 'Tournoi : ' + journal.tournoi_nom,
+                        tournoi: edition ? { calendrierId: edition.calendrier_id, semaine: edition.semaine, nom: journal.tournoi_nom } : null
+                    };
+                }
+                return { libelle: LABELS_ACTION_COURTS[journal.action_prevue] || journal.action_prevue };
             }
 
             const planning = db.prepare('SELECT action FROM plannings WHERE player_id = ? AND semaine = ?').get(playerId, semaine);
@@ -9990,7 +10007,7 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
         };
 
         const palmares = db.prepare(`
-            SELECT tournois.nom, tournois.semaine, tournois.categorie, tournois.surface
+            SELECT tournois.nom, tournois.semaine, tournois.categorie, tournois.surface, tournois.calendrier_id
             FROM tournoi_joueurs tj
             JOIN tournois ON tournois.id = tj.tournoi_id
             WHERE tj.player_id = ? AND tj.est_reel = 1 AND tj.tour_elimine = 'Vainqueur'
@@ -10135,7 +10152,7 @@ app.get('/api/adversaire/rival/:rivalId', (req, res) => {
         };
 
         const palmares = db.prepare(`
-            SELECT tournois.nom, tournois.semaine, tournois.categorie, tournois.surface
+            SELECT tournois.nom, tournois.semaine, tournois.categorie, tournois.surface, tournois.calendrier_id
             FROM tournoi_joueurs tj
             JOIN tournois ON tournois.id = tj.tournoi_id
             WHERE tj.rival_id = ? AND tj.tour_elimine = 'Vainqueur'

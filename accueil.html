@@ -298,8 +298,14 @@
                 ? '<div class="xp-non-attribuee">!! Points d\'expérience non attribués</div>'
                 : '';
 
+            // Un tournoi devient un lien vers sa fiche (onglet Tableau).
+            function texteSemaine(info) {
+                if (!info.tournoi) return info.libelle;
+                const t = info.tournoi;
+                return `Tournoi : <a class="planning-tournoi-lien" href="tournoi-detail.html?calendrierId=${t.calendrierId}&semaine=${t.semaine}&playerId=${player.id}&onglet=tableau">${t.nom}</a>`;
+            }
             const semaineTxt = semaineInfo
-                ? `<p class="match-hint" style="margin:8px 0 0;">Semaine en cours : ${semaineInfo.semaineActuelle.libelle}<br>Semaine prochaine : ${semaineInfo.semaineProchaine.libelle}</p>`
+                ? `<p class="match-hint" style="margin:8px 0 0;">Semaine en cours : ${texteSemaine(semaineInfo.semaineActuelle)}<br>Semaine prochaine : ${texteSemaine(semaineInfo.semaineProchaine)}</p>`
                 : '';
 
             return `

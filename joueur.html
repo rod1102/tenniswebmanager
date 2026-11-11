@@ -285,8 +285,15 @@
                 container.innerHTML = '';
                 return;
             }
+            // Un tournoi devient un lien vers sa fiche (onglet Tableau), comme dans
+            // l'encart de planification juste en dessous.
+            function texteSemaine(info) {
+                if (!info.tournoi) return info.libelle;
+                const t = info.tournoi;
+                return `Tournoi : <a class="planning-tournoi-lien" href="tournoi-detail.html?calendrierId=${t.calendrierId}&semaine=${t.semaine}&playerId=${player.id}&onglet=tableau">${t.nom}</a>`;
+            }
             container.innerHTML = `
-                <span class="match-hint">Semaine en cours : ${data.semaineActuelle.libelle} · Semaine prochaine : ${data.semaineProchaine.libelle}</span>
+                <span class="match-hint">Semaine en cours : ${texteSemaine(data.semaineActuelle)} · Semaine prochaine : ${texteSemaine(data.semaineProchaine)}</span>
             `;
         }
 
