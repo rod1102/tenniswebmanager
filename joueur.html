@@ -290,7 +290,7 @@
             function texteSemaine(info) {
                 if (!info.tournoi) return info.libelle;
                 const t = info.tournoi;
-                return `Tournoi : <a class="planning-tournoi-lien" href="tournoi-detail.html?calendrierId=${t.calendrierId}&semaine=${t.semaine}&playerId=${player.id}&onglet=tableau">${t.nom}</a>`;
+                return `Tournoi : <a class="lien-semaine-info" href="tournoi-detail.html?calendrierId=${t.calendrierId}&semaine=${t.semaine}&playerId=${player.id}&onglet=tableau">${t.nom}</a>`;
             }
             container.innerHTML = `
                 <span class="match-hint">Semaine en cours : ${texteSemaine(data.semaineActuelle)} · Semaine prochaine : ${texteSemaine(data.semaineProchaine)}</span>

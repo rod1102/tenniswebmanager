@@ -2930,6 +2930,19 @@ a.lien-adversaire.record-moi,
     color: #FFFFFF;
 }
 
+/* Ligne "Semaine en cours / prochaine" (joueur.html, accueil.html) : le lien du
+   tournoi garde la couleur du texte autour (souligne seulement), blanc au survol. */
+.lien-semaine-info,
+.lien-semaine-info:visited {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+.lien-semaine-info:hover {
+    color: #FFFFFF;
+}
+
 /* Bouton "Stats" d'un match (a cote du Teletexte) : tableau comparatif des 2 joueurs */
 .match-mode-mini-groupe {
     display: flex;
