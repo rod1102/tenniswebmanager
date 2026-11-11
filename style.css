@@ -2932,14 +2932,16 @@ a.lien-adversaire.record-moi,
 
 /* Ligne "Semaine en cours / prochaine" (joueur.html, accueil.html) : le lien du
    tournoi garde la couleur du texte autour (souligne seulement), blanc au survol. */
-.lien-semaine-info,
-.lien-semaine-info:visited {
+/* Prefixe .match-hint obligatoire : sinon la regle ".match-hint a" (jaune),
+   plus specifique, l'emporte et le lien reste jaune. */
+.match-hint .lien-semaine-info,
+.match-hint .lien-semaine-info:visited {
     color: inherit;
     text-decoration: underline;
     text-underline-offset: 2px;
 }
 
-.lien-semaine-info:hover {
+.match-hint .lien-semaine-info:hover {
     color: #FFFFFF;
 }
 
