@@ -504,10 +504,15 @@
             `;
 
             document.querySelector('.enregistrer-btn').addEventListener('click', async function () {
-                const selects = document.querySelectorAll('.planning-select');
+                // Les repos sont envoyes EN PREMIER : un joueur blesse dont on deplace son
+                // repos (ex. S72 -> S73) serait sinon desinscrit a tort de ses tournois
+                // par la 1re requete, avant que le nouveau repos ne soit enregistre.
+                const selects = Array.from(document.querySelectorAll('.planning-select'))
+                    .sort(function (a, b) { return (b.value === 'repos') - (a.value === 'repos'); });
+                const desinscriptions = [];
                 for (const select of selects) {
                     if (select.value === '') continue;
-                    await fetch('/api/planification', {
+                    const r = await fetch('/api/planification', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -517,6 +522,13 @@
                             action: select.value
                         })
                     });
+                    const d = await r.json().catch(function () { return {}; });
+                    (d.desinscriptions || []).forEach(function (nom) { desinscriptions.push(nom); });
+                }
+                if (desinscriptions.length > 0) {
+                    alert('Planification enregistrée.\n\nJoueur blessé sans repos prévu avant : désinscription obligatoire de ' + desinscriptions.join(', ') + '.');
+                    window.location.reload();
+                    return;
                 }
                 alert('Planification enregistrée.');
             });

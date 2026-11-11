@@ -247,8 +247,8 @@
             if (fiche.estInscrit) {
                 const desactive = fiche.instance.statut === 'termine';
                 boutonHtml = `<button id="inscription-btn" class="cta cta-secondary" ${desactive ? 'disabled title="Tournoi deja termine"' : ''}>Se désinscrire</button>`;
-            } else if (fiche.joueurCondition === 'blesse') {
-                boutonHtml = `<div class="match-hint">Joueur blessé — inscription impossible tant qu'il ne s'est pas reposé.</div>`;
+            } else if (fiche.joueurCondition === 'blesse' && !fiche.reposPrevuAvant) {
+                boutonHtml = `<div class="match-hint">Joueur blessé — inscription impossible tant qu'aucun repos n'est planifié sur une semaine avant ce tournoi.</div>`;
             } else if (fiche.joueurPointsEnergie < 1) {
                 boutonHtml = `<div class="match-hint">Plus de points d'énergie — inscription impossible.</div>`;
             } else if (fiche.peutInscrire) {

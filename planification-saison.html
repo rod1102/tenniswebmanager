@@ -251,8 +251,13 @@
                 const feedback = document.getElementById('saison-feedback');
                 btn.disabled = true;
                 feedback.textContent = 'Enregistrement...';
-                const selects = Array.from(document.querySelectorAll('.planning-select'));
+                // Repos envoyes en premier : sinon deplacer le repos d'un joueur blesse
+                // le desinscrirait a tort de ses tournois avant que le nouveau repos ne
+                // soit enregistre (desinscription forcee, 2026-11-11).
+                const selects = Array.from(document.querySelectorAll('.planning-select'))
+                    .sort(function (a, b) { return (b.value === 'repos') - (a.value === 'repos'); });
                 let modifs = 0, erreurs = 0;
+                const desinscriptions = [];
                 for (const sel of selects) {
                     const initial = sel.getAttribute('data-initial') || '';
                     if (sel.value === initial) continue;
@@ -270,11 +275,20 @@
                                 body: JSON.stringify({ playerId: player.id, semaine, action: sel.value })
                             });
                         }
-                        if (r.ok) { modifs++; sel.setAttribute('data-initial', sel.value); }
+                        if (r.ok) {
+                            modifs++; sel.setAttribute('data-initial', sel.value);
+                            const d = await r.json().catch(function () { return {}; });
+                            (d.desinscriptions || []).forEach(function (nom) { desinscriptions.push(nom); });
+                        }
                         else { erreurs++; }
                     } catch (e) { erreurs++; }
                 }
                 btn.disabled = false;
+                if (desinscriptions.length > 0) {
+                    alert('Joueur blessé sans repos prévu avant : désinscription obligatoire de ' + desinscriptions.join(', ') + '.');
+                    window.location.reload();
+                    return;
+                }
                 if (modifs === 0 && erreurs === 0) feedback.textContent = 'Aucune modification à enregistrer.';
                 else feedback.textContent = modifs + ' semaine(s) enregistrée(s)' + (erreurs ? ', ' + erreurs + ' en échec (semaine verrouillée ?)' : '') + '.';
             });

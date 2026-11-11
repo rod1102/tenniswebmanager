@@ -3918,7 +3918,11 @@ app.post('/api/planification', (req, res) => {
         db.prepare('INSERT INTO planning_historique (player_id, semaine, action, horodatage) VALUES (?, ?, ?, ?)')
             .run(playerId, semaine, action, new Date().toISOString());
 
-        res.json({ success: true });
+        // Repos remplace par un autre ordre alors que le joueur est blesse : retrait
+        // force des tournois qui ne sont plus precedes d'aucun repos (2026-11-11).
+        const desinscriptions = desinscrireBlesseSansRepos(playerId);
+
+        res.json({ success: true, desinscriptions });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
@@ -3939,7 +3943,10 @@ app.post('/api/planification/effacer', (req, res) => {
         db.prepare('DELETE FROM plannings WHERE player_id = ? AND semaine = ?').run(playerId, semaine);
         db.prepare('INSERT INTO planning_historique (player_id, semaine, action, horodatage) VALUES (?, ?, ?, ?)')
             .run(playerId, semaine, 'efface', new Date().toISOString());
-        res.json({ success: true });
+        // Meme regle que /api/planification : un repos efface peut forcer la
+        // desinscription d'un joueur blesse (2026-11-11).
+        const desinscriptions = desinscrireBlesseSansRepos(playerId);
+        res.json({ success: true, desinscriptions });
     } catch (err) {
         console.error(err);
         res.status(500).json({ error: 'ERREUR : ' + err.message });
@@ -8299,12 +8306,65 @@ function rebalancerTournoi(tournoiId, entree, semaine) {
 // tournoi_liste_attente, puis rebalancerTournoi() decide qui occupe reellement un
 // slot. La mise d'energie ne se choisit plus ici (voir POST /api/tournois/mise-
 // energie), toujours 0 a l'inscription.
+// Un joueur blesse peut s'inscrire a un tournoi de la semaine `semaineTournoi` des
+// qu'un REPOS est planifie sur une semaine future strictement avant ce tournoi :
+// ce repos le remettra "en forme" a l'entree de sa semaine, avant le tournoi
+// (demande explicite de l'utilisateur, 2026-11-11). Les lignes de `plannings`
+// sont supprimees des leur consommation, donc seules les semaines futures y sont.
+function reposPlanifieAvant(playerId, semaineTournoi) {
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    return !!db.prepare("SELECT 1 FROM plannings WHERE player_id = ? AND action = 'repos' AND semaine > ? AND semaine < ?")
+        .get(playerId, etat.semaine_actuelle, semaineTournoi);
+}
+
+// Retire l'inscription (confirmee ou en liste d'attente) d'un joueur a un tournoi
+// encore ouvert, rebalance le tableau et retire le coeur "Programmer l'inscription"
+// correspondant. Partage par /api/tournois/desinscription et la desinscription
+// forcee d'un joueur blesse sans repos (desinscrireBlesseSansRepos).
+function retirerInscriptionTournoi(playerId, tournoi) {
+    db.prepare('DELETE FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ? AND player_id = ?').run(tournoi.calendrier_id, tournoi.semaine, playerId);
+    const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
+    rebalancerTournoi(tournoi.id, entree, tournoi.semaine);
+    // Sans ca, la semaine restait affichee verrouillee "Tournoi vise" sur la
+    // planification malgre la desinscription, ET l'inscription automatique retentee
+    // chaque semaine (voir executerAvancementSemaine) re-inscrivait le joueur malgre
+    // lui des le prochain changement de semaine (bug signale par l'utilisateur, 2026-09-22).
+    db.prepare('DELETE FROM tournoi_favoris WHERE player_id = ? AND semaine = ? AND calendrier_id = ?')
+        .run(playerId, tournoi.semaine, tournoi.calendrier_id);
+}
+
+// Joueur blesse dont le repos vient d'etre annule (remplace par un autre ordre ou
+// efface) : il est obligatoirement desinscrit de chacun de ses tournois des 5
+// prochaines semaines qui n'est plus precede d'aucun repos planifie (2026-11-11).
+// Seuls les tournois encore ouverts aux inscriptions sont concernes (un tableau
+// deja tire ne peut de toute facon pas etre precede d'un repos futur). Renvoie
+// les noms des tournois retires, pour prevenir le coach.
+function desinscrireBlesseSansRepos(playerId) {
+    const player = db.prepare('SELECT condition FROM players WHERE id = ?').get(playerId);
+    if (!player || player.condition !== 'blesse') return [];
+    const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+    const tournois = db.prepare(`
+        SELECT t.* FROM tournoi_liste_attente tla
+        JOIN tournois t ON t.calendrier_id = tla.calendrier_id AND t.semaine = tla.semaine
+        WHERE tla.player_id = ? AND tla.semaine > ? AND tla.semaine <= ? AND t.statut = 'inscriptions'
+        ORDER BY t.semaine
+    `).all(playerId, etat.semaine_actuelle, etat.semaine_actuelle + 5);
+    const retires = [];
+    tournois.forEach(function (t) {
+        if (reposPlanifieAvant(playerId, t.semaine)) return;
+        retirerInscriptionTournoi(playerId, t);
+        retires.push(t.nom);
+    });
+    return retires;
+}
+
 function inscrireJoueurAuTournoi(userId, player, entree, semaine) {
     // Un joueur blesse est contraint de declarer forfait pour les tournois a venir
     // (regle du PDF) : pas de nouvelle inscription tant que la condition n'est pas
-    // revenue a "en_forme" (recuperation via une semaine de repos).
-    if (player.condition === 'blesse') {
-        return { error: 'Ce joueur est blesse et ne peut pas s inscrire a un tournoi tant qu il ne s est pas repose.' };
+    // revenue a "en_forme"... SAUF si un repos est deja planifie avant ce tournoi
+    // (2026-11-11, voir reposPlanifieAvant).
+    if (player.condition === 'blesse' && !reposPlanifieAvant(player.id, semaine)) {
+        return { error: 'Ce joueur est blesse : il faut d abord planifier un repos sur une semaine avant ce tournoi pour pouvoir s y inscrire.' };
     }
 
     // Le tournoi est un objet GLOBAL partage par tous les coachs : le pool peut deja
@@ -8458,19 +8518,9 @@ app.post('/api/tournois/desinscription', (req, res) => {
 
         // Retire l'inscription (confirmee ou en liste d'attente), puis rebalancerTournoi
         // se charge de tout : si ce joueur occupait un slot dans le tableau, il revient
-        // lambda et un inscrit mieux classe encore en attente prend sa place le cas echeant.
-        db.prepare('DELETE FROM tournoi_liste_attente WHERE id = ?').run(inscription.id);
-        const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
-        rebalancerTournoi(tournoiId, entree, tournoi.semaine);
-
-        // Retire aussi le coeur ("Programmer l'inscription des l'ouverture") pose sur ce
-        // meme tournoi/cette meme semaine, s'il existe : sinon la semaine restait
-        // affichee verrouillee "Tournoi vise" sur la planification malgre la
-        // desinscription, ET l'inscription automatique retentee chaque semaine (voir
-        // executerAvancementSemaine) re-inscrivait le joueur malgre lui des le prochain
-        // changement de semaine (bug signale par l'utilisateur, 2026-09-22).
-        db.prepare('DELETE FROM tournoi_favoris WHERE player_id = ? AND semaine = ? AND calendrier_id = ?')
-            .run(playerId, tournoi.semaine, tournoi.calendrier_id);
+        // lambda et un inscrit mieux classe encore en attente prend sa place le cas
+        // echeant. Retire aussi le coeur "Programmer l'inscription" de ce tournoi.
+        retirerInscriptionTournoi(playerId, tournoi);
 
         res.json({ success: true });
     } catch (err) {
@@ -8917,7 +8967,7 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
             && semaineNum <= etat.semaine_actuelle + 5
             && (!instanceRow || instanceRow.statut === 'inscriptions')
             && !autreTournoiCetteSemaine
-            && player.condition !== 'blesse'
+            && (player.condition !== 'blesse' || reposPlanifieAvant(player.id, semaineNum))
             && player.points_energie >= 1;
 
         // Palmares = TOUS les vainqueurs des editions terminees de ce tournoi, que ce
@@ -8960,6 +9010,8 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
             estInscrit,
             peutInscrire,
             joueurCondition: player.condition,
+            // Blesse mais repos planifie avant ce tournoi -> inscription autorisee (2026-11-11).
+            reposPrevuAvant: player.condition === 'blesse' && reposPlanifieAvant(player.id, semaineNum),
             joueurPointsEnergie: player.points_energie,
             instance,
             palmares
