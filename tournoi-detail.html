@@ -902,7 +902,7 @@
             match.evenements.forEach(function (evt) {
                 const ligne = document.createElement('div');
                 ligne.className = 'teletexte-ligne teletexte-' + evt.type;
-                ligne.textContent = evt.texte;
+                ligne.textContent = evt.texte.replace(/ sauve par /g, ' sauvé par ');
                 journalDiv.appendChild(ligne);
             });
         }
@@ -954,7 +954,7 @@
             function jouerEvenement(evt) {
                 const ligne = document.createElement('div');
                 ligne.className = 'live-log-ligne live-log-' + evt.type;
-                ligne.textContent = evt.texte;
+                ligne.textContent = evt.texte.replace(/ sauve par /g, ' sauvé par ');
                 logDiv.appendChild(ligne);
                 logDiv.scrollTop = logDiv.scrollHeight;
                 if (evt.type === 'victoire_tournoi' && window.lancerConfettis) window.lancerConfettis(5000);
@@ -1250,7 +1250,7 @@
             function jouerEvenement(evt) {
                 const ligne = document.createElement('div');
                 ligne.className = 'live-log-ligne live-log-' + evt.type;
-                ligne.textContent = evt.texte;
+                ligne.textContent = evt.texte.replace(/ sauve par /g, ' sauvé par ');
                 logDiv.appendChild(ligne);
                 logDiv.scrollTop = logDiv.scrollHeight;
                 if (evt.type === 'victoire_tournoi' && window.lancerConfettis) window.lancerConfettis(5000);

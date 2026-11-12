@@ -551,7 +551,7 @@
                 match.evenements.forEach(function (evt) {
                     const ligne = document.createElement('div');
                     ligne.className = 'teletexte-ligne teletexte-' + evt.type;
-                    ligne.textContent = evt.texte;
+                    ligne.textContent = evt.texte.replace(/ sauve par /g, ' sauvé par ');
                     journalDiv.appendChild(ligne);
                 });
             } catch (err) {
