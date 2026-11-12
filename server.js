@@ -1653,6 +1653,25 @@ app.get('/api/admin/chercher-joueur', (req, res) => {
     }
 });
 
+// Historique (admin) des inscriptions/desinscriptions/coeurs d'un joueur reel, plus
+// recent en premier (table inscription_historique, 2026-11-12).
+app.get('/api/admin/inscription-historique/:playerId', (req, res) => {
+    try {
+        if (!estAdmin(req.userId)) {
+            return res.status(403).json({ error: 'Acces reserve a l administrateur.' });
+        }
+        const lignes = db.prepare('SELECT * FROM inscription_historique WHERE player_id = ? ORDER BY id DESC LIMIT 500').all(Number(req.params.playerId))
+            .map(function (l) {
+                const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === l.calendrier_id; });
+                return Object.assign({}, l, { tournoi: entree ? entree.nom : l.calendrier_id, semaineAffichee: l.semaine != null ? positionSemaineAffichee(l.semaine) : null });
+            });
+        res.json({ success: true, historique: lignes });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Diagnostic (admin) de la planification d'un joueur reel : ce qui a ete soumis
 // (planning_historique, trace permanente), ce qui est encore en attente (plannings),
 // ce que le moteur a reellement credite (journal_semaine_joueur) et pourquoi une
@@ -4771,6 +4790,8 @@ function executerAvancementSemaine() {
                 if (dejaInscrit) return;
                 const joueurAJour = db.prepare('SELECT * FROM players WHERE id = ?').get(player.id);
                 const resultat = inscrireJoueurAuTournoi(player.user_id, joueurAJour, entreeFavori, semaineCible);
+                tracerInscription(player.id, player.user_id, entreeFavori.id, semaineCible, 'inscription', 'favori_auto',
+                    resultat && resultat.error ? resultat.error : 'ok');
                 if (resultat && resultat.error) {
                     console.log('[favori] inscription automatique differee - player ' + player.id + ', ' + entreeFavori.id + ', semaine ' + semaineCible + ' : ' + resultat.error);
                 }
@@ -5584,8 +5605,15 @@ function ajusterNiveauxStyle(niveauA_normal, niveauA_mental, styleA, mentalCoura
     if (styleA === 'reperage') {
         return { normal: niveauA_normal - 15, mental: niveauA_mental - 15 };
     }
+    // Mental d'acier : sur les points importants, 80 % du mental courant remplace
+    // la forme (au lieu de 100 % sans style) - niveauA_mental vaut deja
+    // "normal - forme + mental courant" (malus de condition et Sang-froid inclus),
+    // on en retire donc 20 % du mental courant. Corrige le 2026-11-12 (demande
+    // explicite de l'utilisateur) : c'etait "normal + 0,8 x mental courant", qui
+    // gardait la forme ET ajoutait le mental (reste de l'ancienne regle d'avant le
+    // correctif du 2026-08-31).
     if (styleA === 'mental_acier' && mentalCourantA !== undefined) {
-        return { normal: niveauA_normal, mental: niveauA_normal + mentalCourantA * 0.8 };
+        return { normal: niveauA_normal, mental: niveauA_mental - mentalCourantA * 0.2 };
     }
     return { normal: niveauA_normal, mental: niveauA_mental };
 }
@@ -8317,6 +8345,34 @@ function reposPlanifieAvant(playerId, semaineTournoi) {
         .get(playerId, etat.semaine_actuelle, semaineTournoi);
 }
 
+// Trace permanente d'une tentative d'inscription/desinscription ou d'un coeur pose/
+// retire (table inscription_historique, database.js - 2026-11-12). Ne doit JAMAIS
+// faire echouer l'action tracee : toute erreur d'ecriture est juste loggee.
+function tracerInscription(playerId, userId, calendrierId, semaine, action, source, resultat) {
+    try {
+        db.prepare(`INSERT INTO inscription_historique (player_id, user_id, calendrier_id, semaine, action, source, resultat, horodatage)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+            .run(playerId != null ? Number(playerId) : null, userId != null ? userId : null, calendrierId || null,
+                semaine != null ? Number(semaine) : null, action, source, resultat || 'ok', new Date().toISOString());
+    } catch (e) {
+        console.error('[inscription_historique] echec de la trace :', e.message);
+    }
+}
+
+// Enveloppe res.json d'une route pour tracer son issue (succes ou message d'erreur
+// renvoye), quel que soit le "return" emprunte - evite d'oublier une sortie.
+// `infos()` est rappelee au moment de la reponse, pour lire les valeurs connues
+// a ce moment-la (ex. calendrier_id/semaine du tournoi pour une desinscription).
+function tracerReponse(res, infos) {
+    const jsonOriginal = res.json.bind(res);
+    res.json = function (body) {
+        const i = infos();
+        tracerInscription(i.playerId, i.userId, i.calendrierId, i.semaine, i.action, 'manuel',
+            body && body.error ? body.error : 'ok');
+        return jsonOriginal(body);
+    };
+}
+
 // Retire l'inscription (confirmee ou en liste d'attente) d'un joueur a un tournoi
 // encore ouvert, rebalance le tableau et retire le coeur "Programmer l'inscription"
 // correspondant. Partage par /api/tournois/desinscription et la desinscription
@@ -8353,6 +8409,7 @@ function desinscrireBlesseSansRepos(playerId) {
     tournois.forEach(function (t) {
         if (reposPlanifieAvant(playerId, t.semaine)) return;
         retirerInscriptionTournoi(playerId, t);
+        tracerInscription(playerId, null, t.calendrier_id, t.semaine, 'desinscription', 'blesse_sans_repos', 'ok');
         retires.push(t.nom);
     });
     return retires;
@@ -8401,6 +8458,10 @@ function inscrireJoueurAuTournoi(userId, player, entree, semaine) {
 app.post('/api/tournois/inscription', (req, res) => {
     try {
         const { playerId, calendrierId, semaine } = req.body;
+        // Trace de CHAQUE tentative, reussie ou refusee (2026-11-12).
+        tracerReponse(res, function () {
+            return { playerId, userId: req.userId, calendrierId, semaine, action: 'inscription' };
+        });
 
         const player = db.prepare('SELECT * FROM players WHERE id = ? AND user_id = ?').get(playerId, req.userId);
         if (!player) {
@@ -8471,6 +8532,7 @@ app.post('/api/tournois/favori', (req, res) => {
         const existant = db.prepare('SELECT id, calendrier_id FROM tournoi_favoris WHERE player_id = ? AND semaine = ?').get(playerId, semaine);
         if (existant && existant.calendrier_id === calendrierId) {
             db.prepare('DELETE FROM tournoi_favoris WHERE id = ?').run(existant.id);
+            tracerInscription(playerId, req.userId, calendrierId, semaine, 'favori_retire', 'manuel', 'ok');
             return res.json({ success: true, favori: false });
         }
 
@@ -8478,6 +8540,9 @@ app.post('/api/tournois/favori', (req, res) => {
             INSERT INTO tournoi_favoris (player_id, calendrier_id, semaine) VALUES (?, ?, ?)
             ON CONFLICT(player_id, semaine) DO UPDATE SET calendrier_id = excluded.calendrier_id
         `).run(playerId, calendrierId, semaine);
+        // Un coeur pose sur un AUTRE tournoi de la meme semaine remplace l'ancien.
+        if (existant) tracerInscription(playerId, req.userId, existant.calendrier_id, semaine, 'favori_retire', 'manuel', 'remplace par ' + calendrierId);
+        tracerInscription(playerId, req.userId, calendrierId, semaine, 'favori_ajoute', 'manuel', 'ok');
 
         res.json({ success: true, favori: true });
     } catch (err) {
@@ -8489,6 +8554,13 @@ app.post('/api/tournois/favori', (req, res) => {
 app.post('/api/tournois/desinscription', (req, res) => {
     try {
         const { playerId, tournoiId } = req.body;
+        // Trace de CHAQUE tentative (2026-11-12) ; calendrier/semaine lus au moment de
+        // la reponse, une fois le tournoi retrouve.
+        let tournoiTrace = null;
+        tracerReponse(res, function () {
+            return { playerId, userId: req.userId, calendrierId: tournoiTrace ? tournoiTrace.calendrier_id : 'tournoi#' + tournoiId,
+                semaine: tournoiTrace ? tournoiTrace.semaine : null, action: 'desinscription' };
+        });
 
         // Le tournoi lui-meme est partage (plus de user_id/player_id dessus) :
         // l'ownership passe par le joueur (players.user_id) + sa ligne d'inscription
@@ -8504,6 +8576,7 @@ app.post('/api/tournois/desinscription', (req, res) => {
             return res.status(400).json({ error: 'Il faut d abord repartir les points de competences de la moulinette.' });
         }
         const tournoi = db.prepare('SELECT * FROM tournois WHERE id = ?').get(tournoiId);
+        tournoiTrace = tournoi || null;
         if (!tournoi) {
             return res.status(404).json({ error: 'Inscription introuvable.' });
         }

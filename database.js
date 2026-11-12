@@ -113,6 +113,29 @@ db.exec(`
     )
 `);
 
+// Historique COMPLET (append-only, jamais modifie ni supprime) de chaque tentative
+// d'inscription / desinscription a un tournoi et de chaque coeur "Programmer
+// l'inscription" pose ou retire (demande explicite de l'utilisateur, 2026-11-12,
+// apres un "je pensais l'avoir inscrit a Rome" impossible a trancher faute de
+// trace). action : inscription / desinscription / favori_ajoute / favori_retire.
+// source : manuel (clic du coach) / favori_auto (inscription automatique a
+// l'avancee de semaine) / blesse_sans_repos (desinscription forcee).
+// resultat : 'ok' ou le message d'erreur renvoye (tentative refusee).
+db.exec(`
+    CREATE TABLE IF NOT EXISTS inscription_historique (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        player_id INTEGER,
+        user_id INTEGER,
+        calendrier_id TEXT,
+        semaine INTEGER,
+        action TEXT NOT NULL,
+        source TEXT NOT NULL,
+        resultat TEXT NOT NULL,
+        horodatage TEXT NOT NULL
+    )
+`);
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_inscription_historique_player ON inscription_historique(player_id, semaine)'); } catch (e) {}
+
 // Journal hebdomadaire : une ligne par joueur et par semaine "vecue", ecrite au
 // moment ou executerAvancementSemaine traite cette semaine - contrairement a
 // `plannings` (supprimee une fois consommee) et `points_experience` (remis a zero
