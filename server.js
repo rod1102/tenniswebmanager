@@ -5405,8 +5405,10 @@ function resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveau
 //      "points importants" (annonce + issue dans le teletexte). Convertie = jeu au
 //      relanceur ; sauvee = on revient au tirage 1, et ainsi de suite.
 // Si le jeu conclurait le set/match pour le SERVEUR (pointImportant, menacant ===
-// serveur), le tirage 1 devient lui-meme une balle de set/match, sur les niveaux
-// "points importants". Si c'est pour le RELANCEUR, ses balles de break portent le
+// serveur), le tirage 1 reste neutre et decide qui obtient la balle : balle de
+// set/match pour le serveur, ou balle de break ; une balle sauvee ramene a ce
+// tirage neutre, annonce "Egalite" (2026-11-13, voir plus bas). Si c'est pour le
+// RELANCEUR, ses balles de break portent le
 // libelle specifique ("Balle de break / Balle de set", etc.). Le tie-break, lui,
 // reste joue point par point.
 function resoudreJeu(serveur, niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, pointImportant, libelleAnnonce, motResolution, menacant, stats, evenements) {
@@ -5414,12 +5416,35 @@ function resoudreJeu(serveur, niveauA_normal, niveauB_normal, niveauA_mental, ni
     const serveurMenace = pointImportant && menacant === serveur;
     const libelleBreak = pointImportant && menacant === relanceur ? (libelleAnnonce || 'Balle de break') : 'Balle de break';
 
+    // Jeu ou le SERVEUR peut conclure le set/match (2026-11-13, demande explicite de
+    // l'utilisateur) : avant, le tirage au service etait directement la balle de
+    // set/match, et le MEME tirage gagne par le relanceur pour la sauver lui donnait
+    // aussi une balle de break automatique (et inversement : balle de break sauvee =
+    // balle de set/match automatique). Desormais un tirage neutre (niveaux normaux,
+    // sans annonce) precede chaque balle : gagne par le serveur = balle de set/match,
+    // gagne par le relanceur = balle de break. Toute balle sauvee ramene a ce tirage
+    // neutre, annonce "Egalite" dans le teletexte (evenement 'egalite', ignore par
+    // calculerStatsMatch).
+    if (serveurMenace) {
+        let premierTirage = true;
+        while (true) {
+            if (!premierTirage) evenements.push({ type: 'egalite', texte: 'Égalité' });
+            premierTirage = false;
+            if (tirage(niveauA_normal, niveauB_normal) === serveur) {
+                const vainqueur = resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, serveur, libelleAnnonce, motResolution, stats, evenements);
+                if (vainqueur === serveur) return { vainqueur: serveur, libelleUtilise: libelleAnnonce };
+            } else {
+                const vainqueur = resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, relanceur, libelleBreak, 'break', stats, evenements);
+                if (vainqueur === relanceur) return { vainqueur: relanceur, libelleUtilise: libelleBreak };
+                if (serveur === 'A') stats.ballesBreakSauveesA++; else stats.ballesBreakSauveesB++;
+            }
+        }
+    }
+
+    // Jeu ordinaire, ou jeu que seul le relanceur peut conclure (sur un break) : inchange.
     while (true) {
-        const vainqueurService = serveurMenace
-            ? resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, serveur, libelleAnnonce, motResolution, stats, evenements)
-            : tirage(niveauA_normal, niveauB_normal);
-        if (vainqueurService === serveur) {
-            return { vainqueur: serveur, libelleUtilise: serveurMenace ? libelleAnnonce : null };
+        if (tirage(niveauA_normal, niveauB_normal) === serveur) {
+            return { vainqueur: serveur, libelleUtilise: null };
         }
 
         const vainqueurBalle = resoudrePointJeu(niveauA_normal, niveauB_normal, niveauA_mental, niveauB_mental, relanceur, libelleBreak, 'break', stats, evenements);
