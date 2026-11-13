@@ -593,7 +593,8 @@
             // Le badge Kine ne reflete jamais que la propre condition du joueur/rival
             // de cette fiche (matchs.kine_intervenu est calcule cote serveur par
             // rapport a CE player_id precis) - jamais celle de l'adversaire du match.
-            const kineBadge = m.kineIntervenu ? '<span class="status-badge kine-badge">Kiné</span>' : '';
+            // Une icone Kine par alerte recue dans ce match (2026-11-13).
+            const kineBadge = m.kineIntervenu ? '<span class="status-badge kine-badge">Kiné</span>'.repeat(Math.max(1, m.kineAlertes || 1)) : '';
 
             if (typeAdversaire === 'reel' && m.matchId && m.tournoi) {
                 carte.dataset.matchId = m.matchId;

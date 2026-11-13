@@ -2076,14 +2076,30 @@ function historiqueCorrigeDuJoueur(player) {
 // forme" - un repos d'une saison precedente n'a plus de sens comme point de depart).
 // Toujours EXACT, pour n'importe quel joueur (jamais une estimation, cf. commentaire
 // ci-dessus sur la nature publique de cette donnee).
+// Compte les ALERTES (pas les matchs) : un meme match peut en contenir plusieurs
+// (ex. Fatigue puis Diminue), chacune ecrite comme un evenement 'kine' (ou
+// 'abandon' si elle mene a la blessure) au nom de "Toi" = le joueur de la ligne
+// matchs (la ligne miroir d'un reel-vs-reel a deja Toi/Adversaire inverses).
+// Avant le 2026-11-13, comptait 1 par match (kine_intervenu), d'ou "1 alerte"
+// affiche pour un match qui en avait eu 2 (signale par l'utilisateur).
+function nbAlertesKineDansMatch(evenementsJson) {
+    let evenements = [];
+    try { evenements = JSON.parse(evenementsJson || '[]'); } catch (e) { return 1; }
+    const n = evenements.filter(function (e) {
+        return e && (e.type === 'kine' || e.type === 'abandon') && /\bToi\b/.test(e.texte || '');
+    }).length;
+    return Math.max(1, n); // kine_intervenu = 1 garantit au moins une alerte
+}
+
 function alertesKine(playerId, debutSaison) {
     const dernierRepos = db.prepare("SELECT MAX(semaine) AS s FROM journal_semaine_joueur WHERE player_id = ? AND action_prevue = 'repos'").get(playerId).s;
     const depuisRepos = Math.max(dernierRepos || 0, debutSaison);
-    const semaines = db.prepare('SELECT semaine FROM matchs WHERE player_id = ? AND kine_intervenu = 1').all(playerId).map(function (r) { return r.semaine; });
-    return {
-        saison: semaines.filter(function (s) { return s > debutSaison; }).length,
-        depuisRepos: semaines.filter(function (s) { return s > depuisRepos; }).length
+    const lignes = db.prepare('SELECT semaine, evenements FROM matchs WHERE player_id = ? AND kine_intervenu = 1').all(playerId)
+        .map(function (r) { return { semaine: r.semaine, n: nbAlertesKineDansMatch(r.evenements) }; });
+    const somme = function (seuil) {
+        return lignes.reduce(function (total, l) { return total + (l.semaine > seuil ? l.n : 0); }, 0);
     };
+    return { saison: somme(debutSaison), depuisRepos: somme(depuisRepos) };
 }
 
 app.get('/api/admin/scouting/classement/:circuit', (req, res) => {
@@ -7782,9 +7798,14 @@ app.get('/api/tournois/historique/:playerId', (req, res) => {
             ORDER BY tournois.semaine DESC
         `).all(playerId);
 
+        const deroulesKineTournoi = db.prepare('SELECT matchs.evenements FROM matchs JOIN tournois ON tournois.id = matchs.tournoi_id WHERE tournois.calendrier_id = ? AND tournois.semaine = ? AND matchs.player_id = ? AND matchs.kine_intervenu = 1');
         historique.forEach(function (h) {
             h.positionSemaine = positionSemaineAffichee(h.semaine);
             h.kineIntervenu = !!h.kine_intervenu;
+            // Total des alertes sur tout le tournoi (une icone Kine par alerte, 2026-11-13).
+            h.kineAlertes = h.kine_intervenu
+                ? deroulesKineTournoi.all(h.calendrier_id, h.semaine, playerId).reduce(function (t, r) { return t + nbAlertesKineDansMatch(r.evenements); }, 0)
+                : 0;
             delete h.kine_intervenu;
             const entreeCal = CALENDRIER_TOURNOIS.find(function (e) { return e.id === h.calendrier_id; });
             h.indoor = entreeCal ? !!entreeCal.indoor : false;
@@ -10222,6 +10243,9 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
                     matchId: m.id, surface: m.surface, semaine: m.semaine, positionSemaine: positionSemaineAffichee(m.semaine),
                     victoire: m.vainqueur === 'joueur', score: m.score, tournoi: !!m.tournoi_id, numeroTour: m.numero_tour,
                     kineIntervenu: !!m.kine_intervenu,
+                    // Nombre d'alertes dans CE match (une icone Kine par alerte, 2026-11-13) -
+                    // deroule relu seulement pour les rares matchs concernes.
+                    kineAlertes: m.kine_intervenu ? nbAlertesKineDansMatch((db.prepare('SELECT evenements FROM matchs WHERE id = ?').get(m.id) || {}).evenements) : 0,
                     tournoiId: m.tournoi_id, tournoiNom: m.tournoi_nom, tournoiCalendrierId: m.tournoi_calendrier_id, categorie: m.tournoi_categorie,
                     adversaireNom: m.adversaire_nom || null, adversaireDrapeau: drapeau(m.adversaire_nationalite),
                     adversaireClassement: m.adversaire_classement || null,
@@ -10832,7 +10856,9 @@ function calculerBadgesCoach(userId) {
             WHERE tj.player_id IN (${placeholders}) AND tj.est_reel = 1 AND tj.tour_elimine = 'Vainqueur' AND t.categorie = 'finals'
         `).get(...idsJoueurs).n;
 
-        appelKine = db.prepare(`SELECT COUNT(*) AS n FROM matchs WHERE player_id IN (${placeholders}) AND kine_intervenu = 1`).get(...idsJoueurs).n;
+        // Nombre d'INTERVENTIONS (alertes), pas de matchs - cf. nbAlertesKineDansMatch.
+        appelKine = db.prepare(`SELECT evenements FROM matchs WHERE player_id IN (${placeholders}) AND kine_intervenu = 1`).all(...idsJoueurs)
+            .reduce(function (total, r) { return total + nbAlertesKineDansMatch(r.evenements); }, 0);
     }
 
     // Nombre de saisons ou LES DEUX personnages ont chacun remporte au moins un

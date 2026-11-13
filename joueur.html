@@ -1192,7 +1192,8 @@
 
             const listeHtml = data.historique.map(function (h) {
                 const resultat = h.tour_elimine === 'Vainqueur' ? 'Vainqueur' : (h.tour_elimine ? 'Éliminé : ' + h.tour_elimine : '—');
-                const kineBadge = h.kineIntervenu ? '<span class="status-badge kine-badge">Kiné</span>' : '';
+                // Une icone Kine par alerte recue sur ce tournoi (2026-11-13).
+                const kineBadge = h.kineIntervenu ? '<span class="status-badge kine-badge">Kiné</span>'.repeat(Math.max(1, h.kineAlertes || 1)) : '';
                 return `
                     <div class="tournoi-card tournoi-card-${h.surface + (h.surface === 'dur' && h.indoor ? '-indoor' : '')}">
                         <a class="tournoi-card-name" href="tournoi-detail.html?calendrierId=${h.calendrier_id}&semaine=${h.semaine}&playerId=${player.id}">${h.nom} ${kineBadge}</a>
