@@ -5702,6 +5702,9 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
     // fixer abandonCote ici permet a l'appelant de tester les DEUX cotes de maniere
     // independante avant de decider qui abandonne (cf. cas des deux joueurs blesses
     // sur le meme jeu, PDF : tirage equiprobable).
+    // Nombre d'alertes kine recues par chaque cote dans CE match (2026-11-13) :
+    // appliquerEtatPostMatch retire 1 point de competence PAR alerte.
+    let nbAlertesA = 0, nbAlertesB = 0;
     function tenterAlerteKine(cote) {
         const etatPhysique = cote === 'A' ? etatPhysiqueA : etatPhysiqueB;
         if (!etatPhysique) return null;
@@ -5709,8 +5712,8 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
         if (conditionActuelle === 'blesse') return null; // deja blesse, plus rien a tirer
         const nouvelleCondition = tirageDegradationJeu(conditionActuelle, etatPhysique.forme, etatPhysique.pointsEnergie);
         if (nouvelleCondition === conditionActuelle) return null;
-        if (cote === 'A') { conditionActuelleA = nouvelleCondition; malusActuelA = malusCondition(nouvelleCondition); }
-        else { conditionActuelleB = nouvelleCondition; malusActuelB = malusCondition(nouvelleCondition); }
+        if (cote === 'A') { conditionActuelleA = nouvelleCondition; malusActuelA = malusCondition(nouvelleCondition); nbAlertesA++; }
+        else { conditionActuelleB = nouvelleCondition; malusActuelB = malusCondition(nouvelleCondition); nbAlertesB++; }
 
         if (nouvelleCondition === 'blesse') {
             const estJoueuse = etatPhysique.type === 'joueuse';
@@ -5885,6 +5888,7 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
             ballesBreakSauveesB: stats.ballesBreakSauveesB,
             conditionFinaleA: conditionActuelleA,
             conditionFinaleB: conditionActuelleB,
+            nbAlertesA, nbAlertesB,
             evenements
         };
     }
@@ -5905,6 +5909,7 @@ function simulerMatch(niveauA_normal, niveauA_mental, niveauB_normal, niveauB_me
         ballesBreakSauveesB: stats.ballesBreakSauveesB,
         conditionFinaleA: conditionActuelleA,
         conditionFinaleB: conditionActuelleB,
+        nbAlertesA, nbAlertesB,
         evenements
     };
 }
@@ -7017,7 +7022,7 @@ function perteMentalCourant(categorie, label) {
 // reste +1 dans tous les cas. Arrondi a 2 decimales au lieu d'1 dans ce cas (une
 // valeur normalement a 1 decimale, une fois divisee par 2, peut tomber sur 2 -
 // ex. 12,094 -> 12,10 plutot que 12,1 ou 12,0).
-function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants, categorie, label, conditionFinale, moitie, styleAdversaire) {
+function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImportants, categorie, label, conditionFinale, moitie, styleAdversaire, nbAlertes) {
     const facteur = moitie ? 0.5 : 1;
     const decimales = moitie ? 100 : 10;
     // Style adverse "Marathonien" : l'adversaire fait courir ce joueur pour le
@@ -7042,8 +7047,14 @@ function appliquerEtatPostMatch(player, surface, style, totalJeux, pointsImporta
     );
     const kineIntervenu = conditionSestDegradee(player.condition, nouvelleCondition);
     // PDF : une degradation reelle de condition (pas juste "deja diminue en arrivant")
-    // coute aussi 1 point tire au sort parmi les competences techniques deja non-nulles.
-    if (kineIntervenu) appliquerPerteCaracteristique(player.id);
+    // coute aussi 1 point tire au sort parmi les competences techniques deja non-nulles
+    // - 1 point PAR ALERTE (2026-11-13, demande explicite de l'utilisateur ; avant :
+    // 1 seul point par match, meme avec 2 alertes Fatigue puis Diminue). nbAlertes
+    // vient de simulerMatch ; repli a 1 si l'appelant ne le fournit pas.
+    if (kineIntervenu) {
+        const nbPertes = Math.max(1, nbAlertes || 0);
+        for (let i = 0; i < nbPertes; i++) appliquerPerteCaracteristique(player.id);
+    }
     return { kineIntervenu };
 }
 
@@ -7187,7 +7198,7 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
         undefined, label === 'Finale' ? tournoi.nom : null
     );
 
-    const { kineIntervenu } = appliquerEtatPostMatch(player, tournoi.surface, styleA, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA);
+    const { kineIntervenu } = appliquerEtatPostMatch(player, tournoi.surface, styleA, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA, false, undefined, resultat.nbAlertesA);
 
     const vainqueurEstReel = resultat.vainqueur === 'A';
 
@@ -7297,8 +7308,8 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
         label === 'Finale' ? tournoi.nom : null
     );
 
-    const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA, false, style2);
-    const etat2 = appliquerEtatPostMatch(player2, tournoi.surface, style2, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleB, false, style1);
+    const etat1 = appliquerEtatPostMatch(player1, tournoi.surface, style1, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleA, false, style2, resultat.nbAlertesA);
+    const etat2 = appliquerEtatPostMatch(player2, tournoi.surface, style2, resultat.totalJeux, resultat.pointsImportants, tournoi.categorie, label, resultat.conditionFinaleB, false, style1, resultat.nbAlertesB);
 
     const j1Gagne = resultat.vainqueur === 'A';
 
@@ -13328,10 +13339,10 @@ function simulerRubberCoupe(tie, numero, domicileEntree, exterieurEntree, libell
 
     const labelPourEtatPostMatch = LABEL_MANCHE_COUPE[tie.manche] || 'premier tour';
     const kineDomicile = vDomicile.joueur
-        ? appliquerEtatPostMatch(vDomicile.joueur, surface, styleDomicile, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleA, false, styleExterieur).kineIntervenu
+        ? appliquerEtatPostMatch(vDomicile.joueur, surface, styleDomicile, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleA, false, styleExterieur, resultat.nbAlertesA).kineIntervenu
         : false;
     const kineExterieur = vExterieur.joueur
-        ? appliquerEtatPostMatch(vExterieur.joueur, surface, styleExterieur, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleB, false, styleDomicile).kineIntervenu
+        ? appliquerEtatPostMatch(vExterieur.joueur, surface, styleExterieur, resultat.totalJeux, resultat.pointsImportants, 250, labelPourEtatPostMatch, resultat.conditionFinaleB, false, styleDomicile, resultat.nbAlertesB).kineIntervenu
         : false;
 
     const nationVainqueur = resultat.vainqueur === 'A' ? tie.nation_domicile : tie.nation_exterieur;
