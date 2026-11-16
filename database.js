@@ -818,6 +818,11 @@ const migrations = [
     // efface automatiquement des que POST /api/joueurs/renommer aboutit.
     "ALTER TABLE users ADD COLUMN renommage_requis_type TEXT",
     "ALTER TABLE users ADD COLUMN renommage_requis_motif TEXT",
+    // Suppression de compte par le coach lui-meme (2026-11-16, POST /api/compte/supprimer) :
+    // le compte est ANONYMISE (e-mail, mot de passe, pseudo, discord, IP effaces),
+    // pas supprime, pour que l'historique de ses personnages reste coherent.
+    "ALTER TABLE users ADD COLUMN supprime INTEGER DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN date_suppression TEXT",
     // Marqueur du recalcul retroactif des pronostics lie au nouveau bareme cascade
     // (2026-09-07 : 8es/quarts/demies/finale avec bonus d'affiche + tour parfait,
     // total 250 pts/M1000, double en GC). Voir recalculerTousLesPronostics dans

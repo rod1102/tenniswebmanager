@@ -63,6 +63,10 @@
                     <button id="swipe-next" type="button">›</button>
                 </div>
             </div>
+
+            <div style="text-align:center; margin-top:48px;">
+                <a href="#" id="supprimer-compte-lien" class="match-hint" style="color:#8B98A5; text-decoration:underline; padding:0;">Supprimer mon compte</a>
+            </div>
         </div>
     </div>
 
@@ -539,6 +543,91 @@
             fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
             localStorage.removeItem('currentUserId');
             window.location.href = 'index.html';
+        });
+
+        // Suppression du compte (2026-11-16) : 1) confirmation, 2) mot de passe +
+        // avertissement "irreversible", puis POST /api/compte/supprimer. Meme fenetre
+        // que la popup de conflit de pseudo (dispo-blocage-overlay).
+        document.getElementById('supprimer-compte-lien').addEventListener('click', function (e) {
+            e.preventDefault();
+            if (document.getElementById('supprimer-compte-overlay')) return;
+            const overlay = document.createElement('div');
+            overlay.id = 'supprimer-compte-overlay';
+            overlay.className = 'dispo-blocage-overlay';
+            document.body.appendChild(overlay);
+
+            function fermer() { overlay.remove(); }
+
+            function etapeConfirmation() {
+                overlay.innerHTML = `
+                    <div class="dispo-blocage-box">
+                        <div class="stats-header" style="margin-top:0;">Supprimer mon compte</div>
+                        <p class="planning-alerte-texte" style="margin-bottom:20px;">Es-tu sûr de vouloir supprimer ton compte ?</p>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <button type="button" id="suppr-annuler" class="cta cta-secondary" style="flex:1; padding:12px; font-size:0.85rem;">Annuler</button>
+                            <button type="button" id="suppr-oui" class="cta cta-primary" style="flex:1; padding:12px; font-size:0.85rem;">Oui, continuer</button>
+                        </div>
+                    </div>
+                `;
+                document.getElementById('suppr-annuler').addEventListener('click', fermer);
+                document.getElementById('suppr-oui').addEventListener('click', etapeMotDePasse);
+            }
+
+            function etapeMotDePasse() {
+                overlay.innerHTML = `
+                    <div class="dispo-blocage-box">
+                        <div class="stats-header" style="margin-top:0;">Confirmer la suppression</div>
+                        <p class="planning-alerte-texte" style="margin-bottom:16px; color:#E24B4A; font-weight:700;">
+                            Attention, cette action est irréversible : ton compte sera définitivement supprimé
+                            et tes joueurs ne pourront plus être gérés.
+                        </p>
+                        <div class="form-group">
+                            <label for="suppr-mdp">Mot de passe du compte</label>
+                            <input type="password" id="suppr-mdp" autocomplete="current-password">
+                        </div>
+                        <div id="suppr-msg" class="planning-alerte-texte" style="min-height:18px; margin-bottom:12px;"></div>
+                        <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                            <button type="button" id="suppr-annuler" class="cta cta-secondary" style="flex:1; padding:12px; font-size:0.85rem;">Annuler</button>
+                            <button type="button" id="suppr-valider" class="cta cta-primary" style="flex:1; padding:12px; font-size:0.85rem;">Supprimer définitivement</button>
+                        </div>
+                    </div>
+                `;
+                const input = document.getElementById('suppr-mdp');
+                const msg = document.getElementById('suppr-msg');
+                const btn = document.getElementById('suppr-valider');
+                input.focus();
+                document.getElementById('suppr-annuler').addEventListener('click', fermer);
+
+                async function valider() {
+                    msg.textContent = '';
+                    if (!input.value) { msg.textContent = 'Le mot de passe est obligatoire.'; return; }
+                    btn.disabled = true;
+                    try {
+                        const response = await fetch('/api/compte/supprimer', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ password: input.value })
+                        });
+                        const data = await response.json();
+                        if (!response.ok) { msg.textContent = data.error || 'Suppression impossible.'; btn.disabled = false; return; }
+                        localStorage.removeItem('currentUserId');
+                        overlay.innerHTML = `
+                            <div class="dispo-blocage-box">
+                                <div class="stats-header" style="margin-top:0;">Compte supprimé</div>
+                                <p class="planning-alerte-texte">Ton compte a bien été supprimé. Merci d'avoir joué à Tennis Web Manager.</p>
+                            </div>
+                        `;
+                        setTimeout(function () { window.location.href = 'index.html'; }, 2500);
+                    } catch (err) {
+                        msg.textContent = 'Erreur réseau, réessaie.';
+                        btn.disabled = false;
+                    }
+                }
+                btn.addEventListener('click', valider);
+                input.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') valider(); });
+            }
+
+            etapeConfirmation();
         });
 
         document.getElementById('nav-toggle').addEventListener('click', function (e) {

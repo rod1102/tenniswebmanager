@@ -766,6 +766,84 @@ app.post('/api/deconnexion', (req, res) => {
     res.json({ success: true });
 });
 
+// Suppression de son propre compte (lien en bas d'accueil.html, 2026-11-16, demande
+// explicite de l'utilisateur). Mot de passe obligatoire. Choix de l'utilisateur :
+// le compte est ANONYMISE et non efface de la base - e-mail, mot de passe, pseudo,
+// discord, IP, jetons et sessions sont effaces (connexion impossible, l'e-mail et
+// l'IP sont liberes pour une eventuelle reinscription), mais ses personnages restent
+// en base pour que leurs matchs passes, palmares, face-a-face et points restent
+// coherents chez les autres. Ils sont retires de tout ce qui est A VENIR (ordres
+// planifies, coeurs, inscriptions a des tournois pas encore tires, candidature au
+// capitanat de la saison) et ne jouent plus que les tableaux deja tires, comme un
+// coach absent. Bio et photo (contenu ecrit par le coach) sont effacees.
+app.post('/api/compte/supprimer', (req, res) => {
+    try {
+        const password = String((req.body && req.body.password) || '');
+        if (!password) return res.status(400).json({ error: 'Mot de passe requis.' });
+
+        const user = db.prepare('SELECT id, role, password_hash, supprime FROM users WHERE id = ?').get(req.userId);
+        if (!user || user.supprime) return res.status(404).json({ error: 'Compte introuvable.' });
+        if (user.role === 'admin') {
+            return res.status(403).json({ error: 'Un compte administrateur ne peut pas etre supprime depuis le site.' });
+        }
+        if (!bcrypt.compareSync(password, user.password_hash)) {
+            return res.status(401).json({ error: 'Mot de passe incorrect.' });
+        }
+
+        const players = db.prepare('SELECT id, photo_avatar FROM players WHERE user_id = ?').all(user.id);
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const saison = nombreSaisonAffichee();
+        const photos = [];
+
+        db.transaction(function () {
+            players.forEach(function (p) {
+                // Inscriptions a des tournois pas encore tires (le tableau se rebalance,
+                // un rival reprend la place) - les tableaux deja tires restent tels quels.
+                db.prepare(`
+                    SELECT t.* FROM tournoi_liste_attente tla
+                    JOIN tournois t ON t.calendrier_id = tla.calendrier_id AND t.semaine = tla.semaine
+                    WHERE tla.player_id = ? AND t.statut = 'inscriptions'
+                `).all(p.id).forEach(function (t) {
+                    retirerInscriptionTournoi(p.id, t);
+                    tracerInscription(p.id, user.id, t.calendrier_id, t.semaine, 'desinscription', 'compte_supprime', 'ok');
+                });
+                db.prepare('DELETE FROM tournoi_liste_attente WHERE player_id = ? AND semaine > ?').run(p.id, etat.semaine_actuelle);
+                db.prepare('DELETE FROM tournoi_favoris WHERE player_id = ?').run(p.id);
+                db.prepare('DELETE FROM plannings WHERE player_id = ?').run(p.id);
+                db.prepare('DELETE FROM coupe_candidatures WHERE player_id = ? AND saison = ?').run(p.id, saison);
+                db.prepare('DELETE FROM coupe_votes WHERE candidat_player_id = ? AND saison = ?').run(p.id, saison);
+                db.prepare('UPDATE players SET bio = NULL, photo_avatar = NULL WHERE id = ?').run(p.id);
+                if (p.photo_avatar) photos.push(p.photo_avatar);
+            });
+
+            // Mot de passe remplace par l'empreinte d'une valeur aleatoire jamais
+            // conservee : plus aucune connexion possible. E-mail unique (contrainte
+            // UNIQUE NOT NULL) mais en .invalid, qui ne peut jamais recevoir de courrier.
+            db.prepare(`
+                UPDATE users SET email = ?, password_hash = ?, pseudo = ?, discord = NULL, ip_inscription = NULL,
+                    reset_token = NULL, reset_token_expire = NULL, est_redacteur = 0, est_beta_testeur = 0,
+                    renommage_requis_type = NULL, renommage_requis_motif = NULL,
+                    supprime = 1, date_suppression = ?
+                WHERE id = ?
+            `).run('compte-supprime-' + user.id + '@supprime.invalid',
+                bcrypt.hashSync(crypto.randomBytes(32).toString('hex'), 10),
+                'Compte supprimé #' + user.id, new Date().toISOString(), user.id);
+            db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
+        })();
+
+        photos.forEach(function (photo) { fs.unlink(path.join(DOSSIER_DONNEES, photo), function () {}); });
+        // Le pseudo du coach apparait dans des resultats mis en cache (classements...).
+        _memoLourd.clear();
+        console.log('[compte_supprime] user ' + user.id + ' anonymise, ' + players.length + ' personnage(s) retires du jeu a venir');
+
+        res.clearCookie('session_token', { path: '/' });
+        res.json({ success: true });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Duree de validite d'un jeton de reinitialisation de mot de passe.
 const EXPIRATION_RESET_MOT_DE_PASSE_MS = 60 * 60 * 1000; // 1 heure
 
@@ -9616,7 +9694,8 @@ app.get('/api/annuaire/joueurs/:circuit', (req, res) => {
 // alphabetique de leur pseudo (users.pseudo).
 app.get('/api/annuaire/coachs', (req, res) => {
     try {
-        const userIds = db.prepare("SELECT DISTINCT user_id FROM players WHERE statut = 'valide'").all()
+        // Comptes supprimes (anonymises) exclus de l'annuaire des coachs (2026-11-16).
+        const userIds = db.prepare("SELECT DISTINCT p.user_id FROM players p JOIN users u ON u.id = p.user_id WHERE p.statut = 'valide' AND COALESCE(u.supprime, 0) = 0").all()
             .map(function (r) { return r.user_id; });
 
         const coachs = userIds.map(function (userId) {
