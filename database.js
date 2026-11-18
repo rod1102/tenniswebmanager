@@ -2028,4 +2028,24 @@ if (db.prepare('SELECT patch_frisk_puissance_resistance_v2_20261108 AS p FROM je
     db.prepare('UPDATE jeu_etat SET patch_frisk_puissance_resistance_v2_20261108 = 1 WHERE id = 1').run();
 }
 
+// Correctif unique demande par l'utilisateur (admin) le 2026-11-18 : Ella FRISK
+// intervertit sa Puissance et son Retour. Valeurs actuelles inconnues (lecture de la
+// prod impossible ce jour-la : CLI Railway bloque par Windows), donc echange "a
+// l'aveugle" en une seule requete (SQLite lit les anciennes valeurs a droite du SET).
+// Garde-fous : id 63 (son id en prod, constate le 2026-11-12) ET nom tolerant
+// ELLA / FRISK - sinon rien n'est modifie. Valeurs avant/apres dans les logs.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_frisk_retour_puissance_20261118 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_frisk_retour_puissance_20261118 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const normaliserNom = function (s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, '').toUpperCase(); };
+    const frisk = db.prepare('SELECT id, prenom, nom, retour, puissance FROM players WHERE id = 63').get();
+    if (!frisk || normaliserNom(frisk.prenom) !== 'ELLA' || normaliserNom(frisk.nom) !== 'FRISK') {
+        console.log('[patch_frisk_retour_puissance_20261118] non applique : joueur 63 = ' + JSON.stringify(frisk || null));
+    } else {
+        db.prepare('UPDATE players SET retour = puissance, puissance = retour WHERE id = 63').run();
+        const apres = db.prepare('SELECT retour, puissance FROM players WHERE id = 63').get();
+        console.log('[patch_frisk_retour_puissance_20261118] joueuse 63 : Retour ' + frisk.retour + ' -> ' + apres.retour + ', Puissance ' + frisk.puissance + ' -> ' + apres.puissance);
+    }
+    db.prepare('UPDATE jeu_etat SET patch_frisk_retour_puissance_20261118 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
