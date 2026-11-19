@@ -14000,6 +14000,42 @@ try {
     console.error('[recalage_tournois] echec :', err.message);
 }
 
+// Compte de verification pour Apple / Google (2026-11-19, demande explicite de
+// l'utilisateur) : les verificateurs des stores se connectent a l'appli mobile avec
+// un coach qui a deja un joueur ATP et une joueuse WTA valides. Cree une seule fois,
+// comme un coach normal (memes fonctions que /api/joueurs, budget courant), puis
+// valide directement. Depot PUBLIC : seule l'empreinte bcrypt (cout 12) d'un mot de
+// passe aleatoire de 20 caracteres est ici - le mot de passe lui-meme n'est jamais
+// dans le code (donne a l'utilisateur, a saisir dans App Store Connect / Play Console).
+try {
+    try { db.exec('ALTER TABLE jeu_etat ADD COLUMN patch_compte_review_20261119 INTEGER DEFAULT 0'); } catch (e) {}
+    if (db.prepare('SELECT patch_compte_review_20261119 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+        const EMAIL_REVIEW = 'review@tenniswebmanager.com';
+        const HASH_REVIEW = '$2b$12$hwFTpC0Cnxg9G3W9lEs8O.0.I23CyTXstk1z9rg22guqtARSLAweq';
+        const existant = db.prepare('SELECT id FROM users WHERE TRIM(email) = ? COLLATE NOCASE').get(EMAIL_REVIEW);
+        if (existant) {
+            console.log('[compte_review] deja present (user ' + existant.id + '), rien fait');
+        } else {
+            const budget = budgetActuelCompetences();
+            const base = Math.floor(budget / COMPETENCES.length);
+            const competences = {};
+            COMPETENCES.forEach(function (cle, i) { competences[cle] = base + (i < budget - base * COMPETENCES.length ? 1 : 0); });
+            const dispositions = { disp_adversite: 2, disp_coupeur_de_tetes: 2, disp_dernier_carre: 2, disp_premiers_tours: 2, disp_sang_froid: 2, disp_indoor: 1, disp_rivalite: 1 };
+            db.transaction(function () {
+                const userId = db.prepare('INSERT INTO users (email, password_hash, ip_inscription, pseudo) VALUES (?, ?, NULL, ?)')
+                    .run(EMAIL_REVIEW, HASH_REVIEW, 'Compte Test Stores').lastInsertRowid;
+                creerPersonnage(userId, 'joueur', Object.assign({ prenom: 'Alex', nom: 'Martin', age: 22, taille: 185, nationalite: 'France', main: 'droitier' }, competences, dispositions));
+                creerPersonnage(userId, 'joueuse', Object.assign({ prenom: 'Lea', nom: 'Martin', age: 21, taille: 172, nationalite: 'France', main: 'droitier' }, competences, dispositions));
+                db.prepare("UPDATE players SET statut = 'valide' WHERE user_id = ?").run(userId);
+                console.log('[compte_review] cree : user ' + userId + ' (' + EMAIL_REVIEW + '), budget ' + budget + ' points par personnage, 2 personnages valides');
+            })();
+        }
+        db.prepare('UPDATE jeu_etat SET patch_compte_review_20261119 = 1 WHERE id = 1').run();
+    }
+} catch (err) {
+    console.error('[compte_review] echec :', err.message);
+}
+
 // Coeurs "Programmer l'inscription" decales par d'anciens changements de calendrier :
 // recales a chaque demarrage (sans effet s'il n'y en a aucun), cf. realignerFavoris.
 try {
