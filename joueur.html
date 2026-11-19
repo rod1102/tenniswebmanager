@@ -770,7 +770,18 @@
                     </div>
                 ` : '';
                 const tourActuel = bloc.tournoi.tour_actuel || 0;
+                const toursBye = bloc.toursBye || [];
                 const toursHtml = bloc.labelsTours.map(function (label, i) {
+                    // Tour exempte (bye, tete de serie) : aucun match donc aucun style -
+                    // affiche grise "BYE", envoie "aucun" (2026-11-19).
+                    if (toursBye.includes(i)) {
+                        return `
+                            <div class="style-tour-card" style="opacity:0.45;" title="Exempté de ce tour (tête de série) : aucun match, donc aucun style à choisir.">
+                                <label>${label}</label>
+                                <select class="style-tour-select" data-index="${i}" disabled><option value="aucun" selected>BYE</option></select>
+                            </div>
+                        `;
+                    }
                     const valeurActuelle = bloc.stylesActuels[i] || 'aucun';
                     const dejaJoue = i < tourActuel;
                     const optionsHtml = Object.keys(STYLES_JEU_LABELS).map(function (cle) {

@@ -2823,7 +2823,7 @@ function resoudreMatchDryRun(tournoi, j1, j2, label, tourIndex, meilleurDe5, est
         const bonus = calculerBonusDispositions(snap, bot, Object.assign({ esTeteDeSerie: !!reel.tete_de_serie, adversaireEsTeteDeSerie: !!bot.tete_de_serie }, contexteBase));
         const niveauNormalAvec = niveauNormalBrut + bonus.fixe;
         const niveauMental = niveauNormalAvec - snap.forme + snap.mental_courant;
-        const style = styleDuTourCourant(tournoi.id, snap, reel);
+        const style = styleDuTourCourant(tournoi.id, snap, reel, tourIndex);
         const r = simulerMatch(niveauNormalAvec, niveauMental, bot.niveau, bot.niveau + BONUS_POINTS_IMPORTANTS_BOT, style, snap.mental_courant, null, undefined, bonus.sangFroid, 0, meilleurDe5,
             { forme: snap.forme, pointsEnergie: snap.points_energie, condition: snap.condition, type: snap.type });
         const taux = style === 'prudence' ? 0.08 : (style === 'en_avant' ? 0.12 : 0.10);
@@ -2839,7 +2839,7 @@ function resoudreMatchDryRun(tournoi, j1, j2, label, tourIndex, meilleurDe5, est
     const niveau1Mental = niveau1 - snap1.forme + snap1.mental_courant;
     const niveau2 = niveauNormal(snap2, tournoi.surface, (j2.energie_misee || 0) * 5) + bonus2.fixe;
     const niveau2Mental = niveau2 - snap2.forme + snap2.mental_courant;
-    const style1 = styleDuTourCourant(tournoi.id, snap1, j1), style2 = styleDuTourCourant(tournoi.id, snap2, j2);
+    const style1 = styleDuTourCourant(tournoi.id, snap1, j1, tourIndex), style2 = styleDuTourCourant(tournoi.id, snap2, j2, tourIndex);
     const r = simulerMatch(niveau1, niveau1Mental, niveau2, niveau2Mental, style1, snap1.mental_courant, style2, snap2.mental_courant, bonus1.sangFroid, bonus2.sangFroid, meilleurDe5,
         { forme: snap1.forme, pointsEnergie: snap1.points_energie, condition: snap1.condition, type: snap1.type },
         { forme: snap2.forme, pointsEnergie: snap2.points_energie, condition: snap2.condition, type: snap2.type });
@@ -4861,6 +4861,10 @@ function executerAvancementSemaine() {
         // par l'utilisateur, 2026-09-22). inscrireJoueurAuTournoi est deja sans effet
         // si l'inscription existe deja ou si le tableau est tire, donc aucun risque de
         // doublon ni de tentative tardive.
+        // Coeurs recales sur la vraie semaine de leur tournoi AVANT de les relire, pour
+        // que ce qui est inscrit ici soit exactement ce que le coach voit (et peut
+        // retirer) sur le calendrier (2026-11-19).
+        realignerFavoris();
         joueurs.forEach(function (player) {
             const favoris = db.prepare('SELECT calendrier_id, semaine FROM tournoi_favoris WHERE player_id = ? AND semaine BETWEEN ? AND ?')
                 .all(player.id, nouvelleSemaine + 1, semaineOuvertureFavoris);
@@ -7058,15 +7062,22 @@ function tirerAuSort(tournoiId, entreeCalendrier) {
     db.prepare('DELETE FROM tournoi_liste_attente WHERE calendrier_id = ? AND semaine = ?').run(entreeCalendrier.id, semaineDuTournoi);
 }
 
-// Style de jeu en cours pour un joueur reel a l'interieur d'un tournoi : deduit du
-// nombre de matchs deja enregistres pour lui dans ce tournoi (jamais incremente par
-// un bye ou un adversaire lambda, donc fiable en elimination comme en poules sans
-// faire remonter d'index explicite depuis simulerTournoi).
-function styleDuTourCourant(tournoiId, player, entrant) {
-    const dejaJoues = db.prepare('SELECT COUNT(*) AS n FROM matchs WHERE tournoi_id = ? AND player_id = ?').get(tournoiId, player.id).n;
+// Style de jeu en cours pour un joueur reel a l'interieur d'un tournoi. Le coach
+// choisit un style PAR TOUR DU TABLEAU (style_choisi[i] = style du tour i, cf.
+// calculerLabelsTours / joueur.html), y compris le 1er tour quand il en est exempte.
+// En elimination directe, l'appelant fournit donc tourIndex (tournoi.tour_actuel) et
+// c'est lui qui fait foi. Bug corrige le 2026-11-19 (signale par l'utilisateur) :
+// l'index etait le NOMBRE DE MATCHS deja joues, or un bye (tete de serie exemptee)
+// ne cree aucun match -> tous ses styles etaient decales d'un tour (au 2e tour il
+// jouait le style prevu pour le 1er, etc.). Repli sur le nombre de matchs joues
+// seulement sans tourIndex (phase de poules des Masters, qui n'a jamais de bye).
+function styleDuTourCourant(tournoiId, player, entrant, tourIndex) {
+    const index = Number.isInteger(tourIndex)
+        ? tourIndex
+        : db.prepare('SELECT COUNT(*) AS n FROM matchs WHERE tournoi_id = ? AND player_id = ?').get(tournoiId, player.id).n;
     let stylesChoisis = [];
     try { stylesChoisis = JSON.parse(entrant.style_choisi || '[]'); } catch (e) { stylesChoisis = []; }
-    return stylesChoisis[dejaJoues] || 'aucun';
+    return stylesChoisis[index] || 'aucun';
 }
 
 // Perte du mental courant a l'issue d'un match, selon la categorie du tournoi et le
@@ -7260,7 +7271,7 @@ function jouerMatchTournoi(tournoi, label, j1, j2, tourIndex) {
     const niveauLambda_normal = lambda.niveau;
     const niveauLambda_mental = niveauLambda_normal + BONUS_POINTS_IMPORTANTS_BOT;
 
-    const styleA = styleDuTourCourant(tournoi.id, player, reel);
+    const styleA = styleDuTourCourant(tournoi.id, player, reel, tourIndex);
 
     // GC Hommes : 3 sets gagnants (5 max) au lieu de 2 (regle PDF), partout ailleurs
     // inchange.
@@ -7371,8 +7382,8 @@ function jouerMatchReelVsReel(tournoi, label, j1, j2, tourIndex) {
     const niveau2_normal = niveauNormal(player2, tournoi.surface, (j2.energie_misee || 0) * 5) + bonus2.fixe;
     const niveau2_mental = niveau2_normal - player2.forme + player2.mental_courant;
 
-    const style1 = styleDuTourCourant(tournoi.id, player1, j1);
-    const style2 = styleDuTourCourant(tournoi.id, player2, j2);
+    const style1 = styleDuTourCourant(tournoi.id, player1, j1, tourIndex);
+    const style2 = styleDuTourCourant(tournoi.id, player2, j2, tourIndex);
 
     // GC Hommes : 3 sets gagnants (5 max) au lieu de 2 (regle PDF), partout ailleurs
     // inchange.
@@ -8508,6 +8519,42 @@ function tracerReponse(res, infos) {
     };
 }
 
+// Semaine absolue REELLE du tournoi vise par un coeur "Programmer l'inscription"
+// (tournoi_favoris.semaine est figee au moment du clic et n'a jamais ete recalee par
+// les changements de calendrier) - meme calcul que l'auto-inscription. null si la
+// semaine stockee ne tombe meme plus sur une semaine de tournoi.
+function semaineCibleFavori(favori) {
+    const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === favori.calendrier_id; });
+    const phase = phaseDeSemaine(favori.semaine);
+    if (!entree || phase.type !== 'tournoi') return null;
+    return favori.semaine + (entree.semaine_debut - phase.positionSemaine);
+}
+
+// Recale en base chaque coeur dont la semaine stockee n'est plus celle de son tournoi
+// (2026-11-19, bug signale par le coach de Koga : desinscrite 3 fois de Roland-Garros,
+// reinscrite a chaque passage de semaine). Un coeur decale etait INVISIBLE sur le
+// calendrier (cherche a la semaine exacte), JAMAIS supprime par la desinscription
+// (idem), mais toujours reinscrit par l'auto-inscription (qui, elle, recalait). Si le
+// coach a deja un autre coeur sur la semaine cible (contrainte UNIQUE player/semaine),
+// le coeur decale est supprime : c'est le coeur visible qui fait foi.
+function realignerFavoris() {
+    let recales = 0, supprimes = 0;
+    db.prepare('SELECT id, player_id, calendrier_id, semaine FROM tournoi_favoris').all().forEach(function (f) {
+        const cible = semaineCibleFavori(f);
+        if (cible === null || cible === f.semaine) return;
+        const conflit = db.prepare('SELECT id FROM tournoi_favoris WHERE player_id = ? AND semaine = ? AND id != ?').get(f.player_id, cible, f.id);
+        if (conflit) {
+            db.prepare('DELETE FROM tournoi_favoris WHERE id = ?').run(f.id);
+            supprimes++;
+        } else {
+            db.prepare('UPDATE tournoi_favoris SET semaine = ? WHERE id = ?').run(cible, f.id);
+            recales++;
+        }
+        console.log('[realigner_favoris] joueur ' + f.player_id + ', ' + f.calendrier_id + ' : semaine ' + f.semaine + ' -> ' + cible + (conflit ? ' (supprime, autre coeur deja sur cette semaine)' : ''));
+    });
+    if (recales || supprimes) console.log('[realigner_favoris] ' + recales + ' coeur(s) recale(s), ' + supprimes + ' supprime(s)');
+}
+
 // Retire l'inscription (confirmee ou en liste d'attente) d'un joueur a un tournoi
 // encore ouvert, rebalance le tableau et retire le coeur "Programmer l'inscription"
 // correspondant. Partage par /api/tournois/desinscription et la desinscription
@@ -8520,8 +8567,16 @@ function retirerInscriptionTournoi(playerId, tournoi) {
     // planification malgre la desinscription, ET l'inscription automatique retentee
     // chaque semaine (voir executerAvancementSemaine) re-inscrivait le joueur malgre
     // lui des le prochain changement de semaine (bug signale par l'utilisateur, 2026-09-22).
-    db.prepare('DELETE FROM tournoi_favoris WHERE player_id = ? AND semaine = ? AND calendrier_id = ?')
-        .run(playerId, tournoi.semaine, tournoi.calendrier_id);
+    // Tout coeur de CE tournoi pour ce joueur, y compris un coeur dont la semaine
+    // stockee est decalee (cf. realignerFavoris) - avant le 2026-11-19, seul le coeur
+    // pile a la semaine du tournoi etait supprime, un coeur decale survivait et
+    // reinscrivait le joueur a chaque passage de semaine.
+    db.prepare('SELECT id, calendrier_id, semaine FROM tournoi_favoris WHERE player_id = ? AND calendrier_id = ?').all(playerId, tournoi.calendrier_id)
+        .forEach(function (f) {
+            if (f.semaine === tournoi.semaine || semaineCibleFavori(f) === tournoi.semaine) {
+                db.prepare('DELETE FROM tournoi_favoris WHERE id = ?').run(f.id);
+            }
+        });
 }
 
 // Joueur blesse dont le repos vient d'etre annule (remplace par un autre ordre ou
@@ -8788,6 +8843,14 @@ function stylesInterditsEvenementPrecedent(playerId, semaineActuelle) {
     return Array.from(new Set(stylesPrecedents.filter(function (s) { return s !== 'aucun'; })));
 }
 
+// Joueur exempte (bye) au 1er tour d'un tableau a elimination directe : la case
+// voisine de la sienne au 1er tour (positions 0-1, 2-3...) est un BYE. Les byes
+// n'existent qu'au 1er tour (tirerAuSort). Jamais en phase de poules.
+function estExempteTour1(tournoi, positionTableau) {
+    if (tournoi.format === 'poules' || positionTableau === null || positionTableau === undefined) return false;
+    return !!db.prepare("SELECT 1 FROM tournoi_joueurs WHERE tournoi_id = ? AND position_tableau = ? AND nom = 'BYE'").get(tournoi.id, positionTableau ^ 1);
+}
+
 app.post('/api/tournois/style', (req, res) => {
     try {
         const { playerId, tournoiId, styles } = req.body;
@@ -8817,20 +8880,23 @@ app.post('/api/tournois/style', (req, res) => {
             return res.status(400).json({ error: 'Les styles de jeu ne peuvent etre choisis qu une fois le tableau tire, et avant le debut du tournoi.' });
         }
 
-        const stylesInterdits = stylesInterditsEvenementPrecedent(playerId, tournoi.semaine);
-        if (styles.some(function (s) { return stylesInterdits.includes(s); })) {
-            return res.status(400).json({ error: 'Impossible d utiliser un style deja utilise au tournoi ou a la rencontre de Coupe Davis/Fed Cup precedent(e).' });
-        }
-
         const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
         const labelsAttendus = calculerLabelsTours(entree.taille_tableau, tournoi.format);
         if (styles.length !== labelsAttendus.length) {
             return res.status(400).json({ error: 'Il faut choisir exactement un style pour chacun des ' + labelsAttendus.length + ' tours possibles de ce tournoi.' });
         }
 
-        const ligneReelle = db.prepare('SELECT id, style_choisi FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoiId, playerId);
+        const ligneReelle = db.prepare('SELECT id, style_choisi, position_tableau FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoiId, playerId);
         if (!ligneReelle) {
             return res.status(400).json({ error: 'Ce joueur n est pas inscrit a ce tournoi.' });
+        }
+        // Tour exempte (bye) : aucun match, donc aucun style - force a "aucun" quoi que
+        // le client envoie (l'appli mobile ne connait pas encore toursBye).
+        if (estExempteTour1(tournoi, ligneReelle.position_tableau)) styles[0] = 'aucun';
+
+        const stylesInterdits = stylesInterditsEvenementPrecedent(playerId, tournoi.semaine);
+        if (styles.some(function (s) { return stylesInterdits.includes(s); })) {
+            return res.status(400).json({ error: 'Impossible d utiliser un style deja utilise au tournoi ou a la rencontre de Coupe Davis/Fed Cup precedent(e).' });
         }
 
         if (ligneReelle.style_choisi) {
@@ -8888,9 +8954,15 @@ app.get('/api/tournois/style-en-attente/:playerId', (req, res) => {
             const entree = CALENDRIER_TOURNOIS.find(function (t) { return t.id === tournoi.calendrier_id; });
             const labelsTours = calculerLabelsTours(entree.taille_tableau, tournoi.format);
 
-            const ligneReelle = db.prepare('SELECT style_choisi, energie_misee FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoi.id, playerId);
+            const ligneReelle = db.prepare('SELECT style_choisi, energie_misee, position_tableau FROM tournoi_joueurs WHERE tournoi_id = ? AND player_id = ? AND est_reel = 1').get(tournoi.id, playerId);
             let stylesActuels = [];
             try { stylesActuels = JSON.parse(ligneReelle.style_choisi || '[]'); } catch (e) { stylesActuels = []; }
+
+            // Exempte (bye) au 1er tour : son adversaire de 1er tour (case voisine du
+            // tableau, positions 0-1, 2-3...) est un BYE. joueur.html affiche alors ce
+            // tour grise "BYE" et envoie "aucun" pour lui (2026-11-19, demande de
+            // l'utilisateur, avec la correction du decalage des styles apres un bye).
+            const exempteTour1 = estExempteTour1(tournoi, ligneReelle.position_tableau);
 
             const stylesInterdits = stylesInterditsEvenementPrecedent(playerId, tournoi.semaine);
 
@@ -8902,6 +8974,7 @@ app.get('/api/tournois/style-en-attente/:playerId', (req, res) => {
                 // simule cette semaine-la.
                 verrouille: semaineActuelle >= tournoi.semaine,
                 labelsTours,
+                toursBye: exempteTour1 ? [0] : [],
                 stylesActuels,
                 stylesInterdits,
                 energieMiseeActuelle: ligneReelle.energie_misee || 0,
@@ -13925,6 +13998,14 @@ try {
     }
 } catch (err) {
     console.error('[recalage_tournois] echec :', err.message);
+}
+
+// Coeurs "Programmer l'inscription" decales par d'anciens changements de calendrier :
+// recales a chaque demarrage (sans effet s'il n'y en a aucun), cf. realignerFavoris.
+try {
+    realignerFavoris();
+} catch (err) {
+    console.error('[realigner_favoris] echec :', err.message);
 }
 
 // Copie de test (MODE_STAGING) : force l'avancement automatique a l'arret a
