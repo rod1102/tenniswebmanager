@@ -996,7 +996,10 @@
                 <div class="bar-row"><span class="bar-label">Énergie</span><div class="bar-track"><div class="bar-fill ${classeEnergie(player.points_energie)}" style="width:${Math.min(100, player.points_energie)}%;"></div></div><span class="bar-value">${player.points_energie}</span></div>
                 ${xpLigne}
 
-                <div class="stats-header">Compétences techniques</div>
+                <div class="stats-header" style="display:flex; justify-content:space-between; align-items:baseline; gap:12px; flex-wrap:wrap;">
+                    <span>Compétences techniques</span>
+                    <span style="color:#8B98A5; font-size:0.85em; letter-spacing:0.04em;">Total : <strong style="color:#F5F7FA;">${['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'].reduce(function (s, c) { return s + (Number(player[c]) || 0); }, 0)}</strong></span>
+                </div>
                 ${ligneCompetence('Service', player.service, COMPETENCES_TOOLTIPS.service)}
                 ${ligneCompetence('Retour', player.retour, COMPETENCES_TOOLTIPS.retour)}
                 ${ligneCompetence('Coup droit / Revers', player.coup_droit_revers, COMPETENCES_TOOLTIPS.coup_droit_revers)}
