@@ -2048,4 +2048,26 @@ if (db.prepare('SELECT patch_frisk_retour_puissance_20261118 AS p FROM jeu_etat 
     db.prepare('UPDATE jeu_etat SET patch_frisk_retour_puissance_20261118 = 1 WHERE id = 1').run();
 }
 
+// Correctif unique demande par l'utilisateur (admin) le 2026-11-20 : Tomas JØRGENSEN
+// (id 254, coach Ben Becker) n'a pas pu placer ses 7 XP de qualification en 2e semaine
+// de Rome (bonus tombe le 18/11 a midi, semaine changee le 19/11 a 8h). Credites sur
+// l'Effet "erosion comprise" : au passage S73 -> S74, l'Effet est passe de 50 a 48
+// (erosion 4 %) ; avec les 7 XP places a temps il serait passe a 50 - 2 + 7 = 55
+// (le moteur applique l'XP APRES l'erosion). Garde-fous : id 254 + nom tolerant +
+// Effet exactement 48 - sinon rien n'est modifie.
+try { db.exec("ALTER TABLE jeu_etat ADD COLUMN patch_jorgensen_tomas_effet_20261120 INTEGER DEFAULT 0"); } catch (e) {}
+if (db.prepare('SELECT patch_jorgensen_tomas_effet_20261120 AS p FROM jeu_etat WHERE id = 1').get().p === 0) {
+    const normaliserNomT = function (s) { return String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[øØ]/g, 'O').replace(/\s+/g, '').toUpperCase(); };
+    const tomas = db.prepare('SELECT id, prenom, nom, effet FROM players WHERE id = 254').get();
+    if (!tomas || normaliserNomT(tomas.prenom) !== 'TOMAS' || normaliserNomT(tomas.nom) !== 'JORGENSEN') {
+        console.log('[patch_jorgensen_tomas_effet_20261120] non applique : joueur 254 = ' + JSON.stringify(tomas || null));
+    } else if (tomas.effet !== 48) {
+        console.log('[patch_jorgensen_tomas_effet_20261120] non applique : Effet inattendu (' + tomas.effet + ', attendu 48)');
+    } else {
+        db.prepare('UPDATE players SET effet = 55 WHERE id = 254').run();
+        console.log('[patch_jorgensen_tomas_effet_20261120] joueur 254 : Effet 48 -> 55 (7 XP de qualification de Rome, erosion comprise)');
+    }
+    db.prepare('UPDATE jeu_etat SET patch_jorgensen_tomas_effet_20261120 = 1 WHERE id = 1').run();
+}
+
 module.exports = db;
