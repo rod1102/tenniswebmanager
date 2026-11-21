@@ -1024,6 +1024,18 @@ app.get('/api/joueurs/:userId', (req, res) => {
             player.drapeau = drapeau(player.nationalite);
         });
 
+        // Classement Live a la fin de la semaine precedente (photo classement_historique
+        // prise a chaque changement de semaine) : permet a l'appli mobile d'afficher la
+        // fleche d'evolution du classement (▲3 / ▼2), en le comparant au classement
+        // Live actuel (2026-11-21, demande de l'utilisateur). null si le joueur n'etait
+        // pas classe la semaine precedente.
+        const semaineActuelleJ = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get().semaine_actuelle;
+        const rangPrecedent = db.prepare('SELECT rang FROM classement_historique WHERE circuit = ? AND cle = ? AND semaine = ? ORDER BY id DESC LIMIT 1');
+        players.forEach(function (player) {
+            const ligne = rangPrecedent.get(player.type === 'joueur' ? 'ATP' : 'WTA', 'joueur:' + player.id, semaineActuelleJ - 1);
+            player.rang_live_precedent = ligne ? ligne.rang : null;
+        });
+
         res.json({ success: true, players });
     } catch (err) {
         console.error(err);
