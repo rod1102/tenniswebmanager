@@ -81,6 +81,18 @@ h1 {
     text-shadow: 0 8px 40px rgba(0,0,0,0.5);
 }
 
+/* Logo officiel du jeu (2026-11-23) a la place du titre texte de la page d'accueil. */
+.hero-logo {
+    line-height: 0;
+    margin: 8px 0 4px;
+}
+
+.hero-logo img {
+    width: min(460px, 82vw);
+    height: auto;
+    filter: drop-shadow(0 8px 30px rgba(0, 0, 0, 0.55));
+}
+
 .service-line {
     width: 120px;
     height: 3px;
@@ -220,6 +232,17 @@ h1 {
     color: #F5F7FA;
     text-decoration: none;
     margin-bottom: 8px;
+}
+
+/* Embleme "W" du logo officiel devant le nom du jeu, sur toutes les pages (2026-11-23). */
+.auth-logo::before {
+    content: '';
+    display: inline-block;
+    width: 1.9em;
+    height: 1.3em;
+    margin-right: 0.35em;
+    vertical-align: -0.22em;
+    background: url('logo-w.png') no-repeat center / contain;
 }
 
 .auth-title {
