@@ -933,6 +933,157 @@ h1 {
     gap: 8px;
 }
 
+/* ---------- Cloche de notifications (cloche.js, 2026-11-24) ---------- */
+
+.cloche-ligne {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.cloche-zone {
+    position: relative;
+}
+
+.cloche-bouton {
+    position: relative;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 1px solid rgba(245, 247, 250, 0.3);
+    background: transparent;
+    color: #F5F7FA;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.cloche-bouton:hover,
+.cloche-bouton[aria-expanded="true"] {
+    border-color: #D4F000;
+    color: #D4F000;
+}
+
+.cloche-bouton svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
+.cloche-compteur {
+    position: absolute;
+    top: -5px;
+    right: -6px;
+    min-width: 19px;
+    height: 19px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #E24B4A;
+    color: #FFFFFF;
+    font-family: 'IBM Plex Sans', sans-serif;
+    font-size: 0.7rem;
+    font-weight: 700;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    border: 2px solid #0A1628;
+}
+
+.cloche-panneau {
+    display: none;
+    position: absolute;
+    top: calc(100% + 10px);
+    left: 0;
+    width: min(360px, calc(100vw - 32px));
+    max-height: 70vh;
+    overflow-y: auto;
+    background: #0F2438;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+    padding: 8px;
+    z-index: 30;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.cloche-panneau.open {
+    display: block;
+}
+
+/* Telephone : le panneau s'ancre sous le nom du jeu (debut de ligne) plutot que sous
+   la cloche, sinon il deborderait a droite de l'ecran. */
+@media (max-width: 600px) {
+    .cloche-ligne { position: relative; }
+    .cloche-zone { position: static; }
+}
+
+.cloche-titre {
+    font-family: 'Big Shoulders Display', sans-serif;
+    font-weight: 900;
+    font-size: 1.05rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #F5F7FA;
+    padding: 6px 10px 8px;
+}
+
+.cloche-vide {
+    font-size: 0.88rem;
+    color: #8B98A5;
+    padding: 6px 10px 12px;
+}
+
+.cloche-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #E6EBF0;
+    font-size: 0.88rem;
+    line-height: 1.4;
+    border-left: 3px solid #D4F000;
+}
+
+.cloche-item + .cloche-item {
+    margin-top: 4px;
+}
+
+.cloche-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.cloche-item.cloche-xp,
+.cloche-item.cloche-dispositions {
+    border-left-color: #E24B4A;
+}
+
+.cloche-item.cloche-vue {
+    border-left-color: transparent;
+    color: #8B98A5;
+}
+
+.cloche-texte {
+    flex: 1;
+    min-width: 0;
+}
+
+.cloche-detail {
+    display: block;
+    margin-top: 3px;
+    font-weight: 700;
+    color: #E24B4A;
+}
+
+.cloche-fleche {
+    flex-shrink: 0;
+    font-size: 1.15rem;
+    color: #D4F000;
+}
+
 .btn-retour-entete {
     font-family: 'IBM Plex Sans', sans-serif;
     font-size: 0.72rem;

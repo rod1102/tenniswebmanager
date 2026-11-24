@@ -9,7 +9,7 @@
     <title>Accueil — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261123">
+    <link rel="stylesheet" href="style.css?v=20261124">
 </head>
 <body>
     <div class="dashboard-page">
@@ -47,7 +47,6 @@
             <div id="annonce-container"></div>
 
             <div id="alerte-capitaine-container"></div>
-            <div id="badge-attente-container"></div>
 
             <div id="cartes-container" class="creation-grid"></div>
 
@@ -286,22 +285,6 @@
                 ? '<p class="match-hint" style="margin:12px 0 0;">En attente de validation par un administrateur.</p>'
                 : '';
 
-            // Encadre rouge tant que des XP en reserve n'ont pas ete TOUTES programmees
-            // (repartition absente ou partielle) - disparait une fois la totalite repartie,
-            // ce qui permet au coach de verifier que ses ordres d'XP sont bien passes.
-            // Meme dependance au planning que le rappel textuel (afficherBadgeAttente) : une
-            // fois les ordres de la semaine prochaine valides (plan choisi ou tournoi en
-            // cours), il n'a plus lieu d'etre. Demande explicite de l'utilisateur, 2026-09-21.
-            let xpProgrammee = 0;
-            try {
-                const rep = JSON.parse(player.xp_repartition_en_attente || '{}');
-                Object.keys(rep).forEach(function (cle) { xpProgrammee += Number(rep[cle]) > 0 ? Number(rep[cle]) : 0; });
-            } catch (e) { xpProgrammee = 0; }
-            const planningDejaValide = semaineInfo && semaineInfo.semaineProchaine.libelle !== 'Pas encore défini';
-            const xpNonAttribuee = player.statut === 'valide' && player.points_experience > xpProgrammee && !planningDejaValide
-                ? '<div class="xp-non-attribuee">!! Points d\'expérience non attribués</div>'
-                : '';
-
             // Un tournoi devient un lien vers sa fiche (onglet Tableau).
             function texteSemaine(info) {
                 if (!info.tournoi) return info.libelle;
@@ -319,40 +302,8 @@
                     <div class="player-summary-name">${formaterNom(player.prenom, player.nom)}</div>
                     <p class="match-hint" style="margin:8px 0 16px;">${flagImg(player.drapeau)} ${player.nationalite}</p>
                     ${enAttente}
-                    ${xpNonAttribuee}
                     ${semaineTxt}
                     <a href="joueur.html?type=${type}" class="cta cta-primary" style="padding:10px 20px; font-size:0.8rem; margin-top:12px;">Voir la fiche</a>
-                </div>
-            `;
-        }
-
-        function afficherBadgeAttente(players, semaineInfoParType) {
-            const alertes = [];
-            players.forEach(function (player) {
-                // Une fois les ordres de la semaine prochaine deja valides (plan choisi,
-                // ou tournoi en cours), le rappel n'a plus lieu d'etre - meme s'il reste
-                // des points en attente (demande explicite de l'utilisateur, 2026-09-14).
-                const semaineInfo = semaineInfoParType && semaineInfoParType[player.type];
-                const dejaValide = semaineInfo && semaineInfo.semaineProchaine.libelle !== 'Pas encore défini';
-                if (dejaValide) return;
-
-                const label = player.type === 'joueur' ? 'Ton joueur' : 'Ta joueuse';
-                if (player.points_experience > 0) alertes.push(label + ' a ' + player.points_experience + ' point(s) d\'XP à répartir avant le prochain changement de semaine.');
-                if (player.points_dispositions_a_gagner > 0) alertes.push(label + ' a ' + player.points_dispositions_a_gagner + ' point(s) de disposition à répartir.');
-                if (player.points_dispositions_a_retirer > 0) alertes.push(label + ' doit retirer ' + player.points_dispositions_a_retirer + ' point(s) de disposition avant de pouvoir continuer.');
-                if (player.points_dispositions_a_deplacer > 0) alertes.push(label + ' peut déplacer ' + player.points_dispositions_a_deplacer + ' point(s) de disposition d\'une catégorie à une autre.');
-            });
-
-            const container = document.getElementById('badge-attente-container');
-            if (alertes.length === 0) {
-                container.innerHTML = '';
-                return;
-            }
-            // Couleur rouge par defaut de .planning-alerte-texte - pas besoin de la
-            // repeter ici, elle sert justement a signaler qu'il reste une action a faire.
-            container.innerHTML = `
-                <div class="xp-pool-panel">
-                    ${alertes.map(function (a) { return '<div class="planning-alerte-texte">' + a + '</div>'; }).join('')}
                 </div>
             `;
         }
@@ -534,7 +485,8 @@
             document.getElementById('cartes-container').innerHTML =
                 carteJoueur('joueur', joueur, semaineInfoJoueur) + carteJoueur('joueuse', joueuse, semaineInfoJoueuse);
 
-            afficherBadgeAttente(data.players, { joueur: semaineInfoJoueur, joueuse: semaineInfoJoueuse });
+            // XP / points de disposition a placer : plus d'encart ici, c'est la cloche
+            // de notifications de l'en-tete qui les signale (cloche.js, 2026-11-24).
             afficherAlerteCapitaine(data.players);
         }
 
@@ -652,6 +604,7 @@
         chargerClassement();
     </script>
     <script src="retour.js?v=20260829"></script>
+    <script src="cloche.js?v=20261124"></script>
     <script src="theme-saison.js?v=20260831"></script>
 </body>
 </html>

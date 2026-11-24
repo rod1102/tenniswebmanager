@@ -9848,6 +9848,127 @@ app.get('/api/annuaire/coachs', (req, res) => {
     }
 });
 
+// Cloche de notifications du site (2026-11-24, demande explicite de l'utilisateur,
+// remplace l'encart rouge "XP non attribues" de l'accueil). Calculees ici pour le
+// coach connecte :
+//  - tirage effectue d'un tournoi ou un de ses joueurs est inscrit (tableau tire,
+//    tournoi pas encore commence) -> fleche vers le tableau ;
+//  - XP a placer (points_experience > XP deja programmes) : "N XP a placer avant
+//    <jour> 8h", PERSISTANTE (non effacable) tant que les XP ne sont pas tous
+//    programmes. Pour un joueur engage dans un tournoi, seulement une fois son
+//    tournoi termine (elimination/victoire), ou a l'issue du dernier tour de la
+//    1re semaine d'un tournoi en 2 semaines (bonus de qualification) ;
+//  - pronostics de la semaine prochaine ouverts et pas tous faits ;
+//  - points de disposition en attente (repris de l'ancien encart de l'accueil).
+// `persistante` = le client ne peut pas la marquer comme lue.
+app.get('/api/notifications', (req, res) => {
+    try {
+        const userId = req.userId;
+        const etat = db.prepare('SELECT semaine_actuelle FROM jeu_etat WHERE id = 1').get();
+        const s = etat.semaine_actuelle;
+        const echeance = prochaineEcheanceApres(new Date());
+        const jour = echeance.toLocaleDateString('fr-FR', { weekday: 'long', timeZone: 'Europe/Paris' });
+        const heure = Number(echeance.toLocaleTimeString('fr-FR', { hour: '2-digit', hour12: false, timeZone: 'Europe/Paris' }).slice(0, 2));
+        const avant = jour + ' ' + heure + 'h';
+        const nomJ = function (p) {
+            const prenom = String(p.prenom || '').trim().toLowerCase().replace(/(^|[\s'-])\p{L}/gu, function (c) { return c.toUpperCase(); });
+            return (prenom + ' ' + String(p.nom || '').trim().toUpperCase()).trim();
+        };
+        const lienTableau = function (t, p) {
+            return 'tournoi-detail.html?calendrierId=' + encodeURIComponent(t.calendrier_id) + '&semaine=' + t.semaine + '&playerId=' + p.id + '&onglet=tableau';
+        };
+        const nbTours = function (t) { return Math.ceil(Math.log2(Math.max(2, t.taille_tableau))); };
+
+        const notifications = [];
+        const joueurs = db.prepare("SELECT * FROM players WHERE user_id = ? AND statut = 'valide' ORDER BY type").all(userId);
+        joueurs.forEach(function (p) {
+            const nom = nomJ(p);
+            const lienFiche = 'joueur.html?type=' + p.type;
+
+            // Tirages effectues, tournoi pas encore commence
+            db.prepare(`
+                SELECT t.* FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+                WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.statut = 'a_venir' AND COALESCE(t.tour_actuel, 0) = 0
+                ORDER BY t.semaine
+            `).all(p.id).forEach(function (t) {
+                notifications.push({
+                    id: 'tirage-' + t.id + '-' + p.id, type: 'tirage', persistante: false,
+                    texte: 'Le tirage du tournoi de ' + t.nom + ' où ' + nom + ' est inscrit' + (p.type === 'joueuse' ? 'e' : '') + ' a été effectué',
+                    lien: lienTableau(t, p), lienTexte: 'Voir le tirage'
+                });
+            });
+
+            // XP a placer
+            let programmes = 0;
+            try {
+                const rep = JSON.parse(p.xp_repartition_en_attente || '{}');
+                Object.keys(rep).forEach(function (k) { programmes += Number(rep[k]) > 0 ? Number(rep[k]) : 0; });
+            } catch (e) { programmes = 0; }
+            const aPlacer = (p.points_experience || 0) - programmes;
+            if (aPlacer > 0) {
+                // Tournoi de cette semaine (ou commence la semaine derniere s'il dure 2
+                // semaines) dans lequel le joueur est encore en lice.
+                const engages = db.prepare(`
+                    SELECT t.* FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+                    WHERE tj.player_id = ? AND tj.est_reel = 1 AND tj.tour_elimine IS NULL
+                      AND t.statut = 'a_venir' AND t.semaine IN (?, ?)
+                `).all(p.id, s, s - 1).filter(function (t) { return t.semaine === s || nbTours(t) >= 7; });
+                const finSemaine1 = engages.length > 0 && engages.every(function (t) { return nbTours(t) >= 7 && t.semaine === s && (t.tour_actuel || 0) >= 3; });
+                if (engages.length === 0 || finSemaine1) {
+                    let texte;
+                    if (finSemaine1) {
+                        texte = 'La 1re semaine du tournoi de ' + engages[0].nom + ' vient de se terminer, pense à répartir tes XP pour ' + nom;
+                    } else {
+                        const fini = db.prepare(`
+                            SELECT t.nom FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
+                            WHERE tj.player_id = ? AND tj.est_reel = 1 AND tj.tour_elimine IS NOT NULL AND t.semaine IN (?, ?, ?)
+                            ORDER BY t.semaine DESC LIMIT 1
+                        `).get(p.id, s, s - 1, s - 2);
+                        texte = fini
+                            ? 'Le tournoi de ' + fini.nom + ' vient de se terminer, pense à répartir tes XP pour ' + nom
+                            : 'Pense à répartir tes XP pour ' + nom;
+                    }
+                    notifications.push({
+                        id: 'xp-' + p.id, type: 'xp', persistante: true,
+                        texte: texte, detail: aPlacer + ' XP à placer avant ' + avant,
+                        lien: lienFiche, lienTexte: 'Répartir les XP'
+                    });
+                }
+            }
+
+            // Points de disposition en attente
+            if ((p.points_dispositions_a_retirer || 0) > 0) {
+                notifications.push({ id: 'dispo-retirer-' + p.id, type: 'dispositions', persistante: true,
+                    texte: nom + ' doit retirer ' + p.points_dispositions_a_retirer + ' point(s) de disposition', lien: lienFiche, lienTexte: 'Retirer les points' });
+            } else if ((p.points_dispositions_a_gagner || 0) > 0 && !p.dispositions_gain_en_attente) {
+                notifications.push({ id: 'dispo-gagner-' + p.id, type: 'dispositions', persistante: true,
+                    texte: nom + ' a ' + p.points_dispositions_a_gagner + ' point(s) de disposition à placer', detail: 'À placer avant ' + avant,
+                    lien: lienFiche, lienTexte: 'Placer les points' });
+            } else if ((p.points_dispositions_a_deplacer || 0) > 0 && !p.dispositions_deplacement_en_attente) {
+                notifications.push({ id: 'dispo-deplacer-' + p.id + '-s' + s, type: 'dispositions', persistante: false,
+                    texte: nom + ' peut déplacer 1 point de disposition (Coaching mental)', lien: lienFiche, lienTexte: 'Déplacer le point' });
+            }
+        });
+
+        // Pronostics de la semaine prochaine ouverts (tableau tire, pas commence) et
+        // pas tous faits.
+        const pronos = db.prepare(`
+            SELECT t.id, p.id AS pronostic_id FROM tournois t
+            LEFT JOIN pronostics p ON p.tournoi_id = t.id AND p.user_id = ?
+            WHERE t.statut = 'a_venir' AND COALESCE(t.tour_actuel, 0) = 0 AND t.semaine = ?
+        `).all(userId, s + 1);
+        if (pronos.length > 0 && pronos.some(function (t) { return !t.pronostic_id; })) {
+            notifications.push({ id: 'pronos-s' + (s + 1), type: 'pronos', persistante: false,
+                texte: 'Les pronos de la semaine prochaine sont ouverts', lien: 'pronostics.html', lienTexte: 'Faire mes pronos' });
+        }
+
+        res.json({ success: true, notifications: notifications });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 app.get('/api/pronostics/disponibles/:userId', (req, res) => {
     try {
         const userId = req.userId;
