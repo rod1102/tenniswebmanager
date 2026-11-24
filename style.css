@@ -1056,6 +1056,31 @@ h1 {
     background: rgba(255, 255, 255, 0.06);
 }
 
+.cloche-lien {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: inherit;
+    text-decoration: none;
+}
+
+/* Case "lu / fait" qui retire la notification (pas pour les XP : espace vide de
+   meme largeur pour garder les textes alignes). */
+.cloche-case,
+.cloche-case-vide {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+}
+
+.cloche-case {
+    cursor: pointer;
+    accent-color: #D4F000;
+}
+
 .cloche-item.cloche-xp,
 .cloche-item.cloche-dispositions {
     border-left-color: #E24B4A;

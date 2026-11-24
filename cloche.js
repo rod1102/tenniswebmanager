@@ -16,6 +16,10 @@
     if (!userId) return;
 
     var CLE_VUES = 'twm.notifications.vues.' + userId;
+    // Notifications retirees par le coach via leur case a cocher (2026-11-24) : plus
+    // affichees du tout. Jamais possible pour une notification persistante (XP).
+    var CLE_RETIREES = 'twm.notifications.retirees.' + userId;
+    var toutes = [];
     var notifications = [];
     var bouton, compteur, panneau;
 
@@ -24,6 +28,18 @@
     }
     function ecrireVues(ids) {
         try { localStorage.setItem(CLE_VUES, JSON.stringify(ids.slice(-300))); } catch (e) { /* stockage indisponible */ }
+    }
+    function lireRetirees() {
+        try { return JSON.parse(localStorage.getItem(CLE_RETIREES) || '[]'); } catch (e) { return []; }
+    }
+    function retirer(id) {
+        var ids = lireRetirees().filter(function (x) { return x !== id; });
+        ids.push(id);
+        try { localStorage.setItem(CLE_RETIREES, JSON.stringify(ids.slice(-300))); } catch (e) { /* stockage indisponible */ }
+    }
+    function filtrer() {
+        var retirees = lireRetirees();
+        notifications = toutes.filter(function (n) { return n.persistante || retirees.indexOf(n.id) === -1; });
     }
     function echapper(t) {
         return String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -48,10 +64,16 @@
         }
         panneau.innerHTML = '<div class="cloche-titre">Notifications</div>' + notifications.map(function (n) {
             var classes = 'cloche-item cloche-' + n.type + (estNonVue(n, vues) ? '' : ' cloche-vue');
-            return '<a class="' + classes + '" href="' + echapper(n.lien) + '" data-id="' + echapper(n.id) + '">' +
+            // Case a cocher "lu / fait" : retire la notification. Pas pour les
+            // notifications persistantes (repartition des XP).
+            var caseRetrait = n.persistante
+                ? '<span class="cloche-case-vide" aria-hidden="true"></span>'
+                : '<input type="checkbox" class="cloche-case" data-id="' + echapper(n.id) + '" title="Lu / fait : retirer la notification" aria-label="Retirer la notification">';
+            return '<div class="' + classes + '">' + caseRetrait +
+                '<a class="cloche-lien" href="' + echapper(n.lien) + '">' +
                 '<span class="cloche-texte">' + echapper(n.texte) +
                 (n.detail ? '<span class="cloche-detail">' + echapper(n.detail) + '</span>' : '') +
-                '</span><span class="cloche-fleche" title="' + echapper(n.lienTexte || '') + '" aria-hidden="true">→</span></a>';
+                '</span><span class="cloche-fleche" title="' + echapper(n.lienTexte || '') + '" aria-hidden="true">→</span></a></div>';
         }).join('');
     }
 
@@ -81,7 +103,8 @@
             .then(function (r) { return r.ok ? r.json() : null; })
             .then(function (d) {
                 if (!d || !d.success) return;
-                notifications = d.notifications || [];
+                toutes = d.notifications || [];
+                filtrer();
                 majCompteur();
                 if (panneau.classList.contains('open')) rendrePanneau();
             })
@@ -116,9 +139,16 @@
             if (panneau.classList.contains('open')) fermer(); else ouvrir();
         });
         panneau.addEventListener('click', function (e) {
-            var lien = e.target.closest('.cloche-item');
-            if (lien) marquerVues();
             e.stopPropagation();
+            var caseCochee = e.target.closest('.cloche-case');
+            if (caseCochee) {
+                retirer(caseCochee.getAttribute('data-id'));
+                filtrer();
+                majCompteur();
+                rendrePanneau();
+                return;
+            }
+            if (e.target.closest('.cloche-lien')) marquerVues();
         });
         document.addEventListener('click', fermer);
         document.addEventListener('keydown', function (e) { if (e.key === 'Escape') fermer(); });
