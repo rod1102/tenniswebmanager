@@ -194,6 +194,19 @@
             `;
         }
 
+        // "Joueur arrivé en <mois année> (S<saison> - Semaine <n>)" : moment de la
+        // création du personnage (2026-11-24). Calculé côté serveur (arriveeJoueur).
+        const MOIS_ARRIVEE = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+        function ligneArrivee(info) {
+            const a = info.arrivee;
+            if (!a) return '';
+            const d = a.date ? new Date(a.date) : null;
+            const mois = d && !isNaN(d.getTime()) ? MOIS_ARRIVEE[d.getMonth()] + ' ' + d.getFullYear() : '';
+            const semaine = a.type === 'presaison' ? 'Pré-saison' : (a.type === 's0' ? 'Semaine 0' : 'Semaine ' + a.positionSemaine);
+            const libelle = info.type === 'joueuse' ? 'Joueuse arrivée en' : 'Joueur arrivé en';
+            return `<div class="stat-row"><span class="stat-label">${libelle}</span><span class="stat-value">${mois ? mois + ' ' : ''}(S${a.saison} - ${semaine})</span></div>`;
+        }
+
         function blocProchainsTournois(prochainsTournois) {
             if (!prochainsTournois || prochainsTournois.length === 0) {
                 return `
@@ -284,6 +297,7 @@
                     <div class="stat-row"><span class="stat-label">Main forte</span><span class="stat-value">${traduireMain(info.main_forte)}</span></div>
                     <div class="stat-row"><span class="stat-label">Circuit</span><span class="stat-value">${info.circuit}</span></div>
                     <div class="stat-row"><span class="stat-label">Coach</span><span class="stat-value"><a class="lien-adversaire" href="coach.html?id=${info.coachUserId}">${info.coachNom}</a></span></div>
+                    ${ligneArrivee(info)}
                     ${ligneClassement(info)}
                     ${blocProchainsTournois(data.prochainsTournois)}
                 `;

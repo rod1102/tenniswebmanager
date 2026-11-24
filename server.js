@@ -601,9 +601,10 @@ const insertPersonnage = db.prepare(`
         niveau, points_energie, points_experience,
         surface_dur_automatismes, surface_terre_automatismes, surface_herbe_automatismes,
         disposition_adversite, disposition_coupeur_de_tetes, disposition_dernier_carre,
-        disposition_premiers_tours, disposition_sang_froid, disposition_indoor, disposition_rivalite
+        disposition_premiers_tours, disposition_sang_froid, disposition_indoor, disposition_rivalite,
+        date_creation
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?, ?, ?, ?, ?, ?, ?, ?, ?, 50, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'en_attente', ?, ?, ?, ?, ?, ?, ?, ?, ?, 50, 0, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 function creerPersonnage(userId, type, p) {
     insertPersonnage.run(
@@ -611,8 +612,52 @@ function creerPersonnage(userId, type, p) {
         p.service, p.retour, p.coup_droit_revers, p.effet, p.volee, p.deplacement, p.puissance, p.resistance,
         calculerNiveau(p),
         p.disp_adversite, p.disp_coupeur_de_tetes, p.disp_dernier_carre,
-        p.disp_premiers_tours, p.disp_sang_froid, p.disp_indoor, p.disp_rivalite
+        p.disp_premiers_tours, p.disp_sang_froid, p.disp_indoor, p.disp_rivalite,
+        new Date().toISOString()
     );
+}
+
+// Arrivee d'un personnage sur le circuit (2026-11-24, demande explicite : "Joueur
+// arrive en <mois annee> (S? - Semaine ?)" dans l'onglet Infos de sa fiche).
+// Date exacte si players.date_creation existe (personnages crees depuis ce jour) ;
+// sinon reconstituee : semaine de l'inscription du compte, mais jamais avant la
+// veille de sa 1re ligne de journal (le journal d'une semaine est ecrit a l'ENTREE
+// dans cette semaine) - les personnages des comptes anterieurs au reset beta du
+// 2026-08-28 ont ete recrees apres. Date affichee = debut reel de cette semaine.
+function arriveeJoueur(player) {
+    // Ancres bidon (1970) ignorees : la semaine 55 de la prod en a une.
+    const semaineALaDate = function (iso) {
+        const r = db.prepare("SELECT semaine AS s FROM semaines_reelles WHERE debut_reel <= ? AND debut_reel >= '2000' ORDER BY debut_reel DESC, semaine DESC LIMIT 1").get(iso);
+        return r && r.s ? r.s : null;
+    };
+    const debutValide = function (s) {
+        const r = db.prepare("SELECT debut_reel FROM semaines_reelles WHERE semaine = ? AND debut_reel >= '2000'").get(s);
+        return r ? r.debut_reel : null;
+    };
+    const versIso = function (t) {
+        if (!t) return null;
+        const d = new Date(String(t).indexOf('T') === -1 ? String(t).replace(' ', 'T') + 'Z' : t);
+        return isNaN(d.getTime()) ? null : d.toISOString();
+    };
+    let semaine = null, date = null;
+    const dateCreation = versIso(player.date_creation);
+    if (dateCreation) {
+        semaine = semaineALaDate(dateCreation);
+        date = dateCreation;
+    } else {
+        const user = db.prepare('SELECT created_at FROM users WHERE id = ?').get(player.user_id);
+        const dateCompte = versIso(user && user.created_at);
+        const sCompte = dateCompte ? semaineALaDate(dateCompte) : null;
+        const j = db.prepare('SELECT MIN(semaine) AS s FROM journal_semaine_joueur WHERE player_id = ?').get(player.id);
+        const sJournal = j && j.s ? j.s - 1 : null;
+        semaine = Math.max(sCompte || 0, sJournal || 0) || null;
+        if (semaine) {
+            date = debutValide(semaine) || debutValide(semaine + 1) || (semaine === sCompte ? dateCompte : null);
+        }
+    }
+    if (!semaine) return null;
+    const phase = phaseAffichee(semaine);
+    return { date: date, saison: phase.numeroSaison, type: phase.type, positionSemaine: phase.positionSemaine || null };
 }
 
 app.post('/api/joueurs', (req, res) => {
@@ -10349,7 +10394,8 @@ app.get('/api/adversaire/reel/:playerId', (req, res) => {
             meilleurClassement: meilleurClassement(circuitAdversaire, cleAdversaire),
             coachUserId: adversaire.user_id, coachNom: nomCoach(adversaire.user_id),
             photoAvatar: adversaire.photo_avatar,
-            bio: adversaire.bio || ''
+            bio: adversaire.bio || '',
+            arrivee: arriveeJoueur(adversaire)
         };
 
         const palmares = db.prepare(`

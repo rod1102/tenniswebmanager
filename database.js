@@ -725,6 +725,10 @@ const migrations = [
     // Presentation libre du joueur par son coach, visible par tous sur sa fiche
     // (adversaire.html, onglet Infos) - 2026-10-02.
     "ALTER TABLE players ADD COLUMN bio TEXT",
+    // Date de creation du personnage (2026-11-24) : "Joueur arrive en ..." sur sa
+    // fiche (onglet Infos). NULL pour les personnages crees avant : la date est
+    // alors reconstituee (cf. arriveeJoueur dans server.js).
+    "ALTER TABLE players ADD COLUMN date_creation TEXT",
     "ALTER TABLE tournoi_matchs ADD COLUMN manche_poules INTEGER",
     // Historique physique complet par joueur/semaine (energie/usure/mental/
     // condition/automatismes, en plus de forme_avant/forme_apres deja existants) -
