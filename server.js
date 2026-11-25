@@ -260,6 +260,15 @@ function authentifier(req, res, next) {
     next();
 }
 
+// Mises a jour de l'appli mobile servies par le site (2026-11-25, module fourni par
+// Yann, maj-appli/routeur.js) : protocole Expo Updates, interroge par l'appli sans
+// session -> branche AVANT authentifier. Publications dans app-updates/ (versionne
+// dans le depot, donc conserve a chaque deploiement).
+app.use('/api/app-mises-a-jour', require('./maj-appli/routeur')({
+    dossier: path.join(__dirname, 'app-updates'),
+    urlPublique: 'https://www.tenniswebmanager.com/api/app-mises-a-jour'
+}));
+
 app.use(authentifier);
 
 const BUDGET_POINTS = 120;

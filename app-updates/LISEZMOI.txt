@@ -1,0 +1,3 @@
+﻿Mises a jour de l'appli mobile servies par /api/app-mises-a-jour (maj-appli/routeur.js).
+Publier depuis le projet de l'appli : npm run publier-maj -- --dossier <chemin vers ce dossier>
+Puis git add app-updates + git push (le site sert ce dossier tel quel).
