@@ -57,7 +57,9 @@ module.exports = function creerRouteurMajAppli({ dossier, urlPublique }) {
     const fichierConfig = path.join(maj.chemin, 'expoConfig.json');
     const expoClient = fs.existsSync(fichierConfig) ? JSON.parse(fs.readFileSync(fichierConfig, 'utf8')) : {};
     const url = (rel) => `${urlPublique}/fichier/${maj.runtime}/${maj.horodatage}/${rel}`;
-    const decrire = (rel, ext, contentType) => {
+    const decrire = (relBrut, ext, contentType) => {
+      // publication faite sous Windows : metadata.json contient des « \ » (2026-11-25)
+      const rel = String(relBrut).replace(/\\/g, '/');
       const contenu = fs.readFileSync(path.join(maj.chemin, rel));
       return { hash: hashBase64Url(contenu), key: md5(contenu), fileExtension: `.${ext}`, contentType, url: url(rel) };
     };
