@@ -8877,10 +8877,13 @@ function stylesInterditsEvenementPrecedent(playerId, semaineActuelle) {
         SELECT t.semaine AS semaine, tj.style_choisi AS styles
         FROM tournois t
         JOIN tournoi_joueurs tj ON tj.tournoi_id = t.id AND tj.player_id = ? AND tj.est_reel = 1
-        WHERE t.semaine < ? AND t.semaine > ? AND tj.style_choisi IS NOT NULL
+        WHERE t.semaine < ? AND t.semaine > ?
         ORDER BY t.semaine DESC
         LIMIT 1
     `).get(playerId, semaineActuelle, debutSaison);
+    // Un tournoi joue SANS styles valides compte comme "aucun style" : il n'interdit
+    // rien au suivant (2026-11-25, demande explicite de l'utilisateur - avant, il etait
+    // saute et c'etait le tournoi d'avant qui imposait ses styles).
 
     const player = db.prepare('SELECT nationalite, type FROM players WHERE id = ?').get(playerId);
     let dernierTie = null;
@@ -8963,6 +8966,25 @@ app.post('/api/tournois/style', (req, res) => {
         const stylesInterdits = stylesInterditsEvenementPrecedent(playerId, tournoi.semaine);
         if (styles.some(function (s) { return stylesInterdits.includes(s); })) {
             return res.status(400).json({ error: 'Impossible d utiliser un style deja utilise au tournoi ou a la rencontre de Coupe Davis/Fed Cup precedent(e).' });
+        }
+        // Sens inverse (2026-11-25) : un tournoi sans styles ne bloque plus le suivant ;
+        // si le tournoi SUIVANT a deja ses styles, ce tournoi-ci ne peut pas les reprendre
+        // (sinon : T3 en Prudence choisi d'abord, puis T2 en Prudence = 2 de suite).
+        const suivant = db.prepare(`
+            SELECT t.semaine AS semaine, tj.style_choisi AS styles
+            FROM tournois t
+            JOIN tournoi_joueurs tj ON tj.tournoi_id = t.id AND tj.player_id = ? AND tj.est_reel = 1
+            WHERE t.semaine > ? AND t.semaine <= ? AND t.id <> ?
+            ORDER BY t.semaine ASC
+            LIMIT 1
+        `).get(playerId, tournoi.semaine, tournoi.semaine - (((tournoi.semaine - 1) % LONGUEUR_SAISON) + 1) + LONGUEUR_SAISON, tournoi.id);
+        if (suivant && suivant.styles) {
+            let stylesSuivant = [];
+            try { stylesSuivant = JSON.parse(suivant.styles).filter(function (s) { return s !== 'aucun'; }); } catch (e) { stylesSuivant = []; }
+            const repris = styles.filter(function (s) { return s !== 'aucun' && stylesSuivant.includes(s); });
+            if (repris.length > 0) {
+                return res.status(400).json({ error: 'Impossible : le style ' + repris[0] + ' est deja choisi pour ton tournoi suivant, deux tournois de suite ne peuvent pas avoir le meme style.' });
+            }
         }
 
         if (ligneReelle.style_choisi) {
