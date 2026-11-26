@@ -9,7 +9,7 @@
     <title>Accueil — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261126">
+    <link rel="stylesheet" href="style.css?v=20261126c">
     <link rel="stylesheet" href="collection.css?v=20261126">
 </head>
 <body>
@@ -46,6 +46,9 @@
             <div id="validations-admin-container"></div>
 
             <div id="annonce-container"></div>
+
+            <!-- Sondage de la page d'accueil (2026-11-26) -->
+            <div id="sondage-container"></div>
 
             <div id="alerte-capitaine-container"></div>
 
@@ -606,6 +609,52 @@
             afficherValidationsAdmin();
             if (utilisateur && utilisateur.pseudoEnConflit) afficherConflitPseudo();
         })();
+        // Sondage (2026-11-26) : boutons tant qu'on n'a pas vote, resultats ensuite.
+        // Les semaines concernees sont calculees au rythme lundi/jeudi 8h (S22 le 26/11).
+        const SEMAINES_PAUSE_HTML = `
+            <table class="sondage-semaines">
+                <tr><th>Période réelle</th><th>Semaine</th><th>Tournois</th></tr>
+                <tr><td>jeu. 24 déc. → lun. 28 déc.</td><td>S30</td><td><b>ATP</b> : Washington (500), Umag (250), Kitzbühel (250)<br><b>WTA</b> : Washington (500), Prague (250)</td></tr>
+                <tr><td>lun. 28 déc. → jeu. 31 déc.</td><td>S31</td><td><b>ATP / WTA</b> : Masters 1000 du Canada (1re semaine)</td></tr>
+                <tr><td>jeu. 31 déc. → lun. 4 janv.</td><td>S32</td><td><b>ATP / WTA</b> : Masters 1000 du Canada (2e semaine : 8es, quarts, demies le 1er janvier, finale le 2)</td></tr>
+            </table>
+            <p class="match-hint" style="margin:8px 0 0;">Aucune rencontre de Coupe Davis / BJK Cup sur cette période. Le tirage de Cincinnati (S33) a lieu le 31 décembre.</p>`;
+        function dessinerSondage(s) {
+            const zone = document.getElementById('sondage-container');
+            if (!s || (!s.ouvert && !s.termine)) { zone.innerHTML = ''; return; }
+            let corps;
+            if (s.resultats) {
+                corps = s.options.map(function (o) {
+                    const n = s.resultats[o.valeur] || 0;
+                    const pct = s.total ? Math.round(n / s.total * 100) : 0;
+                    return '<div class="sondage-resultat' + (s.monVote === o.valeur ? ' sondage-mon-vote' : '') + '">' +
+                        '<div class="sondage-ligne"><span>' + o.libelle + (s.monVote === o.valeur ? ' · ton vote' : '') + '</span><span>' + pct + ' % (' + n + ')</span></div>' +
+                        '<div class="sondage-barre"><i style="width:' + pct + '%"></i></div></div>';
+                }).join('') + '<p class="match-hint" style="margin:8px 0 0;">' + s.total + ' vote' + (s.total > 1 ? 's' : '') + (s.termine ? ' · sondage terminé' : ' · fin le ' + new Date(s.fin).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })) + '</p>';
+            } else {
+                corps = '<div class="sondage-boutons">' + s.options.map(function (o) {
+                    return '<button type="button" class="cta cta-primary sondage-btn" data-choix="' + o.valeur + '">' + o.libelle + '</button>';
+                }).join('') + '</div><p id="sondage-erreur" class="sondage-erreur"></p>';
+            }
+            zone.innerHTML = '<div class="sondage-carte"><div class="stats-header" style="margin-top:0;">Sondage</div>' +
+                '<p class="sondage-question">' + s.question + '</p>' + corps +
+                '<details class="sondage-details"><summary>Voir les semaines concernées.</summary>' + SEMAINES_PAUSE_HTML + '</details></div>';
+            zone.querySelectorAll('.sondage-btn').forEach(function (b) {
+                b.addEventListener('click', async function () {
+                    zone.querySelectorAll('.sondage-btn').forEach(function (x) { x.disabled = true; });
+                    const rep = await fetch('/api/sondage/voter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ choix: b.dataset.choix }) });
+                    const d = await rep.json().catch(function () { return {}; });
+                    if (!rep.ok) {
+                        document.getElementById('sondage-erreur').textContent = d.error || 'Vote impossible.';
+                        zone.querySelectorAll('.sondage-btn').forEach(function (x) { x.disabled = false; });
+                        return;
+                    }
+                    dessinerSondage(d);
+                });
+            });
+        }
+        fetch('/api/sondage').then(function (r) { return r.ok ? r.json() : null; }).then(dessinerSondage).catch(function () {});
+
         chargerSemaine();
         chargerAccueil();
         chargerTournoisEnCours();

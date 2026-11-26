@@ -676,6 +676,17 @@ db.exec(`
     )
 `);
 
+// Sondages de la page d'accueil (2026-11-26) : un vote par compte et par sondage.
+db.exec(`
+    CREATE TABLE IF NOT EXISTS sondage_votes (
+        sondage_id TEXT NOT NULL,
+        user_id INTEGER NOT NULL,
+        choix TEXT NOT NULL,
+        date_vote TEXT NOT NULL,
+        PRIMARY KEY (sondage_id, user_id)
+    )
+`);
+
 // Marque les evenements globaux (declenches a l'issue d'un tournoi precis, cf.
 // PDF) deja appliques cette saison, pour ne jamais les rejouer deux fois quand
 // le tournoi ATP et le tournoi WTA du meme evenement se terminent separement.

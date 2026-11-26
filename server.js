@@ -9924,6 +9924,57 @@ const collectionAvent = require('./collection-avent')(app, db, {
     estAdmin, meilleurClassement, drapeau, phaseAffichee, positionSemaineAffichee, niveauNormal
 });
 
+// Sondage de la page d'accueil (2026-11-26, demande explicite de l'utilisateur) :
+// 7 jours, un vote par compte (non modifiable), resultats visibles une fois vote
+// (et pour tous une fois le sondage termine).
+const SONDAGE_ACCUEIL = {
+    id: 'pause-noel-2026',
+    question: 'Le jeu doit-il faire une pause du jeudi 24 décembre au lundi 4 janvier ?',
+    options: [{ valeur: 'oui', libelle: 'Oui' }, { valeur: 'non', libelle: 'Non' }],
+    debut: '2026-11-26T00:00:00+01:00',
+    fin: '2026-12-03T23:59:59+01:00'
+};
+function etatSondage(userId) {
+    const s = SONDAGE_ACCUEIL;
+    const maintenant = Date.now();
+    const ouvert = maintenant >= Date.parse(s.debut) && maintenant <= Date.parse(s.fin);
+    const termine = maintenant > Date.parse(s.fin);
+    const vote = db.prepare('SELECT choix FROM sondage_votes WHERE sondage_id = ? AND user_id = ?').get(s.id, userId);
+    const r = { id: s.id, question: s.question, options: s.options, fin: s.fin, ouvert: ouvert, termine: termine, monVote: vote ? vote.choix : null };
+    if (vote || termine) {
+        const comptes = {};
+        s.options.forEach(function (o) { comptes[o.valeur] = 0; });
+        db.prepare('SELECT choix, COUNT(*) AS n FROM sondage_votes WHERE sondage_id = ? GROUP BY choix').all(s.id).forEach(function (x) { comptes[x.choix] = x.n; });
+        r.resultats = comptes;
+        r.total = Object.values(comptes).reduce(function (a, b) { return a + b; }, 0);
+    }
+    return r;
+}
+app.get('/api/sondage', (req, res) => {
+    try {
+        res.json(Object.assign({ success: true }, etatSondage(req.userId)));
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+app.post('/api/sondage/voter', (req, res) => {
+    try {
+        const s = SONDAGE_ACCUEIL;
+        const choix = String((req.body && req.body.choix) || '');
+        if (!s.options.some(function (o) { return o.valeur === choix; })) return res.status(400).json({ error: 'Choix invalide.' });
+        const maintenant = Date.now();
+        if (maintenant < Date.parse(s.debut) || maintenant > Date.parse(s.fin)) return res.status(400).json({ error: 'Ce sondage est terminé.' });
+        const deja = db.prepare('SELECT 1 FROM sondage_votes WHERE sondage_id = ? AND user_id = ?').get(s.id, req.userId);
+        if (deja) return res.status(400).json({ error: 'Tu as déjà voté.' });
+        db.prepare('INSERT INTO sondage_votes (sondage_id, user_id, choix, date_vote) VALUES (?, ?, ?, ?)').run(s.id, req.userId, choix, new Date().toISOString());
+        res.json(Object.assign({ success: true }, etatSondage(req.userId)));
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
+});
+
 // Lien de telechargement signe d'un fond d'ecran debloque (appli mobile).
 app.get('/api/avent/lien-fond', (req, res) => {
     try {

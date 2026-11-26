@@ -3358,3 +3358,22 @@ a.lien-adversaire.record-moi,
 .fiche-deco { position: relative; overflow: hidden; }
 .fiche-deco-svg { position: absolute; left: 0; top: 0; width: 100%; height: 150px; pointer-events: none; }h1 .pseudo-emoji, h2 .pseudo-emoji { vertical-align: 0.1em; }
 h1 .pseudo-emoji svg, h2 .pseudo-emoji svg { width: 0.62em; height: 0.62em; }
+
+/* ---------- Sondage de la page d'accueil (2026-11-26) ---------- */
+.sondage-carte { background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); border-left: 4px solid #D4F000; border-radius: 14px; padding: 16px 18px; margin: 0 0 24px; }
+.sondage-question { font-size: 1.05rem; font-weight: 600; color: #F5F7FA; margin: 0 0 14px; }
+.sondage-boutons { display: flex; gap: 12px; flex-wrap: wrap; }
+.sondage-btn { padding: 10px 28px; font-size: 0.85rem; border: none; cursor: pointer; }
+.sondage-btn:disabled { opacity: 0.6; cursor: default; }
+.sondage-resultat + .sondage-resultat { margin-top: 10px; }
+.sondage-ligne { display: flex; justify-content: space-between; gap: 12px; font-size: 0.92rem; color: #C4CDD6; margin-bottom: 4px; }
+.sondage-mon-vote .sondage-ligne { color: #F5F7FA; font-weight: 700; }
+.sondage-barre { height: 10px; border-radius: 5px; background: rgba(255, 255, 255, 0.1); overflow: hidden; }
+.sondage-barre i { display: block; height: 100%; background: #D4F000; border-radius: 5px; }
+.sondage-details { margin-top: 14px; }
+.sondage-details summary { cursor: pointer; color: #D4F000; font-weight: 600; font-size: 0.9rem; }
+.sondage-semaines { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; color: #C4CDD6; }
+.sondage-semaines th, .sondage-semaines td { text-align: left; padding: 8px 6px; border-bottom: 1px solid rgba(255, 255, 255, 0.1); vertical-align: top; }
+.sondage-semaines th { color: #8B98A5; font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.06em; }
+@media (max-width: 560px) { .sondage-semaines td:first-child { white-space: normal; } .sondage-semaines { font-size: 0.8rem; } }.sondage-erreur { margin: 8px 0 0; color: #FF8A80; font-size: 0.85rem; }
+.sondage-erreur:empty { display: none; }
