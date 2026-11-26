@@ -197,13 +197,26 @@ app.get(['/proposition-point-par-point', '/proposiiton-point-par-point'], functi
 });
 // Fonds d'ecran du calendrier de l'Avent (2026-11-26) : servis seulement au coach
 // qui a debloque le fond (cosmetiques 'fond:<code>'), jamais en acces libre.
+// Lien signe (10 min) pour l'appli : le navigateur du telephone qui telecharge n'a
+// pas la session de l'appli. Signature HMAC avec une cle tiree au demarrage.
+const CLE_LIENS_FONDS = require('crypto').randomBytes(32);
+function signerLienFond(userId, fichier, expire) {
+    return require('crypto').createHmac('sha256', CLE_LIENS_FONDS).update(userId + '|' + fichier + '|' + expire).digest('base64url');
+}
 app.get('/avent/fonds/:fichier', function (req, res) {
     const m = /^(terre|nuit|indoor|givre|appli)-(telephone|ordinateur)\.png$/.exec(req.params.fichier);
     if (!m) return res.status(404).end();
+    let userId = null;
     const token = req.cookies.session_token;
     const session = token ? db.prepare('SELECT user_id, date_expiration FROM sessions WHERE token = ?').get(token) : null;
-    if (!session || new Date(session.date_expiration) < new Date()) return res.status(401).send('Connecte-toi pour télécharger ce fond d\'écran.');
-    const possede = db.prepare('SELECT 1 FROM cosmetiques WHERE user_id = ? AND code = ?').get(session.user_id, 'fond:' + m[1]);
+    if (session && new Date(session.date_expiration) >= new Date()) userId = session.user_id;
+    if (!userId && req.query.u && req.query.e && req.query.s) {
+        const expire = Number(req.query.e);
+        const attendu = signerLienFond(Number(req.query.u), req.params.fichier, expire);
+        if (expire > Date.now() && String(req.query.s) === attendu) userId = Number(req.query.u);
+    }
+    if (!userId) return res.status(401).send('Connecte-toi pour télécharger ce fond d\'écran.');
+    const possede = db.prepare('SELECT 1 FROM cosmetiques WHERE user_id = ? AND code = ?').get(userId, 'fond:' + m[1]);
     if (!possede) return res.status(403).send('Ce fond d\'écran se débloque dans le calendrier de l\'Avent.');
     res.set('Cache-Control', 'private, max-age=86400');
     res.download(path.join(__dirname, 'avent', 'fonds', req.params.fichier), 'TWM-' + req.params.fichier);
@@ -9909,6 +9922,22 @@ app.get('/api/annuaire/coachs', (req, res) => {
 // /api/collection, /api/cosmetiques dans collection-avent.js.
 const collectionAvent = require('./collection-avent')(app, db, {
     estAdmin, meilleurClassement, drapeau, phaseAffichee, positionSemaineAffichee, niveauNormal
+});
+
+// Lien de telechargement signe d'un fond d'ecran debloque (appli mobile).
+app.get('/api/avent/lien-fond', (req, res) => {
+    try {
+        const chemin = String(req.query.fichier || '');
+        const m = /^\/avent\/fonds\/((terre|nuit|indoor|givre|appli)-(telephone|ordinateur)\.png)$/.exec(chemin);
+        if (!m) return res.status(400).json({ error: 'Fichier inconnu.' });
+        const possede = db.prepare('SELECT 1 FROM cosmetiques WHERE user_id = ? AND code = ?').get(req.userId, 'fond:' + m[2]);
+        if (!possede) return res.status(403).json({ error: "Ce fond d'écran se débloque dans le calendrier de l'Avent." });
+        const expire = Date.now() + 10 * 60 * 1000;
+        res.json({ success: true, url: chemin + '?u=' + req.userId + '&e=' + expire + '&s=' + signerLienFond(req.userId, m[1], expire) });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: 'ERREUR : ' + err.message });
+    }
 });
 
 app.get('/api/notifications', (req, res) => {
