@@ -10038,18 +10038,28 @@ app.get('/api/notifications', (req, res) => {
             } catch (e) { programmes = 0; }
             const aPlacer = (p.points_experience || 0) - programmes;
             if (aPlacer > 0) {
-                // Tournoi de cette semaine (ou commence la semaine derniere s'il dure 2
-                // semaines) dans lequel le joueur est encore en lice.
-                const engages = db.prepare(`
+                // Tournoi joue CETTE semaine (ou commence la semaine derniere s'il dure 2
+                // semaines), que le joueur y soit encore en lice OU deja elimine : la
+                // notification n'arrive qu'une fois le DERNIER match de la semaine de ce
+                // tournoi joue (2026-11-26, demande explicite de l'utilisateur - avant, un
+                // joueur elimine tot recevait la notification tout de suite) :
+                //  - tournoi d'une semaine : finale jouee (statut termine) ;
+                //  - 1re semaine d'un tournoi de 2 semaines : 3e tour joue ;
+                //  - 2e semaine d'un tournoi de 2 semaines : finale jouee.
+                const tournoisSemaine = db.prepare(`
                     SELECT t.* FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
-                    WHERE tj.player_id = ? AND tj.est_reel = 1 AND tj.tour_elimine IS NULL
-                      AND t.statut = 'a_venir' AND t.semaine IN (?, ?)
+                    WHERE tj.player_id = ? AND tj.est_reel = 1 AND t.semaine IN (?, ?)
                 `).all(p.id, s, s - 1).filter(function (t) { return t.semaine === s || nbTours(t) >= 7; });
-                const finSemaine1 = engages.length > 0 && engages.every(function (t) { return nbTours(t) >= 7 && t.semaine === s && (t.tour_actuel || 0) >= 3; });
-                if (engages.length === 0 || finSemaine1) {
+                const semaineFinie = function (t) {
+                    if (t.statut === 'termine') return true;
+                    return nbTours(t) >= 7 && t.semaine === s && (t.tour_actuel || 0) >= 3;
+                };
+                const engages = tournoisSemaine.filter(function (t) { return !semaineFinie(t); });
+                const finSemaine1 = tournoisSemaine.length > 0 && tournoisSemaine.every(function (t) { return nbTours(t) >= 7 && t.semaine === s && t.statut !== 'termine'; });
+                if (engages.length === 0) {
                     let texte;
                     if (finSemaine1) {
-                        texte = 'La 1re semaine du tournoi de ' + engages[0].nom + ' vient de se terminer, pense à répartir tes XP pour ' + nom;
+                        texte = 'La 1re semaine du tournoi de ' + tournoisSemaine[0].nom + ' vient de se terminer, pense à répartir tes XP pour ' + nom;
                     } else {
                         const fini = db.prepare(`
                             SELECT t.nom FROM tournoi_joueurs tj JOIN tournois t ON t.id = tj.tournoi_id
