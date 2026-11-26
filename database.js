@@ -618,6 +618,64 @@ db.exec(`
     )
 `);
 
+// Collection TWM + calendrier de l'Avent (2026-11-26, maquettes validees par
+// l'utilisateur : artifacts "Collection TWM" et "Calendrier de l'Avent TWM").
+// cartes : chaque EXEMPLAIRE numerote d'une carte. famille 'joueur' (tournoi_id = 0)
+// ou 'moment' (une victoire en tournoi). user_id NULL = encore en stock.
+db.exec(`
+    CREATE TABLE IF NOT EXISTS cartes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        famille TEXT NOT NULL,
+        player_id INTEGER NOT NULL,
+        tournoi_id INTEGER NOT NULL DEFAULT 0,
+        rarete TEXT NOT NULL,
+        numero INTEGER NOT NULL,
+        total INTEGER NOT NULL,
+        user_id INTEGER,
+        pochette_id INTEGER,
+        date_obtention TEXT,
+        UNIQUE (famille, player_id, tournoi_id, rarete, numero)
+    )
+`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_cartes_stock ON cartes(famille, rarete, user_id)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_cartes_user ON cartes(user_id)');
+db.exec(`
+    CREATE TABLE IF NOT EXISTS pochettes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL,
+        source TEXT NOT NULL,
+        date_ouverture TEXT NOT NULL
+    )
+`);
+db.exec(`
+    CREATE TABLE IF NOT EXISTS avent_ouvertures (
+        user_id INTEGER NOT NULL,
+        annee INTEGER NOT NULL,
+        jour INTEGER NOT NULL,
+        date_ouverture TEXT NOT NULL,
+        pochette_id INTEGER,
+        PRIMARY KEY (user_id, annee, jour)
+    )
+`);
+// Cadeaux cosmetiques debloques (cadres d'avatar, emojis, fonds de fiche, fonds
+// d'ecran, badge) et, pour ceux qui s'equipent, celui choisi par type.
+db.exec(`
+    CREATE TABLE IF NOT EXISTS cosmetiques (
+        user_id INTEGER NOT NULL,
+        code TEXT NOT NULL,
+        date_obtention TEXT NOT NULL,
+        PRIMARY KEY (user_id, code)
+    )
+`);
+db.exec(`
+    CREATE TABLE IF NOT EXISTS cosmetiques_equipes (
+        user_id INTEGER NOT NULL,
+        type TEXT NOT NULL,
+        code TEXT NOT NULL,
+        PRIMARY KEY (user_id, type)
+    )
+`);
+
 // Marque les evenements globaux (declenches a l'issue d'un tournoi precis, cf.
 // PDF) deja appliques cette saison, pour ne jamais les rejouer deux fois quand
 // le tournoi ATP et le tournoi WTA du meme evenement se terminent separement.

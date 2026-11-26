@@ -10,6 +10,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css?v=20261124b">
+    <link rel="stylesheet" href="collection.css?v=20261126">
 </head>
 <body>
     <div class="dashboard-page">
@@ -48,7 +49,14 @@
 
             <div id="alerte-capitaine-container"></div>
 
+            <!-- Calendrier de l'Avent (avent.js, 1er-25 decembre) -->
+            <div id="avent-bandeau" class="col-scope"></div>
+
             <div id="cartes-container" class="creation-grid"></div>
+
+            <p id="lien-collection" style="text-align:center; margin:18px 0 0;" hidden>
+                <a href="collection.html" class="cta cta-secondary" style="padding:10px 20px; font-size:0.8rem;">Ma collection de cartes</a>
+            </p>
 
             <div class="stats-header">Tournois de la semaine</div>
             <div id="tournois-en-cours-container"></div>
@@ -603,6 +611,10 @@
         chargerTournoisEnCours();
         chargerClassement();
     </script>
+    <div id="avent-fenetre"></div>
+    <script src="cadeaux.js?v=20261126"></script>
+    <script src="collection.js?v=20261126"></script>
+    <script src="avent.js?v=20261126"></script>
     <script src="retour.js?v=20260829"></script>
     <script src="cloche.js?v=20261124b"></script>
     <script src="theme-saison.js?v=20260831"></script>

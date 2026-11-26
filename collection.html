@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/png" href="logo-icone.png">
+    <link rel="apple-touch-icon" href="logo-icone.png">
+    <meta name="robots" content="noindex, follow">
+    <title>Ma collection — Tennis Web Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css?v=20261124b">
+    <link rel="stylesheet" href="collection.css?v=20261126">
+</head>
+<body>
+    <div class="dashboard-page">
+        <div class="dashboard-inner">
+            <div class="dashboard-header">
+                <a href="index.html" class="auth-logo">TENNIS WEB MANAGER</a>
+                <div class="nav-menu">
+                    <button class="nav-menu-toggle" id="nav-toggle">Menu <span class="nav-menu-caret">▾</span></button>
+                    <div class="nav-menu-dropdown" id="nav-dropdown">
+                        <a href="accueil.html">Accueil</a>
+                        <a href="joueur.html">Mes joueurs</a>
+                        <a href="tournois.html">Calendrier</a>
+                        <a href="matchs.html">Matchs</a>
+                        <a href="classements.html">Classements</a>
+                        <a href="pronostics.html">Pronostics</a>
+                        <a href="presse.html">Presse</a>
+                        <a href="annuaire.html">Annuaire</a>
+                        <a href="capitanat.html">Capitanat</a>
+                        <a href="statistiques.html">Statistiques</a>
+                        <a href="regles.html">Règles</a>
+                        <a href="https://discord.gg/G4NrCJQaxC" target="_blank" rel="noopener">Discord</a>
+                        <a href="admin.html" id="admin-link" style="display:none;">Administration</a>
+                        <a href="#" id="logout-btn">Déconnexion</a>
+                    </div>
+                </div>
+            </div>
+
+            <h1 class="dashboard-title">Ma collection</h1>
+            <p class="regle-intro">
+                Des cartes numérotées à tirage limité : chaque joueur d'un coach existe en 50 communes, 25 rares,
+                5 épiques et une seule légendaire, et chaque tournoi gagné par un joueur d'un coach crée une carte
+                Moment. Aucun impact sur le jeu. Touche une carte pour la retourner.
+            </p>
+
+            <div class="col-scope">
+                <div class="album-tete">
+                    <div class="onglets" role="tablist" id="onglets">
+                        <button type="button" class="onglet" role="tab" aria-selected="true" data-o="joueurs">Joueurs</button>
+                        <button type="button" class="onglet" role="tab" aria-selected="false" data-o="moments">Moments</button>
+                    </div>
+                    <div class="progres" id="progres"></div>
+                </div>
+                <div class="album" id="album"><p class="match-hint">Chargement...</p></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const userId = localStorage.getItem('currentUserId');
+        if (!userId) window.location.href = 'connexion.html';
+
+        let donnees = null;
+        let onglet = 'joueurs';
+
+        function rendre() {
+            document.querySelectorAll('#onglets .onglet').forEach(function (b) { b.setAttribute('aria-selected', String(b.dataset.o === onglet)); });
+            const cartes = (donnees.cartes || []).filter(function (c) { return (c.famille === 'moment') === (onglet === 'moments'); });
+            const nbPages = new Set(cartes.map(function (c) { return (c.joueur ? c.joueur.playerId : 0) + ':' + (c.tournoi ? c.tournoi.id : 0); })).size;
+            document.getElementById('progres').innerHTML = '<span>' + cartes.length + ' carte' + (cartes.length > 1 ? 's' : '') + ' · ' + nbPages + ' ' + (onglet === 'moments' ? 'Moment' : 'joueur') + (nbPages > 1 ? 's' : '') + '</span>';
+            window.TWMCollection.rendreAlbum(document.getElementById('album'), donnees, onglet);
+        }
+
+        async function charger() {
+            const rep = await fetch('/api/collection');
+            const d = await rep.json();
+            if (!rep.ok) {
+                document.getElementById('album').innerHTML = '<p class="match-hint">' + (d.error || 'Impossible de charger la collection.') + '</p>';
+                return;
+            }
+            donnees = d;
+            rendre();
+        }
+
+        document.getElementById('onglets').addEventListener('click', function (e) {
+            const b = e.target.closest('[data-o]');
+            if (!b || !donnees) return;
+            onglet = b.dataset.o;
+            rendre();
+        });
+
+        document.getElementById('logout-btn').addEventListener('click', function (e) {
+            e.preventDefault();
+            fetch('/api/deconnexion', { method: 'POST' }).catch(function () {});
+            localStorage.removeItem('currentUserId');
+            window.location.href = 'index.html';
+        });
+        fetch('/api/utilisateur/' + userId).then(function (r) { return r.json(); }).then(function (data) {
+            if (data.user && data.user.role === 'admin') document.getElementById('admin-link').style.display = 'inline-block';
+        }).catch(function () {});
+        document.getElementById('nav-toggle').addEventListener('click', function (e) {
+            e.stopPropagation();
+            this.classList.toggle('open');
+            document.getElementById('nav-dropdown').classList.toggle('open');
+        });
+        document.addEventListener('click', function () {
+            document.getElementById('nav-toggle').classList.remove('open');
+            document.getElementById('nav-dropdown').classList.remove('open');
+        });
+
+        charger();
+    </script>
+    <script src="collection.js?v=20261126"></script>
+    <script src="retour.js?v=20260829"></script>
+    <script src="cloche.js?v=20261124b"></script>
+    <script src="theme-saison.js?v=20260831"></script>
+</body>
+</html>

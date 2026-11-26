@@ -9892,6 +9892,12 @@ app.get('/api/annuaire/coachs', (req, res) => {
 //  - pronostics de la semaine prochaine ouverts et pas tous faits ;
 //  - points de disposition en attente (repris de l'ancien encart de l'accueil).
 // `persistante` = le client ne peut pas la marquer comme lue.
+// Collection TWM + calendrier de l'Avent (2026-11-26) : routes /api/avent,
+// /api/collection, /api/cosmetiques dans collection-avent.js.
+const collectionAvent = require('./collection-avent')(app, db, {
+    estAdmin, meilleurClassement, drapeau, phaseAffichee, positionSemaineAffichee, niveauNormal
+});
+
 app.get('/api/notifications', (req, res) => {
     try {
         const userId = req.userId;
@@ -9911,6 +9917,8 @@ app.get('/api/notifications', (req, res) => {
         const nbTours = function (t) { return Math.ceil(Math.log2(Math.max(2, t.taille_tableau))); };
 
         const notifications = [];
+        const notifAvent = collectionAvent.notificationAvent(userId);
+        if (notifAvent) notifications.push(notifAvent);
         const joueurs = db.prepare("SELECT * FROM players WHERE user_id = ? AND statut = 'valide' ORDER BY type").all(userId);
         joueurs.forEach(function (p) {
             const nom = nomJ(p);
