@@ -347,7 +347,7 @@
                     const donne = Math.min(voulu, xpRestante);
                     repartitionAppliquee[comp] = donne;
                     xpRestante -= donne;
-                    competences[comp] = Math.min(102, competences[comp] + donne); // plafond 102 (2026-10-21)
+                    competences[comp] = Math.min(103, competences[comp] + donne); // plafond 103 (2026-11-26)
                 });
 
                 xpCumule += xpSemaine;
@@ -576,7 +576,7 @@
             overlay.innerHTML = `
                 <div class="dispo-blocage-box">
                     <div class="stats-header" style="margin-top:0;">Compétences — S${s.position}</div>
-                    <p class="match-hint" style="margin-bottom:10px;">L'érosion de la semaine (−4 %, arrondie par défaut) passe d'abord ; l'XP répartie s'ajoute ensuite à la valeur après érosion (plafond 102).</p>
+                    <p class="match-hint" style="margin-bottom:10px;">L'érosion de la semaine (−4 %, arrondie par défaut) passe d'abord ; l'XP répartie s'ajoute ensuite à la valeur après érosion (plafond 103).</p>
                     <div class="sim-table-wrap" style="margin-bottom:0;">
                         <table class="sim-table">
                             <thead><tr><th>Compétence</th><th class="num">Début</th><th class="num">Érosion</th><th class="num">Après érosion</th><th class="num">XP</th><th class="num">Fin de semaine</th></tr></thead>

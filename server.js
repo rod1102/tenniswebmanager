@@ -272,10 +272,10 @@ app.use('/api/app-mises-a-jour', require('./maj-appli/routeur')({
 app.use(authentifier);
 
 const BUDGET_POINTS = 120;
-// Plafond d'une competence en progression (repartition d'XP) : 102 depuis le
-// 2026-10-21 (demande explicite de l'utilisateur, etait 100). La creation reste a
-// 100 max par competence (competencesValides).
-const MAX_COMPETENCE = 102;
+// Plafond d'une competence en progression (repartition d'XP) : 103 depuis le
+// 2026-11-26 (demande explicite de l'utilisateur ; 102 depuis le 2026-10-21, 100
+// avant). La creation reste a 100 max par competence (competencesValides).
+const MAX_COMPETENCE = 103;
 const COMPETENCES = ['service', 'retour', 'coup_droit_revers', 'effet', 'volee', 'deplacement', 'puissance', 'resistance'];
 
 // Budget de competences d'un personnage cree en cours de saison (ancien modele du
