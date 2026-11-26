@@ -195,6 +195,19 @@ app.use('/uploads', express.static(path.join(DOSSIER_DONNEES, 'uploads')));
 app.get(['/proposition-point-par-point', '/proposiiton-point-par-point'], function (req, res) {
     res.sendFile(path.join(__dirname, 'proposition-point-par-point.html'));
 });
+// Fonds d'ecran du calendrier de l'Avent (2026-11-26) : servis seulement au coach
+// qui a debloque le fond (cosmetiques 'fond:<code>'), jamais en acces libre.
+app.get('/avent/fonds/:fichier', function (req, res) {
+    const m = /^(terre|nuit|indoor|givre|appli)-(telephone|ordinateur)\.png$/.exec(req.params.fichier);
+    if (!m) return res.status(404).end();
+    const token = req.cookies.session_token;
+    const session = token ? db.prepare('SELECT user_id, date_expiration FROM sessions WHERE token = ?').get(token) : null;
+    if (!session || new Date(session.date_expiration) < new Date()) return res.status(401).send('Connecte-toi pour télécharger ce fond d\'écran.');
+    const possede = db.prepare('SELECT 1 FROM cosmetiques WHERE user_id = ? AND code = ?').get(session.user_id, 'fond:' + m[1]);
+    if (!possede) return res.status(403).send('Ce fond d\'écran se débloque dans le calendrier de l\'Avent.');
+    res.set('Cache-Control', 'private, max-age=86400');
+    res.download(path.join(__dirname, 'avent', 'fonds', req.params.fichier), 'TWM-' + req.params.fichier);
+});
 app.use(express.static(__dirname));
 app.use(express.json());
 
@@ -229,7 +242,7 @@ function estRoutePublique(req) {
         if (['/api/semaine', '/api/public/tournois-en-cours', '/api/public/classement', '/api/annuaire/coachs',
             '/api/presse', '/api/presse/options-liens', '/api/statistiques/confrontations',
             '/api/statistiques/almanach', '/api/statistiques/records', '/api/statistiques/pantheon',
-            '/api/annonce', '/api/interne/snapshot-db'].includes(req.path)) {
+            '/api/annonce', '/api/interne/snapshot-db', '/api/cosmetiques/equipes'].includes(req.path)) {
             return true;
         }
         if (req.path.startsWith('/api/annuaire/joueurs/')) return true;

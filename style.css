@@ -3348,3 +3348,13 @@ a.lien-adversaire.record-moi,
     font-weight: 400;
     text-transform: none;
 }
+
+/* ---------- Cadeaux du calendrier de l'Avent (cosmetiques.js, 2026-11-26) ---------- */
+.pseudo-emoji { display: inline-block; margin-left: 5px; vertical-align: -3px; line-height: 0; }
+.pseudo-emoji svg { width: 18px; height: 18px; }
+.avec-cadre { position: relative; overflow: visible !important; }
+.cadre-avatar { position: absolute; left: 50%; top: 50%; width: 144%; height: 144%; transform: translate(-50%, -50%); pointer-events: none; }
+.cadre-avatar svg { display: block; width: 100%; height: 100%; }
+.fiche-deco { position: relative; overflow: hidden; }
+.fiche-deco-svg { position: absolute; left: 0; top: 0; width: 100%; height: 150px; pointer-events: none; }h1 .pseudo-emoji, h2 .pseudo-emoji { vertical-align: 0.1em; }
+h1 .pseudo-emoji svg, h2 .pseudo-emoji svg { width: 0.62em; height: 0.62em; }

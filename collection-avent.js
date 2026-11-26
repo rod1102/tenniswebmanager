@@ -395,8 +395,12 @@ module.exports = function installerCollectionAvent(app, db, outils) {
     function cosmetiquesEquipes(userIds) {
         const res = {};
         if (!userIds.length) return res;
-        db.prepare('SELECT user_id, type, code FROM cosmetiques_equipes WHERE user_id IN (' + userIds.map(function () { return '?'; }).join(',') + ')')
+        const places = userIds.map(function () { return '?'; }).join(',');
+        db.prepare('SELECT user_id, type, code FROM cosmetiques_equipes WHERE user_id IN (' + places + ')')
             .all(...userIds).forEach(function (r) { (res[r.user_id] = res[r.user_id] || {})[r.type] = r.code; });
+        // Badges d'evenements (rubrique "Evenements" de la fiche coach, hors records).
+        db.prepare("SELECT user_id, code FROM cosmetiques WHERE code LIKE 'badge:%' AND user_id IN (" + places + ')')
+            .all(...userIds).forEach(function (r) { const e = (res[r.user_id] = res[r.user_id] || {}); (e.badges = e.badges || []).push(r.code); });
         return res;
     }
     app.get('/api/cosmetiques/equipes', function (req, res) {

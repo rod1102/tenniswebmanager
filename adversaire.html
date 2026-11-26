@@ -9,7 +9,7 @@
     <title>Adversaire — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261124b">
+    <link rel="stylesheet" href="style.css?v=20261126">
 </head>
 <body>
     <div class="dashboard-page">
@@ -898,11 +898,11 @@
                 zonePhoto.innerHTML = '';
             } else if (!peutGererAvatars) {
                 zonePhoto.innerHTML = data.infos.photoAvatar
-                    ? `<div class="fiche-adversaire-photo"><img src="${data.infos.photoAvatar}" alt=""></div>`
-                    : `<div class="fiche-adversaire-photo avatar-generique"><img src="${iconeGeneriqueAdversaire}" alt=""></div>`;
+                    ? `<div class="fiche-adversaire-photo" data-fiche-coach="${data.infos.coachUserId}"><img src="${data.infos.photoAvatar}" alt=""></div>`
+                    : `<div class="fiche-adversaire-photo avatar-generique" data-fiche-coach="${data.infos.coachUserId}"><img src="${iconeGeneriqueAdversaire}" alt=""></div>`;
             } else {
                 zonePhoto.innerHTML = `
-                    <div class="fiche-adversaire-photo${data.infos.photoAvatar ? '' : ' avatar-generique'}">
+                    <div class="fiche-adversaire-photo${data.infos.photoAvatar ? '' : ' avatar-generique'}" data-fiche-coach="${data.infos.coachUserId}">
                         <img src="${data.infos.photoAvatar || iconeGeneriqueAdversaire}" alt="">
                     </div>
                     <div class="avatar-actions">
@@ -970,6 +970,8 @@
     </script>
     <script src="retour.js?v=20260829"></script>
     <script src="cloche.js?v=20261124b"></script>
+    <script src="cadeaux.js?v=20261126b"></script>
+    <script src="cosmetiques.js?v=20261126"></script>
     <script src="theme-saison.js?v=20260831"></script>
 </body>
 </html>

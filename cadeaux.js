@@ -161,7 +161,9 @@ const phone = (k, enc = true) => `<div class="phone">${enc ? '<span class="encoc
 const ecran = (k) => `<div class="ecran"><div class="ecran-dalle">${FONDS[k].svg("desktop")}</div><span class="ecran-pied"></span></div>`;
 
 /* ---------- Cadres ---------- */
+let sansAvatar = false; // cadreSeul() : le cadre sans la silhouette d'exemple
 function avatar(cx, cy, r) {
+  if (sansAvatar) return '';
   const c = nid("c");
   return `<clipPath id="${c}"><circle cx="${cx}" cy="${cy}" r="${r}"/></clipPath>
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="#1B3A5C"/>
@@ -316,5 +318,6 @@ function teaserMystere(part, enigme, jMoins, taille = 220) {
 
   </div>`;
 }
-window.TWMCadeaux = { FONDS, CADRES, emojiBoule, emojiRaquette, emojiEtoile, ficheNeige, ficheFestive, badge, teaserMystere, miniPack, phone, ecran };
+function cadreSeul(nom, t) { sansAvatar = true; try { return CADRES[nom].svg(t); } finally { sansAvatar = false; } }
+window.TWMCadeaux = { cadreSeul, FONDS, CADRES, emojiBoule, emojiRaquette, emojiEtoile, ficheNeige, ficheFestive, badge, teaserMystere, miniPack, phone, ecran };
 })();

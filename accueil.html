@@ -9,7 +9,7 @@
     <title>Accueil — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261124b">
+    <link rel="stylesheet" href="style.css?v=20261126">
     <link rel="stylesheet" href="collection.css?v=20261126">
 </head>
 <body>
@@ -280,8 +280,8 @@
 
             if (!player) {
                 return `
-                    <div class="player-summary" style="text-align:center;">
-                        <div class="player-avatar" style="margin:0 auto 14px;"><img src="${icone}" alt=""></div>
+                    <div class="player-summary" style="text-align:center;" data-fiche-coach="${userId}">
+                        <div class="player-avatar" style="margin:0 auto 14px;" data-cadre-coach="${userId}"><img src="${icone}" alt=""></div>
                         <div class="player-summary-type">${label}</div>
                         <p class="match-hint" style="margin:12px 0 16px;">Pas encore de personnage sur ce circuit.</p>
                         <a href="creation-joueurs.html" class="cta cta-primary" style="padding:10px 20px; font-size:0.8rem;">Créer mes personnages</a>
@@ -304,8 +304,8 @@
                 : '';
 
             return `
-                <div class="player-summary" style="text-align:center;">
-                    <div class="player-avatar" style="margin:0 auto 14px;"><img src="${icone}" alt=""></div>
+                <div class="player-summary" style="text-align:center;" data-fiche-coach="${userId}">
+                    <div class="player-avatar" style="margin:0 auto 14px;" data-cadre-coach="${userId}"><img src="${icone}" alt=""></div>
                     <div class="player-summary-type">${label}</div>
                     <div class="player-summary-name">${formaterNom(player.prenom, player.nom)}</div>
                     <p class="match-hint" style="margin:8px 0 16px;">${flagImg(player.drapeau)} ${player.nationalite}</p>
@@ -612,11 +612,12 @@
         chargerClassement();
     </script>
     <div id="avent-fenetre"></div>
-    <script src="cadeaux.js?v=20261126"></script>
+    <script src="cadeaux.js?v=20261126b"></script>
     <script src="collection.js?v=20261126"></script>
     <script src="avent.js?v=20261126"></script>
     <script src="retour.js?v=20260829"></script>
     <script src="cloche.js?v=20261124b"></script>
+    <script src="cosmetiques.js?v=20261126"></script>
     <script src="theme-saison.js?v=20260831"></script>
 </body>
 </html>
