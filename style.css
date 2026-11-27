@@ -3378,12 +3378,12 @@ h1 .pseudo-emoji svg, h2 .pseudo-emoji svg { width: 0.62em; height: 0.62em; }
 @media (max-width: 560px) { .sondage-semaines td:first-child { white-space: normal; } .sondage-semaines { font-size: 0.8rem; } }.sondage-erreur { margin: 8px 0 0; color: #FF8A80; font-size: 0.85rem; }
 .sondage-erreur:empty { display: none; }
 
-/* ---------- Pastilles ATP / WTA a cote du nom d'un tournoi (2026-11-27) ---------- */
-.circuit-pastilles { display: inline-flex; gap: 8px; margin-left: 16px; vertical-align: middle; }
-.circuit-pastille { font-family: 'IBM Plex Sans', sans-serif; font-size: 0.95rem; font-weight: 800; letter-spacing: 0.08em; line-height: 1; padding: 8px 12px; border-radius: 8px; text-decoration: none; border: 2px solid; transition: transform 0.15s ease, background 0.15s ease; }
-.circuit-atp { color: #7DB8F0; border-color: #1F5C94; }
-.circuit-wta { color: #C9A8FF; border-color: #6F45BE; }
-.circuit-atp.circuit-actif { background: #1F5C94; color: #FFFFFF; }
-.circuit-wta.circuit-actif { background: #6F45BE; color: #FFFFFF; }
-a.circuit-pastille:hover { transform: translateY(-2px); background: rgba(255, 255, 255, 0.08); }
-@media (max-width: 560px) { .circuit-pastilles { display: flex; justify-content: center; margin: 10px 0 0; } }
+/* ---------- Logos ATP / WTA a cote du nom d'un tournoi (2026-11-27) : l'un sur l'autre,
+   sur une plaque blanche (le logo ATP est bleu nuit, invisible sur le fond du site). ---------- */
+.circuit-pastilles { display: inline-flex; flex-direction: column; gap: 6px; margin-left: 18px; vertical-align: middle; }
+.circuit-pastille { display: flex; align-items: center; justify-content: center; width: 74px; height: 30px; padding: 4px 8px; box-sizing: border-box; background: #FFFFFF; border-radius: 6px; border: 2px solid transparent; text-decoration: none; transition: opacity 0.15s ease, transform 0.15s ease; }
+.circuit-pastille img { max-width: 100%; max-height: 100%; display: block; }
+.circuit-pastille.circuit-actif { border-color: #D4F000; }
+a.circuit-pastille { opacity: 0.55; }
+a.circuit-pastille:hover { opacity: 1; transform: translateX(2px); }
+@media (max-width: 560px) { .circuit-pastilles { flex-direction: row; justify-content: center; display: flex; margin: 10px 0 0; } }

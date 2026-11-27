@@ -9,7 +9,7 @@
     <title>Tournoi — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261127">
+    <link rel="stylesheet" href="style.css?v=20261127b">
 </head>
 <body>
     <div class="dashboard-page">
@@ -1458,9 +1458,11 @@
                 const lienJumeau = 'tournoi-detail.html?calendrierId=' + encodeURIComponent(data.jumeau.calendrierId) + '&semaine=' + semaineCible + '&onglet=tableau';
                 const pastille = function (circuit) {
                     const cls = 'circuit-pastille circuit-' + circuit.toLowerCase();
+                    // vrais logos ATP / WTA (fichiers logo-atp.svg / logo-wta.svg, 2026-11-27)
+                    const img = '<img src="logo-' + circuit.toLowerCase() + '.svg" alt="' + circuit + '">';
                     return circuit === actuel
-                        ? '<span class="' + cls + ' circuit-actif" title="Tableau ' + circuit + ' affiché">' + circuit + '</span>'
-                        : '<a class="' + cls + '" href="' + lienJumeau + '" title="Voir le tableau ' + circuit + '">' + circuit + '</a>';
+                        ? '<span class="' + cls + ' circuit-actif" title="Tableau ' + circuit + ' affiché">' + img + '</span>'
+                        : '<a class="' + cls + '" href="' + lienJumeau + '" title="Voir le tableau ' + circuit + '">' + img + '</a>';
                 };
                 titre.insertAdjacentHTML('beforeend', '<span class="circuit-pastilles">' + pastille('ATP') + pastille('WTA') + '</span>');
             }
