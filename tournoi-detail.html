@@ -9,7 +9,7 @@
     <title>Tournoi — Tennis Web Manager</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="style.css?v=20261126c">
+    <link rel="stylesheet" href="style.css?v=20261127">
 </head>
 <body>
     <div class="dashboard-page">
@@ -1449,7 +1449,21 @@
             if (!playerId && data.playerId) playerId = String(data.playerId);
 
             ficheCourante = data;
-            document.getElementById('tournoi-titre').textContent = data.info.nom;
+            // Nom du tournoi + pastilles ATP / WTA quand le meme evenement existe sur les
+            // 2 circuits (2026-11-27) : l'autre circuit ouvre directement son tableau.
+            const titre = document.getElementById('tournoi-titre');
+            titre.textContent = data.info.nom;
+            if (data.jumeau) {
+                const actuel = data.info.circuit;
+                const lienJumeau = 'tournoi-detail.html?calendrierId=' + encodeURIComponent(data.jumeau.calendrierId) + '&semaine=' + semaineCible + '&onglet=tableau';
+                const pastille = function (circuit) {
+                    const cls = 'circuit-pastille circuit-' + circuit.toLowerCase();
+                    return circuit === actuel
+                        ? '<span class="' + cls + ' circuit-actif" title="Tableau ' + circuit + ' affiché">' + circuit + '</span>'
+                        : '<a class="' + cls + '" href="' + lienJumeau + '" title="Voir le tableau ' + circuit + '">' + circuit + '</a>';
+                };
+                titre.insertAdjacentHTML('beforeend', '<span class="circuit-pastilles">' + pastille('ATP') + pastille('WTA') + '</span>');
+            }
 
             afficherInfo(data);
             afficherInscrits(data);

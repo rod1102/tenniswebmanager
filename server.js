@@ -9397,10 +9397,20 @@ app.get('/api/tournois/fiche/:calendrierId', (req, res) => {
         // meme correctif que pour la Fiche Pays).
         palmares = palmares.filter(function (p) { return p.numeroSaison >= 1; });
 
+        // Tournoi jumeau sur l'autre circuit (2026-11-27, demande explicite : logos ATP /
+        // WTA a cote du nom pour passer de l'un a l'autre) = meme identifiant hors
+        // prefixe atp-/wta- ET meme semaine (Roland-Garros, Canada...). Les homonymes
+        // joues a d'autres dates (Hambourg, Stuttgart...) ne sont pas lies.
+        const suffixe = calendrierId.replace(/^(atp|wta)-/, '');
+        const jumeauEntree = CALENDRIER_TOURNOIS.find(function (t) {
+            return t.circuit !== entree.circuit && t.id.replace(/^(atp|wta)-/, '') === suffixe && t.semaine_debut === entree.semaine_debut;
+        });
+
         res.json({
             success: true,
             playerId: player.id,
             info: Object.assign({}, entree, { baremePoints: bareme, paysDrapeau: drapeau(entree.pays) }),
+            jumeau: jumeauEntree ? { calendrierId: jumeauEntree.id, circuit: jumeauEntree.circuit, nom: jumeauEntree.nom } : null,
             semaine: semaineNum,
             estInscrit,
             peutInscrire,
