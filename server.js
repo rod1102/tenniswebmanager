@@ -10068,6 +10068,9 @@ app.get('/api/notifications', (req, res) => {
                 const finSemaine1 = tournoisSemaine.length > 0 && tournoisSemaine.every(function (t) { return nbTours(t) >= 7 && t.semaine === s && t.statut !== 'termine'; });
                 if (engages.length === 0) {
                     let texte;
+                    // Apres un tournoi, pas de nombre d'XP dans la notification : il
+                    // trahirait jusqu'ou le joueur est alle (2026-11-28, demande explicite).
+                    let apresTournoi = finSemaine1;
                     if (finSemaine1) {
                         texte = 'La 1re semaine du tournoi de ' + tournoisSemaine[0].nom + ' vient de se terminer, pense à répartir tes XP pour ' + nom;
                     } else {
@@ -10079,10 +10082,11 @@ app.get('/api/notifications', (req, res) => {
                         texte = fini
                             ? 'Le tournoi de ' + fini.nom + ' vient de se terminer, pense à répartir tes XP pour ' + nom
                             : 'Pense à répartir tes XP pour ' + nom;
+                        if (fini) apresTournoi = true;
                     }
                     notifications.push({
                         id: 'xp-' + p.id, type: 'xp', persistante: true,
-                        texte: texte, detail: aPlacer + ' XP à placer avant ' + avant,
+                        texte: texte, detail: (apresTournoi ? 'XP' : aPlacer + ' XP') + ' à placer avant ' + avant,
                         lien: lienFiche, lienTexte: 'Répartir les XP'
                     });
                 }
